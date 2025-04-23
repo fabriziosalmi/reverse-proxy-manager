@@ -1142,23 +1142,102 @@ def manage_ssl_certificates(site_id):
                     flash('Certificate check completed. No valid certificates found.', 'warning')
             
         elif action == 'request':
-            # Request a new certificate
+            # Get certificate request parameters
             email = request.form.get('email')
-            result = SSLCertificateService.request_certificate(site_id, node_id, email)
+            challenge_type = request.form.get('challenge_type', 'http')
+            cert_type = request.form.get('cert_type', 'standard')
+            
+            # Handle DNS provider credentials if using DNS challenge
+            dns_provider = None
+            dns_credentials = None
+            
+            if challenge_type == 'dns':
+                dns_provider = request.form.get('dns_provider')
+                
+                if not dns_provider:
+                    flash('DNS provider is required for DNS challenge', 'error')
+                    return redirect(url_for('admin.manage_ssl_certificates', site_id=site_id))
+                
+                # Collect provider-specific credentials
+                if dns_provider == 'cloudflare':
+                    token = request.form.get('cloudflare_token')
+                    if not token:
+                        flash('Cloudflare API token is required', 'error')
+                        return redirect(url_for('admin.manage_ssl_certificates', site_id=site_id))
+                    dns_credentials = {'token': token}
+                    
+                elif dns_provider == 'route53':
+                    access_key = request.form.get('route53_access_key')
+                    secret_key = request.form.get('route53_secret_key')
+                    if not access_key or not secret_key:
+                        flash('AWS access key and secret key are required', 'error')
+                        return redirect(url_for('admin.manage_ssl_certificates', site_id=site_id))
+                    dns_credentials = {'access_key': access_key, 'secret_key': secret_key}
+                    
+                elif dns_provider == 'digitalocean':
+                    token = request.form.get('digitalocean_token')
+                    if not token:
+                        flash('DigitalOcean API token is required', 'error')
+                        return redirect(url_for('admin.manage_ssl_certificates', site_id=site_id))
+                    dns_credentials = {'token': token}
+                    
+                elif dns_provider == 'godaddy':
+                    key = request.form.get('godaddy_key')
+                    secret = request.form.get('godaddy_secret')
+                    if not key or not secret:
+                        flash('GoDaddy API key and secret are required', 'error')
+                        return redirect(url_for('admin.manage_ssl_certificates', site_id=site_id))
+                    dns_credentials = {'key': key, 'secret': secret}
+                    
+                elif dns_provider == 'namecheap':
+                    username = request.form.get('namecheap_username')
+                    api_key = request.form.get('namecheap_api_key')
+                    if not username or not api_key:
+                        flash('Namecheap username and API key are required', 'error')
+                        return redirect(url_for('admin.manage_ssl_certificates', site_id=site_id))
+                    dns_credentials = {'username': username, 'api_key': api_key}
+            
+            # Request the certificate with appropriate parameters
+            result = SSLCertificateService.request_certificate(
+                site_id=site_id, 
+                node_id=node_id, 
+                email=email,
+                challenge_type=challenge_type,
+                dns_provider=dns_provider,
+                dns_credentials=dns_credentials,
+                cert_type=cert_type
+            )
             
             if result.get('success', False):
-                flash('SSL certificate successfully requested and installed', 'success')
+                cert_type_name = "wildcard" if cert_type == 'wildcard' else "standard"
+                flash(f'SSL {cert_type_name} certificate successfully requested and installed using {challenge_type} validation', 'success')
             else:
                 flash(f"Failed to request SSL certificate: {result.get('message', 'Unknown error')}", 'error')
         
         elif action == 'setup_renewal':
+            # Get renewal days parameter
+            renewal_days = request.form.get('renewal_days', 30)
+            try:
+                renewal_days = int(renewal_days)
+            except ValueError:
+                renewal_days = 30
+                
             # Setup auto-renewal
-            result = SSLCertificateService.setup_auto_renewal(node_id)
+            result = SSLCertificateService.setup_auto_renewal(node_id, renewal_days=renewal_days)
             
             if result.get('success', False):
-                flash('Certificate auto-renewal successfully configured', 'success')
+                flash(f'Certificate auto-renewal successfully configured to renew {renewal_days} days before expiry', 'success')
             else:
                 flash(f"Failed to configure auto-renewal: {result.get('message', 'Unknown error')}", 'error')
+        
+        elif action == 'revoke':
+            # Revoke a certificate
+            result = SSLCertificateService.revoke_certificate(site_id, node_id)
+            
+            if result.get('success', False):
+                flash('Certificate successfully revoked', 'success')
+            else:
+                flash(f"Failed to revoke certificate: {result.get('message', 'Unknown error')}", 'error')
         
         return redirect(url_for('admin.manage_ssl_certificates', site_id=site_id))
     
@@ -1173,10 +1252,24 @@ def manage_ssl_certificates(site_id):
     else:
         cert_status = cert_check_result
     
+    # Get list of supported DNS providers
+    dns_providers = []
+    if site.protocol == 'https':
+        from app.services.ssl_certificate_service import SSLCertificateService
+        dns_providers = SSLCertificateService.get_supported_dns_providers()
+    
+    # Check certificate health
+    cert_health = None
+    if site.protocol == 'https':
+        from app.services.ssl_certificate_service import SSLCertificateService
+        cert_health = SSLCertificateService.certificate_health_check()
+    
     return render_template('admin/sites/ssl_management.html', 
                           site=site, 
                           nodes=nodes,
-                          cert_status=cert_status)
+                          cert_status=cert_status,
+                          dns_providers=dns_providers,
+                          cert_health=cert_health)
 
 @admin.route('/templates')
 @login_required
