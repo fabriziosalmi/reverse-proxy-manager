@@ -1,0 +1,200 @@
+{% extends 'base.html' %}
+
+{% block title %}SSL Management - {{ site.domain }} - Admin{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{{ url_for('admin.dashboard') }}">Dashboard</a></li>
+            <li class="breadcrumb-item"><a href="{{ url_for('admin.list_sites') }}">Sites</a></li>
+            <li class="breadcrumb-item"><a href="{{ url_for('admin.view_site', site_id=site.id) }}">{{ site.domain }}</a></li>
+            <li class="breadcrumb-item active" aria-current="page">SSL Management</li>
+        </ol>
+    </nav>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert alert-{{ category if category != 'error' else 'danger' }} alert-dismissible fade show">
+                    {{ message|safe }}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1>SSL Certificate Management: {{ site.domain }}</h1>
+    </div>
+
+    {% if site.protocol != 'https' %}
+        <div class="alert alert-warning">
+            <i class="fas fa-exclamation-triangle me-2"></i>
+            This site is not configured for HTTPS. Configure the site to use HTTPS protocol before managing SSL certificates.
+        </div>
+    {% else %}
+        <div class="row">
+            <div class="col-md-4">
+                <div class="card shadow-sm mb-4">
+                    <div class="card-header bg-primary text-white">
+                        <h5 class="card-title mb-0">SSL Actions</h5>
+                    </div>
+                    <div class="card-body">
+                        <form method="POST" id="sslActionForm">
+                            <div class="mb-3">
+                                <label for="node_id" class="form-label">Select Node</label>
+                                <select class="form-select" id="node_id" name="node_id" required>
+                                    <option value="">Choose a node...</option>
+                                    {% for node in nodes %}
+                                        <option value="{{ node.id }}">{{ node.name }} ({{ node.ip_address }})</option>
+                                    {% endfor %}
+                                </select>
+                                <div class="form-text">Select the node to check or request a certificate for.</div>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="action" class="form-label">Action</label>
+                                <select class="form-select" id="action" name="action" required>
+                                    <option value="check">Check Certificate Status</option>
+                                    <option value="request">Request New Certificate</option>
+                                    <option value="setup_renewal">Setup Auto-Renewal</option>
+                                </select>
+                            </div>
+
+                            <div id="email_field" class="mb-3 d-none">
+                                <label for="email" class="form-label">Contact Email (for Let's Encrypt)</label>
+                                <input type="email" class="form-control" id="email" name="email" placeholder="admin@example.com">
+                                <div class="form-text">Email for Let's Encrypt registration and expiry notifications.</div>
+                            </div>
+
+                            <button type="submit" class="btn btn-primary">Execute Action</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-8">
+                <div class="card shadow-sm mb-4">
+                    <div class="card-header bg-primary text-white">
+                        <h5 class="card-title mb-0">Certificate Status</h5>
+                    </div>
+                    <div class="card-body">
+                        {% if cert_status %}
+                            {% if 'error' in cert_status %}
+                                <div class="alert alert-danger">
+                                    {{ cert_status.error }}
+                                </div>
+                            {% else %}
+                                <h6 class="mb-3">Status for {{ cert_status.domain }}</h6>
+                                
+                                {% for result in cert_status.results %}
+                                    <div class="card border mb-3 {% if 'error' in result %}border-danger{% elif result.certificate.status == 'valid' %}border-success{% else %}border-warning{% endif %}">
+                                        <div class="card-header">
+                                            <strong>{{ result.node_name }}</strong> ({{ result.ip_address }})
+                                            {% if 'error' in result %}
+                                                <span class="badge bg-danger float-end">Error</span>
+                                            {% elif result.certificate.exists %}
+                                                <span class="badge bg-{{ 'success' if result.certificate.status == 'valid' else 'danger' }} float-end">
+                                                    {{ result.certificate.status|upper }}
+                                                </span>
+                                            {% else %}
+                                                <span class="badge bg-warning float-end">Not Found</span>
+                                            {% endif %}
+                                        </div>
+                                        <div class="card-body">
+                                            {% if 'error' in result %}
+                                                <p class="card-text text-danger">{{ result.error }}</p>
+                                            {% elif result.certificate.exists %}
+                                                <div class="row mb-2">
+                                                    <div class="col-md-4 fw-bold">Subject:</div>
+                                                    <div class="col-md-8">{{ result.certificate.subject }}</div>
+                                                </div>
+                                                <div class="row mb-2">
+                                                    <div class="col-md-4 fw-bold">Issuer:</div>
+                                                    <div class="col-md-8">{{ result.certificate.issuer }}</div>
+                                                </div>
+                                                <div class="row mb-2">
+                                                    <div class="col-md-4 fw-bold">Expiry Date:</div>
+                                                    <div class="col-md-8">{{ result.certificate.expiry_date }}</div>
+                                                </div>
+                                                <div class="row">
+                                                    <div class="col-md-4 fw-bold">Days Remaining:</div>
+                                                    <div class="col-md-8">
+                                                        {% if result.certificate.days_remaining is not none %}
+                                                            <span class="badge bg-{{ 'danger' if result.certificate.days_remaining < 7 else 'warning' if result.certificate.days_remaining < 30 else 'success' }}">
+                                                                {{ result.certificate.days_remaining }} days
+                                                            </span>
+                                                        {% else %}
+                                                            <span class="badge bg-secondary">Unknown</span>
+                                                        {% endif %}
+                                                    </div>
+                                                </div>
+                                            {% else %}
+                                                <p class="card-text">{{ result.certificate.message }}</p>
+                                                <div class="alert alert-info">
+                                                    <i class="fas fa-info-circle me-2"></i>
+                                                    Use the "Request New Certificate" action to obtain a new SSL certificate.
+                                                </div>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                {% endfor %}
+                            {% endif %}
+                        {% else %}
+                            <div class="alert alert-info">
+                                <i class="fas fa-info-circle me-2"></i>
+                                Select a node and action to get started. Use "Check Certificate Status" to view current certificates.
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div class="card shadow-sm">
+                    <div class="card-header bg-info text-white">
+                        <h5 class="card-title mb-0">SSL Certificate Information</h5>
+                    </div>
+                    <div class="card-body">
+                        <h6>About Let's Encrypt Certificates</h6>
+                        <ul>
+                            <li>Certificates are valid for 90 days</li>
+                            <li>Auto-renewal should be configured to renew certificates automatically before expiry</li>
+                            <li>Your domain must be publicly accessible on port 80 for verification</li>
+                            <li>The HTTP-01 challenge is used to verify domain ownership through the /.well-known/acme-challenge/ path</li>
+                        </ul>
+                        
+                        <h6>SSL Certificate Best Practices</h6>
+                        <ul>
+                            <li>Use strong SSL protocols (TLSv1.2, TLSv1.3) and ciphers</li>
+                            <li>Enable OCSP stapling for improved performance</li>
+                            <li>Set up HTTP Strict Transport Security (HSTS) for better security</li>
+                            <li>Redirect all HTTP traffic to HTTPS</li>
+                            <li>Ensure certificates are renewed at least 30 days before expiry</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Show/hide the email field based on the action
+        const actionSelect = document.getElementById('action');
+        const emailField = document.getElementById('email_field');
+        
+        if (actionSelect && emailField) {
+            actionSelect.addEventListener('change', function() {
+                if (this.value === 'request') {
+                    emailField.classList.remove('d-none');
+                } else {
+                    emailField.classList.add('d-none');
+                }
+            });
+        }
+    });
+</script>
+{% endblock %}

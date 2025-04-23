@@ -1052,3 +1052,343 @@ def test_site_config(site_id):
     # Show test form
     nodes = Node.query.filter_by(is_active=True).all()
     return render_template('admin/sites/test_config.html', site=site, nodes=nodes)
+
+@admin.route('/sites/<int:site_id>/ssl', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def manage_ssl_certificates(site_id):
+    """Manage SSL certificates for a site"""
+    site = Site.query.get_or_404(site_id)
+    
+    # Get all nodes serving this site
+    site_nodes = SiteNode.query.filter_by(site_id=site_id).all()
+    nodes = [Node.query.get(sn.node_id) for sn in site_nodes]
+    
+    if request.method == 'POST':
+        # Determine what action we're taking
+        action = request.form.get('action')
+        node_id = request.form.get('node_id')
+        
+        if not node_id:
+            flash('Please select a node', 'error')
+            return redirect(url_for('admin.manage_ssl_certificates', site_id=site_id))
+        
+        from app.services.ssl_certificate_service import SSLCertificateService
+        
+        if action == 'check':
+            # Check certificate status
+            result = SSLCertificateService.check_certificate_status(site_id, node_id)
+            
+            if 'error' in result:
+                flash(f"Error checking certificate: {result['error']}", 'error')
+            else:
+                # Store cert info in session for display
+                session['cert_check_result'] = result
+                
+                # Determine appropriate message
+                has_errors = any('error' in r for r in result['results'])
+                valid_certs = any(r.get('certificate', {}).get('status') == 'valid' 
+                                for r in result['results'] if 'certificate' in r)
+                
+                if has_errors:
+                    flash('Certificate check completed with some errors. See details below.', 'warning')
+                elif valid_certs:
+                    flash('Certificate check completed. Valid certificates found.', 'success')
+                else:
+                    flash('Certificate check completed. No valid certificates found.', 'warning')
+            
+        elif action == 'request':
+            # Request a new certificate
+            email = request.form.get('email')
+            result = SSLCertificateService.request_certificate(site_id, node_id, email)
+            
+            if result.get('success', False):
+                flash('SSL certificate successfully requested and installed', 'success')
+            else:
+                flash(f"Failed to request SSL certificate: {result.get('message', 'Unknown error')}", 'error')
+        
+        elif action == 'setup_renewal':
+            # Setup auto-renewal
+            result = SSLCertificateService.setup_auto_renewal(node_id)
+            
+            if result.get('success', False):
+                flash('Certificate auto-renewal successfully configured', 'success')
+            else:
+                flash(f"Failed to configure auto-renewal: {result.get('message', 'Unknown error')}", 'error')
+        
+        return redirect(url_for('admin.manage_ssl_certificates', site_id=site_id))
+    
+    # Get certificate status from session if available
+    cert_check_result = session.pop('cert_check_result', None)
+    
+    # If HTTPS site, check certificate status on all nodes
+    cert_status = None
+    if site.protocol == 'https' and not cert_check_result:
+        from app.services.ssl_certificate_service import SSLCertificateService
+        cert_status = SSLCertificateService.check_certificate_status(site_id)
+    else:
+        cert_status = cert_check_result
+    
+    return render_template('admin/sites/ssl_management.html', 
+                          site=site, 
+                          nodes=nodes,
+                          cert_status=cert_status)
+
+@admin.route('/templates')
+@login_required
+@admin_required
+def list_templates():
+    """List nginx configuration templates"""
+    from app.services.config_template_service import ConfigTemplateService
+    
+    templates = ConfigTemplateService.list_templates()
+    presets = ConfigTemplateService.list_presets()
+    
+    return render_template('admin/templates/list.html', 
+                          templates=templates,
+                          presets=presets)
+
+@admin.route('/templates/new', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def new_template():
+    """Create a new nginx configuration template"""
+    from app.services.config_template_service import ConfigTemplateService
+    
+    if request.method == 'POST':
+        template_name = request.form.get('template_name')
+        content = request.form.get('content')
+        
+        if not template_name or not content:
+            flash('Template name and content are required', 'error')
+            return redirect(url_for('admin.new_template'))
+        
+        # Add .conf extension if missing
+        if not template_name.endswith('.conf'):
+            template_name += '.conf'
+        
+        # Save the template
+        success = ConfigTemplateService.save_template(template_name, content)
+        
+        if success:
+            flash(f'Template {template_name} created successfully', 'success')
+            return redirect(url_for('admin.list_templates'))
+        else:
+            flash(f'Failed to create template {template_name}. It may already exist.', 'error')
+            return redirect(url_for('admin.new_template'))
+    
+    return render_template('admin/templates/new.html')
+
+@admin.route('/templates/edit/<path:template_name>', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def edit_template(template_name):
+    """Edit an existing nginx configuration template"""
+    from app.services.config_template_service import ConfigTemplateService
+    
+    # Get the template content
+    content = ConfigTemplateService.get_template_content(template_name)
+    
+    if not content:
+        flash(f'Template {template_name} not found', 'error')
+        return redirect(url_for('admin.list_templates'))
+    
+    if request.method == 'POST':
+        new_content = request.form.get('content')
+        
+        if not new_content:
+            flash('Template content is required', 'error')
+            return render_template('admin/templates/edit.html', 
+                                template_name=template_name,
+                                content=content)
+        
+        # Save the updated template
+        success = ConfigTemplateService.save_template(template_name, new_content, overwrite=True)
+        
+        if success:
+            flash(f'Template {template_name} updated successfully', 'success')
+            return redirect(url_for('admin.list_templates'))
+        else:
+            flash(f'Failed to update template {template_name}', 'error')
+            return render_template('admin/templates/edit.html', 
+                                template_name=template_name,
+                                content=content)
+    
+    return render_template('admin/templates/edit.html', 
+                          template_name=template_name,
+                          content=content)
+
+@admin.route('/templates/delete/<path:template_name>', methods=['POST'])
+@login_required
+@admin_required
+def delete_template(template_name):
+    """Delete a template"""
+    from app.services.config_template_service import ConfigTemplateService
+    
+    success = ConfigTemplateService.delete_template(template_name)
+    
+    if success:
+        flash(f'Template {template_name} deleted successfully', 'success')
+    else:
+        flash(f'Failed to delete template {template_name}. Default templates cannot be deleted.', 'error')
+    
+    return redirect(url_for('admin.list_templates'))
+
+@admin.route('/presets/new', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def new_preset():
+    """Create a new configuration preset"""
+    if request.method == 'POST':
+        from app.services.config_template_service import ConfigTemplateService
+        
+        preset_name = request.form.get('preset_name')
+        description = request.form.get('description', '')
+        preset_type = request.form.get('type', 'custom')
+        
+        # Parse the preset data from form fields
+        preset_data = {
+            'name': preset_name,
+            'description': description,
+            'type': preset_type,
+            'created_at': datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
+            'created_by': current_user.username,
+            'use_waf': request.form.get('use_waf') == 'on',
+            'force_https': request.form.get('force_https') == 'on',
+            'enable_cache': request.form.get('enable_cache') == 'on',
+            'cache_time': int(request.form.get('cache_time', 3600)),
+            'cache_browser_time': int(request.form.get('cache_browser_time', 3600)),
+            'cache_static_time': int(request.form.get('cache_static_time', 86400))
+        }
+        
+        # Add custom config if provided
+        custom_config = request.form.get('custom_config', '').strip()
+        if custom_config:
+            preset_data['custom_config'] = custom_config
+        
+        # Add custom cache rules if provided
+        custom_cache_rules = request.form.get('custom_cache_rules', '').strip()
+        if custom_cache_rules:
+            preset_data['custom_cache_rules'] = custom_cache_rules
+        
+        # Save the preset
+        success = ConfigTemplateService.save_preset(preset_name, preset_data)
+        
+        if success:
+            flash(f'Preset {preset_name} created successfully', 'success')
+            return redirect(url_for('admin.list_templates'))
+        else:
+            flash(f'Failed to create preset {preset_name}. It may already exist.', 'error')
+            return redirect(url_for('admin.new_preset'))
+    
+    return render_template('admin/templates/new_preset.html')
+
+@admin.route('/presets/from_site/<int:site_id>', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def preset_from_site(site_id):
+    """Create a preset from a site's current configuration"""
+    site = Site.query.get_or_404(site_id)
+    
+    if request.method == 'POST':
+        from app.services.config_template_service import ConfigTemplateService
+        
+        preset_name = request.form.get('preset_name')
+        description = request.form.get('description', f'Preset created from {site.domain}')
+        
+        if not preset_name:
+            flash('Preset name is required', 'error')
+            return redirect(url_for('admin.preset_from_site', site_id=site_id))
+        
+        # Create the preset
+        success, message = ConfigTemplateService.create_preset_from_site(site_id, preset_name, description)
+        
+        if success:
+            flash(message, 'success')
+            return redirect(url_for('admin.list_templates'))
+        else:
+            flash(message, 'error')
+            return redirect(url_for('admin.preset_from_site', site_id=site_id))
+    
+    return render_template('admin/templates/preset_from_site.html', site=site)
+
+@admin.route('/presets/view/<path:preset_name>')
+@login_required
+@admin_required
+def view_preset(preset_name):
+    """View a configuration preset"""
+    from app.services.config_template_service import ConfigTemplateService
+    
+    preset = ConfigTemplateService.get_preset(preset_name)
+    
+    if not preset:
+        flash(f'Preset {preset_name} not found', 'error')
+        return redirect(url_for('admin.list_templates'))
+    
+    return render_template('admin/templates/view_preset.html', preset=preset, preset_name=preset_name)
+
+@admin.route('/presets/delete/<path:preset_name>', methods=['POST'])
+@login_required
+@admin_required
+def delete_preset(preset_name):
+    """Delete a preset"""
+    from app.services.config_template_service import ConfigTemplateService
+    
+    success = ConfigTemplateService.delete_preset(preset_name)
+    
+    if success:
+        flash(f'Preset {preset_name} deleted successfully', 'success')
+    else:
+        flash(f'Failed to delete preset {preset_name}', 'error')
+    
+    return redirect(url_for('admin.list_templates'))
+
+@admin.route('/presets/apply/<path:preset_name>/<int:site_id>', methods=['POST'])
+@login_required
+@admin_required
+def apply_preset(preset_name, site_id):
+    """Apply a preset to a site"""
+    from app.services.config_template_service import ConfigTemplateService
+    
+    site = Site.query.get_or_404(site_id)
+    
+    # Apply the preset
+    success, message = ConfigTemplateService.apply_preset_to_site(site_id, preset_name)
+    
+    if success:
+        flash(message, 'success')
+        
+        # Automatically redeploy the site to all nodes with new settings
+        try:
+            from app.services.nginx_service import generate_nginx_config, deploy_to_node
+            
+            # Generate updated Nginx configuration
+            nginx_config = generate_nginx_config(site)
+            
+            # Deploy to each node
+            site_nodes = SiteNode.query.filter_by(site_id=site_id).all()
+            deploy_errors = []
+            
+            for site_node in site_nodes:
+                try:
+                    # Deploy to node
+                    deploy_to_node(site.id, site_node.node_id, nginx_config)
+                except Exception as e:
+                    deploy_errors.append(f"Error deploying to {site_node.node.name}: {str(e)}")
+            
+            if deploy_errors:
+                error_message = "<br>".join(deploy_errors)
+                flash(f'Preset applied, but there were deployment errors:<br>{error_message}', 'warning')
+            else:
+                flash('Preset applied and successfully deployed to all nodes.', 'success')
+        except Exception as e:
+            flash(f'Preset applied, but deployment failed: {str(e)}', 'warning')
+    else:
+        flash(message, 'error')
+    
+    # Redirect to appropriate page
+    referrer = request.referrer
+    if referrer and 'view_site' in referrer:
+        return redirect(url_for('admin.view_site', site_id=site_id))
+    else:
+        return redirect(url_for('admin.view_preset', preset_name=preset_name))
