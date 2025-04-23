@@ -34,7 +34,9 @@ class SSLCertificateService:
             return {"error": "Site not found"}
             
         domain = site.domain
-        
+        if not domain:
+            return {"error": "Site has no domain configured"}
+            
         # Determine which nodes to check
         if node_id:
             nodes = [Node.query.get(node_id)]
@@ -51,6 +53,9 @@ class SSLCertificateService:
         
         results = []
         cert_found = False
+        import re
+        import socket
+        import time
         
         for node in nodes:
             try:
@@ -58,11 +63,13 @@ class SSLCertificateService:
                 ssh_client = paramiko.SSHClient()
                 ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
                 
-                connection_attempts = 0
-                max_attempts = 2
+                # Connection with proper retry logic
+                max_connection_attempts = 3
+                connection_retry_delay = 2  # seconds
                 connected = False
+                last_error = None
                 
-                while connection_attempts < max_attempts and not connected:
+                for attempt in range(max_connection_attempts):
                     try:
                         if node.ssh_key_path:
                             ssh_client.connect(
@@ -70,7 +77,7 @@ class SSLCertificateService:
                                 port=node.ssh_port,
                                 username=node.ssh_user,
                                 key_filename=node.ssh_key_path,
-                                timeout=5
+                                timeout=10
                             )
                         else:
                             ssh_client.connect(
@@ -78,71 +85,121 @@ class SSLCertificateService:
                                 port=node.ssh_port,
                                 username=node.ssh_user,
                                 password=node.ssh_password,
-                                timeout=5
+                                timeout=10
                             )
                         connected = True
-                    except (paramiko.SSHException, socket.timeout, socket.error) as e:
-                        connection_attempts += 1
-                        if connection_attempts >= max_attempts:
-                            raise
-                        time.sleep(1)  # Short delay before retry
+                        break
+                    except (paramiko.SSHException, socket.timeout, socket.error, Exception) as e:
+                        last_error = str(e)
+                        if attempt < max_connection_attempts - 1:
+                            time.sleep(connection_retry_delay)
+                            log_activity('warning', f"Connection attempt {attempt+1} to node {node.name} failed: {str(e)}. Retrying...")
+                
+                if not connected:
+                    results.append({
+                        "node_id": node.id,
+                        "node_name": node.name,
+                        "ip_address": node.ip_address,
+                        "error": f"Failed to connect after {max_connection_attempts} attempts: {last_error}"
+                    })
+                    continue
                 
                 # Check certificate paths
                 cert_path = f"/etc/letsencrypt/live/{domain}/fullchain.pem"
                 key_path = f"/etc/letsencrypt/live/{domain}/privkey.pem"
                 
+                # Check for certificates in multiple locations
+                potential_cert_paths = [
+                    # Standard Let's Encrypt paths
+                    f"/etc/letsencrypt/live/{domain}/fullchain.pem",
+                    
+                    # Self-signed certificates
+                    f"/etc/nginx/ssl/{domain}.crt",
+                    f"/etc/nginx/ssl/self-signed/{domain}.crt",
+                    f"/etc/nginx/conf.d/ssl/{domain}.crt",
+                    
+                    # Common alternate locations
+                    f"/etc/ssl/certs/{domain}.crt",
+                    f"/etc/ssl/{domain}/fullchain.pem",
+                    f"/etc/nginx/certificates/{domain}.crt"
+                ]
+                
                 # Also check for wildcard certificates which might be used by this domain
-                # Extract the base domain (e.g., example.com from sub.example.com)
                 domain_parts = domain.split('.')
-                wildcard_cert_path = None
+                
+                # Build potential parent domains for wildcard certificate check
+                potential_parent_domains = []
+                
+                # For subdomains like sub.example.com, check example.com wildcard cert
                 if len(domain_parts) > 2:
-                    base_domain = '.'.join(domain_parts[-2:])
-                    wildcard_cert_path = f"/etc/letsencrypt/live/{base_domain}/fullchain.pem"
+                    # Check immediate parent domain (example.com for sub.example.com)
+                    parent_domain = '.'.join(domain_parts[-2:])
+                    potential_parent_domains.append(parent_domain)
+                    
+                    # For deep subdomains, also check intermediate levels
+                    # For service.region.example.com, also check region.example.com
+                    for i in range(1, len(domain_parts)-1):
+                        if len(domain_parts) > i+1:
+                            intermediate_domain = '.'.join(domain_parts[i:])
+                            if intermediate_domain not in potential_parent_domains:
+                                potential_parent_domains.append(intermediate_domain)
                 
-                # First check if the standard certificate exists
-                stdin, stdout, stderr = ssh_client.exec_command(f"test -f {cert_path} && echo 'exists' || echo 'not found'")
-                cert_exists = stdout.read().decode('utf-8').strip() == 'exists'
+                # Add wildcard certificate paths for all potential parent domains
+                for parent_domain in potential_parent_domains:
+                    potential_cert_paths.append(f"/etc/letsencrypt/live/{parent_domain}/fullchain.pem")
                 
-                # If standard cert doesn't exist, check for wildcard cert
-                if not cert_exists and wildcard_cert_path:
-                    stdin, stdout, stderr = ssh_client.exec_command(f"test -f {wildcard_cert_path} && echo 'exists' || echo 'not found'")
-                    wildcard_exists = stdout.read().decode('utf-8').strip() == 'exists'
-                    if wildcard_exists:
-                        cert_path = wildcard_cert_path
-                        key_path = wildcard_cert_path.replace('fullchain.pem', 'privkey.pem')
-                        cert_exists = True
+                # Add paths for domain variations with and without www prefix
+                if domain.startswith('www.'):
+                    base_domain = domain[4:]  # Remove www.
+                    potential_cert_paths.append(f"/etc/letsencrypt/live/{base_domain}/fullchain.pem")
+                else:
+                    www_domain = f"www.{domain}"
+                    potential_cert_paths.append(f"/etc/letsencrypt/live/{www_domain}/fullchain.pem")
                 
                 # Prepare the result object
                 result = {
                     "node_id": node.id,
                     "node_name": node.name,
                     "ip_address": node.ip_address,
-                    "checked_paths": [cert_path]
+                    "checked_paths": potential_cert_paths.copy()
                 }
                 
-                if wildcard_cert_path:
-                    result["checked_paths"].append(wildcard_cert_path)
+                # Search for certificates in all potential locations
+                cert_exists = False
+                actual_cert_path = None
+                actual_key_path = None
                 
-                if not cert_exists:
-                    # Check for self-signed certificates
-                    self_signed_paths = [
-                        f"/etc/nginx/ssl/{domain}.crt",
-                        f"/etc/nginx/ssl/self-signed/{domain}.crt",
-                        f"/etc/nginx/conf.d/ssl/{domain}.crt"
-                    ]
-                    
-                    for ss_path in self_signed_paths:
-                        stdin, stdout, stderr = ssh_client.exec_command(f"test -f {ss_path} && echo 'exists' || echo 'not found'")
-                        if stdout.read().decode('utf-8').strip() == 'exists':
-                            cert_path = ss_path
-                            key_path = ss_path.replace('.crt', '.key')
-                            cert_exists = True
-                            result["self_signed"] = True
-                            break
+                for cert_path in potential_cert_paths:
+                    stdin, stdout, stderr = ssh_client.exec_command(f"test -f {cert_path} && echo 'exists' || echo 'not found'")
+                    if stdout.read().decode('utf-8').strip() == 'exists':
+                        cert_exists = True
+                        actual_cert_path = cert_path
+                        
+                        # Determine the key path based on certificate location pattern
+                        if 'fullchain.pem' in cert_path:
+                            actual_key_path = cert_path.replace('fullchain.pem', 'privkey.pem')
+                        elif '.crt' in cert_path:
+                            actual_key_path = cert_path.replace('.crt', '.key')
+                        
+                        # Verify the key exists too
+                        if actual_key_path:
+                            stdin, stdout, stderr = ssh_client.exec_command(f"test -f {actual_key_path} && echo 'exists' || echo 'not found'")
+                            if stdout.read().decode('utf-8').strip() != 'exists':
+                                # Key not found, continue searching
+                                cert_exists = False
+                                actual_cert_path = None
+                                actual_key_path = None
+                                continue
+                        
+                        # Found valid cert and key
+                        break
                 
-                if cert_exists:
+                if cert_exists and actual_cert_path:
                     cert_found = True
-                    # Get certificate information using OpenSSL
+                    cert_path = actual_cert_path
+                    key_path = actual_key_path
+                    
+                    # Get certificate information using OpenSSL with extended details
                     stdin, stdout, stderr = ssh_client.exec_command(f"openssl x509 -in {cert_path} -text -noout")
                     cert_output = stdout.read().decode('utf-8')
                     
@@ -168,13 +225,22 @@ class SSLCertificateService:
                         status = "expired"
                     elif is_not_yet_valid:
                         status = "not_yet_valid"
+                    elif days_remaining is not None and days_remaining <= 7:
+                        status = "critical"
                     elif days_remaining is not None and days_remaining <= 30:
                         status = "expiring_soon"
                     else:
                         status = "valid"
                     
                     # Check if it's a wildcard certificate
-                    is_wildcard = "Subject Alternative Name" in cert_output and "DNS:*." in cert_output
+                    subject_alt_names = []
+                    san_section = cert_output.split("X509v3 Subject Alternative Name:")[1].split("\n\n")[0] if "X509v3 Subject Alternative Name:" in cert_output else ""
+                    is_wildcard = "DNS:*." in cert_output
+                    
+                    # Extract all SANs
+                    if san_section:
+                        san_entries = re.findall(r'DNS:([^,\s]+)', san_section)
+                        subject_alt_names = san_entries
                     
                     # Verify certificate and key match
                     stdin, stdout, stderr = ssh_client.exec_command(
@@ -184,6 +250,22 @@ class SSLCertificateService:
                     key_match_output = stdout.read().decode('utf-8').strip()
                     key_check_lines = key_match_output.split('\n')
                     key_matches = len(key_check_lines) >= 2 and key_check_lines[0] == key_check_lines[1]
+                    
+                    # Get certificate type (RSA, ECC) and strength
+                    cert_type = "RSA"  # Default assumption
+                    key_strength = "2048-bit"  # Default assumption
+                    
+                    if "Public Key Algorithm: id-ecPublicKey" in cert_output:
+                        cert_type = "ECC"
+                        # Extract ECC curve name
+                        curve_match = re.search(r'ASN1 OID: ([^\n]+)', cert_output)
+                        if curve_match:
+                            key_strength = curve_match.group(1).strip()
+                    else:
+                        # Extract RSA key length
+                        key_length_match = re.search(r'Public-Key: \((\d+) bit\)', cert_output)
+                        if key_length_match:
+                            key_strength = f"{key_length_match.group(1)}-bit"
                     
                     result["certificate"] = {
                         "exists": True,
@@ -195,8 +277,12 @@ class SSLCertificateService:
                         "status": status,
                         "is_self_signed": is_self_signed or result.get("self_signed", False),
                         "is_wildcard": is_wildcard,
+                        "subject_alt_names": subject_alt_names,
                         "key_matches": key_matches,
-                        "path": cert_path
+                        "path": cert_path,
+                        "key_path": key_path,
+                        "cert_type": cert_type,
+                        "key_strength": key_strength
                     }
                     
                     # Check auto-renewal configuration
@@ -204,31 +290,75 @@ class SSLCertificateService:
                     renewal_status = stdout.read().decode('utf-8').strip()
                     result["certificate"]["auto_renewal"] = renewal_status == 'configured'
                     
-                    # Check for chain issues
-                    stdin, stdout, stderr = ssh_client.exec_command(f"openssl verify -untrusted {cert_path.replace('fullchain.pem', 'chain.pem')} {cert_path.replace('fullchain.pem', 'cert.pem')} 2>&1 || echo 'chain_error'")
-                    chain_verify = stdout.read().decode('utf-8').strip()
-                    result["certificate"]["chain_valid"] = "chain_error" not in chain_verify
+                    # Check for systemd timer as an alternative renewal method
+                    stdin, stdout, stderr = ssh_client.exec_command("systemctl list-timers 2>/dev/null | grep -q 'certbot\\.timer' && echo 'timer_configured' || echo 'no_timer'")
+                    timer_status = stdout.read().decode('utf-8').strip()
+                    if timer_status == 'timer_configured':
+                        result["certificate"]["auto_renewal"] = True
+                        result["certificate"]["renewal_method"] = "systemd timer"
+                    elif result["certificate"]["auto_renewal"]:
+                        result["certificate"]["renewal_method"] = "cron"
+                    
+                    # Check for chain issues with better error handling
+                    if '/etc/letsencrypt/live/' in cert_path:
+                        chain_path = cert_path.replace('fullchain.pem', 'chain.pem')
+                        cert_only_path = cert_path.replace('fullchain.pem', 'cert.pem')
+                        
+                        stdin, stdout, stderr = ssh_client.exec_command(f"test -f {chain_path} && test -f {cert_only_path} && echo 'files_exist' || echo 'missing_files'")
+                        chain_files_exist = stdout.read().decode('utf-8').strip() == 'files_exist'
+                        
+                        if chain_files_exist:
+                            # Check the certificate chain validity
+                            stdin, stdout, stderr = ssh_client.exec_command(
+                                f"timeout 10 openssl verify -untrusted {chain_path} {cert_only_path} 2>&1 || echo 'chain_error'"
+                            )
+                            chain_verify = stdout.read().decode('utf-8').strip()
+                            result["certificate"]["chain_valid"] = "chain_error" not in chain_verify and ": OK" in chain_verify
+                            
+                            if not result["certificate"]["chain_valid"]:
+                                result["certificate"]["chain_error"] = chain_verify
+                        else:
+                            result["certificate"]["chain_valid"] = None
+                            result["certificate"]["chain_note"] = "Chain validation skipped - chain.pem or cert.pem not available"
+                    else:
+                        # For self-signed or non-Let's Encrypt certs
+                        result["certificate"]["chain_valid"] = None
+                        result["certificate"]["chain_note"] = "Chain validation not applicable for this certificate type"
                 else:
                     result["certificate"] = {
                         "exists": False,
                         "message": "No SSL certificate found for this domain"
                     }
                 
+                # Close the SSH connection
                 ssh_client.close()
                 results.append(result)
                 
             except Exception as e:
+                error_message = str(e)
+                
+                # Provide more helpful information based on common SSH connection issues
+                if isinstance(e, paramiko.ssh_exception.NoValidConnectionsError):
+                    error_message = f"Cannot connect to {node.ip_address}:{node.ssh_port} - server may be down or port closed"
+                elif isinstance(e, paramiko.ssh_exception.AuthenticationException):
+                    error_message = f"SSH authentication failed for {node.ssh_user}@{node.ip_address} - check credentials"
+                elif isinstance(e, paramiko.ssh_exception.SSHException) and "not found in known_hosts" in str(e):
+                    error_message = f"Host key verification failed - consider adding server to known hosts"
+                elif isinstance(e, socket.timeout):
+                    error_message = f"Connection timed out to {node.ip_address}:{node.ssh_port} - check network or firewall"
+                
                 results.append({
                     "node_id": node.id,
                     "node_name": node.name,
                     "ip_address": node.ip_address,
-                    "error": str(e)
+                    "error": error_message
                 })
         
         return {
             "domain": domain,
             "results": results,
-            "cert_found": cert_found
+            "cert_found": cert_found,
+            "timestamp": datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
         }
     
     @staticmethod
@@ -1876,3 +2006,416 @@ subjectAltName = DNS:{domain}, DNS:www.{domain}
             # Ensure SSH connection is always closed
             if ssh_client:
                 ssh_client.close()
+    
+    @staticmethod
+    def certificate_health_check(site_id=None):
+        """
+        Perform a comprehensive health check on SSL certificates across all or a specific site
+        
+        Args:
+            site_id (int, optional): Specific site ID to check or None for all sites
+            
+        Returns:
+            dict: Health check results with issues and summary
+        """
+        from app.models.models import Site, Node, SiteNode
+        
+        results = {
+            'checked': 0,
+            'healthy': 0,
+            'issues': [],
+            'expiring_soon': [],
+            'expired': [],
+            'self_signed': [],
+            'missing': [],
+            'chain_issues': [],
+            'key_mismatch': [],
+            'summary': {}
+        }
+        
+        # Get sites to check
+        if site_id:
+            sites = [Site.query.get(site_id)]
+            if not sites[0]:
+                return {'error': f'Site ID {site_id} not found'}
+        else:
+            # Check all active sites
+            sites = Site.query.filter_by(is_active=True).all()
+            
+        # Check each site
+        for site in sites:
+            result = SSLCertificateService.check_certificate_status(site.id)
+            results['checked'] += 1
+            
+            # Analyze the certificate status for this site
+            cert_found = result.get('cert_found', False)
+            has_issues = False
+            
+            if not cert_found:
+                has_issues = True
+                results['missing'].append({
+                    'site_id': site.id,
+                    'domain': site.domain,
+                    'nodes': len(result.get('results', []))
+                })
+                continue
+            
+            # Check each node's certificate
+            for node_result in result.get('results', []):
+                if 'error' in node_result:
+                    has_issues = True
+                    results['issues'].append({
+                        'site_id': site.id,
+                        'domain': site.domain,
+                        'node_id': node_result.get('node_id'),
+                        'node_name': node_result.get('node_name'),
+                        'issue': 'connection_error',
+                        'details': node_result.get('error')
+                    })
+                    continue
+                
+                cert_info = node_result.get('certificate', {})
+                if not cert_info.get('exists', False):
+                    has_issues = True
+                    results['missing'].append({
+                        'site_id': site.id,
+                        'domain': site.domain,
+                        'node_id': node_result.get('node_id'),
+                        'node_name': node_result.get('node_name')
+                    })
+                    continue
+                
+                # Check various certificate issues
+                if cert_info.get('status') == 'expired':
+                    has_issues = True
+                    results['expired'].append({
+                        'site_id': site.id,
+                        'domain': site.domain,
+                        'node_id': node_result.get('node_id'),
+                        'node_name': node_result.get('node_name'),
+                        'valid_until': cert_info.get('valid_until')
+                    })
+                
+                if cert_info.get('status') in ['critical', 'expiring_soon'] and cert_info.get('days_remaining', 30) <= 30:
+                    has_issues = True
+                    results['expiring_soon'].append({
+                        'site_id': site.id,
+                        'domain': site.domain,
+                        'node_id': node_result.get('node_id'),
+                        'node_name': node_result.get('node_name'),
+                        'days_remaining': cert_info.get('days_remaining'),
+                        'valid_until': cert_info.get('valid_until')
+                    })
+                
+                if cert_info.get('is_self_signed', False):
+                    has_issues = True
+                    results['self_signed'].append({
+                        'site_id': site.id,
+                        'domain': site.domain,
+                        'node_id': node_result.get('node_id'),
+                        'node_name': node_result.get('node_name')
+                    })
+                
+                if cert_info.get('chain_valid') is False:
+                    has_issues = True
+                    results['chain_issues'].append({
+                        'site_id': site.id,
+                        'domain': site.domain,
+                        'node_id': node_result.get('node_id'),
+                        'node_name': node_result.get('node_name'),
+                        'error': cert_info.get('chain_error', 'Unknown chain validation error')
+                    })
+                
+                if cert_info.get('key_matches') is False:
+                    has_issues = True
+                    results['key_mismatch'].append({
+                        'site_id': site.id,
+                        'domain': site.domain,
+                        'node_id': node_result.get('node_id'),
+                        'node_name': node_result.get('node_name'),
+                        'cert_path': cert_info.get('path'),
+                        'key_path': cert_info.get('key_path')
+                    })
+            
+            if not has_issues:
+                results['healthy'] += 1
+        
+        # Generate summary statistics
+        results['summary'] = {
+            'total_checked': results['checked'],
+            'healthy': results['healthy'],
+            'with_issues': results['checked'] - results['healthy'],
+            'issues_by_type': {
+                'missing': len(results['missing']),
+                'expired': len(results['expired']),
+                'expiring_soon': len(results['expiring_soon']),
+                'self_signed': len(results['self_signed']),
+                'chain_issues': len(results['chain_issues']),
+                'key_mismatch': len(results['key_mismatch'])
+            }
+        }
+        
+        # Log health check results
+        log_activity(
+            'info',
+            f"SSL certificate health check completed: {results['healthy']} healthy, "
+            f"{results['checked'] - results['healthy']} with issues out of {results['checked']} sites"
+        )
+        
+        if results['checked'] - results['healthy'] > 0:
+            log_activity(
+                'warning',
+                f"SSL certificate issues detected: {len(results['expired'])} expired, "
+                f"{len(results['expiring_soon'])} expiring soon, {len(results['missing'])} missing"
+            )
+        
+        return results
+        
+    @staticmethod
+    def auto_replace_self_signed_certificates():
+        """
+        Automatically replace self-signed certificates with Let's Encrypt certificates if available
+        This is meant to be run as a scheduled task
+        
+        Returns:
+            dict: Results of the replacement operation
+        """
+        from app.models.models import Site, Node, SiteNode
+        
+        results = {
+            'checked': 0,
+            'replaced': 0,
+            'failed': 0,
+            'sites': []
+        }
+        
+        # Get all sites with self-signed certificates
+        health_check = SSLCertificateService.certificate_health_check()
+        self_signed_sites = set()
+        
+        for site_info in health_check.get('self_signed', []):
+            self_signed_sites.add(site_info.get('site_id'))
+        
+        # For each site with self-signed certs, check if we can find a Let's Encrypt cert
+        for site_id in self_signed_sites:
+            site = Site.query.get(site_id)
+            if not site:
+                continue
+                
+            results['checked'] += 1
+            site_result = {
+                'site_id': site.id,
+                'domain': site.domain,
+                'nodes': [],
+                'status': 'skipped'
+            }
+            
+            # Check each node for this site
+            site_nodes = SiteNode.query.filter_by(site_id=site.id).all()
+            for site_node in site_nodes:
+                node = Node.query.get(site_node.node_id)
+                if not node or not node.is_active:
+                    continue
+                    
+                # Check if Let's Encrypt certificate exists
+                try:
+                    import paramiko
+                    
+                    ssh_client = paramiko.SSHClient()
+                    ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                    
+                    # Connect to node
+                    if node.ssh_key_path:
+                        ssh_client.connect(
+                            hostname=node.ip_address,
+                            port=node.ssh_port,
+                            username=node.ssh_user,
+                            key_filename=node.ssh_key_path,
+                            timeout=10
+                        )
+                    else:
+                        ssh_client.connect(
+                            hostname=node.ip_address,
+                            port=node.ssh_port,
+                            username=node.ssh_user,
+                            password=node.ssh_password,
+                            timeout=10
+                        )
+                    
+                    # Check for Let's Encrypt certificate
+                    le_cert_path = f"/etc/letsencrypt/live/{site.domain}/fullchain.pem"
+                    le_key_path = f"/etc/letsencrypt/live/{site.domain}/privkey.pem"
+                    
+                    stdin, stdout, stderr = ssh_client.exec_command(
+                        f"test -f {le_cert_path} && test -f {le_key_path} && echo 'exists' || echo 'not found'"
+                    )
+                    le_exists = stdout.read().decode('utf-8').strip() == 'exists'
+                    
+                    if not le_exists:
+                        # Also check for wildcard certificates
+                        base_domain = '.'.join(site.domain.split('.')[-2:])  # e.g., example.com from sub.example.com
+                        le_cert_path_wildcard = f"/etc/letsencrypt/live/{base_domain}/fullchain.pem"
+                        
+                        stdin, stdout, stderr = ssh_client.exec_command(
+                            f"test -f {le_cert_path_wildcard} && echo 'exists' || echo 'not found'"
+                        )
+                        wildcard_exists = stdout.read().decode('utf-8').strip() == 'exists'
+                        
+                        if wildcard_exists:
+                            le_exists = True
+                            le_cert_path = le_cert_path_wildcard
+                            le_key_path = le_cert_path_wildcard.replace('fullchain.pem', 'privkey.pem')
+                    
+                    # Find the Nginx configuration file for this site
+                    nginx_site_conf = f"{node.nginx_config_path}/sites/{site.domain}.conf"
+                    stdin, stdout, stderr = ssh_client.exec_command(
+                        f"test -f {nginx_site_conf} && echo 'exists' || echo 'not found'"
+                    )
+                    conf_exists = stdout.read().decode('utf-8').strip() == 'exists'
+                    
+                    if not conf_exists:
+                        # Try other common locations
+                        potential_paths = [
+                            f"{node.nginx_config_path}/{site.domain}.conf",
+                            f"{node.nginx_config_path}/sites-enabled/{site.domain}.conf",
+                            f"{node.nginx_config_path}/conf.d/{site.domain}.conf"
+                        ]
+                        
+                        for path in potential_paths:
+                            stdin, stdout, stderr = ssh_client.exec_command(
+                                f"test -f {path} && echo 'exists' || echo 'not found'"
+                            )
+                            if stdout.read().decode('utf-8').strip() == 'exists':
+                                nginx_site_conf = path
+                                conf_exists = True
+                                break
+                    
+                    if le_exists and conf_exists:
+                        # Backup the current config
+                        backup_path = f"{nginx_site_conf}.bak-{int(time.time())}"
+                        stdin, stdout, stderr = ssh_client.exec_command(f"cp {nginx_site_conf} {backup_path}")
+                        if stdout.channel.recv_exit_status() != 0:
+                            raise Exception(f"Failed to create backup: {stderr.read().decode('utf-8')}")
+                            
+                        # Get current config
+                        stdin, stdout, stderr = ssh_client.exec_command(f"cat {nginx_site_conf}")
+                        current_config = stdout.read().decode('utf-8')
+                        
+                        # Check if it's using self-signed certs
+                        ssl_cert_line = None
+                        ssl_key_line = None
+                        
+                        for line in current_config.split('\n'):
+                            if 'ssl_certificate ' in line and 'self-signed' in line:
+                                ssl_cert_line = line.strip()
+                            if 'ssl_certificate_key ' in line and 'self-signed' in line:
+                                ssl_key_line = line.strip()
+                        
+                        if ssl_cert_line and ssl_key_line:
+                            # Replace cert paths
+                            new_config = current_config.replace(
+                                ssl_cert_line,
+                                f"    ssl_certificate {le_cert_path};"
+                            ).replace(
+                                ssl_key_line,
+                                f"    ssl_certificate_key {le_key_path};"
+                            )
+                            
+                            # Write updated config
+                            stdin, stdout, stderr = ssh_client.exec_command(f"cat > {nginx_site_conf} << 'EOF'\n{new_config}\nEOF")
+                            if stdout.channel.recv_exit_status() != 0:
+                                raise Exception(f"Failed to update config: {stderr.read().decode('utf-8')}")
+                                
+                            # Test the Nginx config
+                            stdin, stdout, stderr = ssh_client.exec_command("nginx -t")
+                            nginx_test = stdout.read().decode('utf-8') + stderr.read().decode('utf-8')
+                            
+                            if 'test is successful' in nginx_test or 'test successful' in nginx_test:
+                                # Reload Nginx
+                                stdin, stdout, stderr = ssh_client.exec_command(node.nginx_reload_command)
+                                if stdout.channel.recv_exit_status() == 0:
+                                    node_result = {
+                                        'node_id': node.id,
+                                        'node_name': node.name,
+                                        'status': 'replaced',
+                                        'from': ssl_cert_line,
+                                        'to': le_cert_path
+                                    }
+                                    site_result['nodes'].append(node_result)
+                                    site_result['status'] = 'replaced'
+                                    results['replaced'] += 1
+                                else:
+                                    # Failed to reload, restore backup
+                                    stdin, stdout, stderr = ssh_client.exec_command(f"cp {backup_path} {nginx_site_conf}")
+                                    error = stderr.read().decode('utf-8')
+                                    node_result = {
+                                        'node_id': node.id,
+                                        'node_name': node.name,
+                                        'status': 'failed',
+                                        'error': f"Nginx reload failed: {error}",
+                                        'action': 'restored backup'
+                                    }
+                                    site_result['nodes'].append(node_result)
+                                    site_result['status'] = 'failed'
+                                    results['failed'] += 1
+                            else:
+                                # Config test failed, restore backup
+                                stdin, stdout, stderr = ssh_client.exec_command(f"cp {backup_path} {nginx_site_conf}")
+                                error = nginx_test
+                                node_result = {
+                                    'node_id': node.id,
+                                    'node_name': node.name,
+                                    'status': 'failed',
+                                    'error': f"Nginx config test failed: {error}",
+                                    'action': 'restored backup'
+                                }
+                                site_result['nodes'].append(node_result)
+                                site_result['status'] = 'failed'
+                                results['failed'] += 1
+                        else:
+                            # No self-signed cert detected in config
+                            node_result = {
+                                'node_id': node.id,
+                                'node_name': node.name,
+                                'status': 'skipped',
+                                'reason': 'No self-signed certificate found in Nginx config'
+                            }
+                            site_result['nodes'].append(node_result)
+                    else:
+                        reason = []
+                        if not le_exists:
+                            reason.append("No Let's Encrypt certificate found")
+                        if not conf_exists:
+                            reason.append("No Nginx configuration found")
+                            
+                        node_result = {
+                            'node_id': node.id,
+                            'node_name': node.name,
+                            'status': 'skipped',
+                            'reason': ', '.join(reason)
+                        }
+                        site_result['nodes'].append(node_result)
+                    
+                    ssh_client.close()
+                    
+                except Exception as e:
+                    node_result = {
+                        'node_id': node.id,
+                        'node_name': node.name,
+                        'status': 'error',
+                        'error': str(e)
+                    }
+                    site_result['nodes'].append(node_result)
+                    site_result['status'] = 'failed'
+                    results['failed'] += 1
+            
+            results['sites'].append(site_result)
+        
+        # Log results
+        log_activity(
+            'info',
+            f"Auto-replace self-signed certificates completed: "
+            f"{results['replaced']} replaced, {results['failed']} failed out of {results['checked']} sites"
+        )
+        
+        return results
