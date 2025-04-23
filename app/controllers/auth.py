@@ -8,8 +8,8 @@ auth = Blueprint('auth', __name__)
 
 @auth.route('/login', methods=['GET', 'POST'])
 def login():
-    if request.method == 'GET':
-        return render_template('auth/login.html')
+    if current_user.is_authenticated:
+        return redirect(url_for('client.dashboard'))
     
     if request.method == 'POST':
         username = request.form.get('username')
@@ -17,24 +17,68 @@ def login():
         
         user = User.query.filter_by(username=username).first()
         
-        if not user or not user.check_password(password):
-            flash('Invalid username or password', 'error')
-            return redirect(url_for('auth.login'))
+        # Import logger service
+        from app.services.logger_service import log_activity
         
-        if not user.is_active:
-            flash('Account is disabled. Please contact an administrator.', 'error')
-            return redirect(url_for('auth.login'))
-        
-        # Update last login timestamp
-        user.last_login = datetime.utcnow()
-        db.session.commit()
-        
-        login_user(user)
-        
-        if user.is_admin():
-            return redirect(url_for('admin.dashboard'))
+        # Check credentials
+        if user and user.check_password(password):
+            if not user.is_active:
+                flash('Your account is inactive. Please contact an administrator.', 'error')
+                
+                # Log failed login due to inactive account
+                log_activity(
+                    category='auth',
+                    action='login_failed',
+                    resource_type='user',
+                    resource_id=user.id,
+                    details='Login attempt on inactive account',
+                    user_id=user.id
+                )
+                
+                return render_template('auth/login.html')
+            
+            login_user(user)
+            
+            # Update last login timestamp
+            user.last_login = datetime.utcnow()
+            db.session.commit()
+            
+            # Log successful login
+            log_activity(
+                category='auth',
+                action='login',
+                resource_type='user',
+                resource_id=user.id,
+                details='User logged in successfully'
+            )
+            
+            # Redirect to appropriate dashboard based on user role
+            if user.is_admin():
+                return redirect(url_for('admin.dashboard'))
+            else:
+                return redirect(url_for('client.dashboard'))
         else:
-            return redirect(url_for('client.dashboard'))
+            flash('Invalid username or password', 'error')
+            
+            # Log failed login
+            if user:
+                log_activity(
+                    category='auth',
+                    action='login_failed',
+                    resource_type='user',
+                    resource_id=user.id,
+                    details='Failed login attempt (invalid password)',
+                    user_id=user.id
+                )
+            else:
+                log_activity(
+                    category='auth',
+                    action='login_failed',
+                    resource_type='user',
+                    details=f'Failed login attempt for non-existent username: {username}'
+                )
+    
+    return render_template('auth/login.html')
 
 @auth.route('/logout')
 @login_required
