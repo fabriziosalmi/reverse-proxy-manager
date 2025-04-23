@@ -127,3 +127,161 @@ def api_recent_deployments():
         'success': True,
         'logs': [log.to_dict() for log in logs]
     })
+
+@api.route('/sites/<int:site_id>/waf', methods=['GET'])
+@login_required
+def get_site_waf(site_id):
+    """Get WAF settings for a site"""
+    site = Site.query.get_or_404(site_id)
+    
+    # Check if the user is an admin or the owner of the site
+    if not current_user.is_admin() and site.user_id != current_user.id:
+        return error_response("Unauthorized", 403)
+    
+    # Return WAF configuration details
+    waf_config = {
+        'use_waf': site.use_waf,
+        'waf_rule_level': site.waf_rule_level,
+        'waf_max_request_size': site.waf_max_request_size,
+        'waf_request_timeout': site.waf_request_timeout,
+        'waf_block_tor_exit_nodes': site.waf_block_tor_exit_nodes,
+        'waf_rate_limiting_enabled': site.waf_rate_limiting_enabled,
+        'waf_rate_limiting_requests': site.waf_rate_limiting_requests,
+        'waf_rate_limiting_burst': site.waf_rate_limiting_burst,
+        'waf_custom_rules': site.waf_custom_rules
+    }
+    
+    return success_response(waf_config)
+
+@api.route('/sites/<int:site_id>/waf', methods=['PUT'])
+@login_required
+def update_site_waf(site_id):
+    """Update WAF settings for a site"""
+    site = Site.query.get_or_404(site_id)
+    
+    # Check if the user is an admin or the owner of the site
+    if not current_user.is_admin() and site.user_id != current_user.id:
+        return error_response("Unauthorized", 403)
+    
+    # Get JSON data
+    data = request.get_json()
+    if not data:
+        return error_response("Invalid JSON data")
+    
+    # Update WAF settings
+    if 'use_waf' in data:
+        site.use_waf = bool(data['use_waf'])
+    
+    if 'waf_rule_level' in data:
+        rule_level = data['waf_rule_level']
+        if rule_level not in ['basic', 'medium', 'strict']:
+            return error_response("Invalid value for waf_rule_level. Must be one of: basic, medium, strict")
+        site.waf_rule_level = rule_level
+    
+    if 'waf_max_request_size' in data:
+        try:
+            size = int(data['waf_max_request_size'])
+            if size < 1 or size > 100:
+                return error_response("waf_max_request_size must be between 1 and 100 MB")
+            site.waf_max_request_size = size
+        except ValueError:
+            return error_response("waf_max_request_size must be an integer")
+    
+    if 'waf_request_timeout' in data:
+        try:
+            timeout = int(data['waf_request_timeout'])
+            if timeout < 10 or timeout > 300:
+                return error_response("waf_request_timeout must be between 10 and 300 seconds")
+            site.waf_request_timeout = timeout
+        except ValueError:
+            return error_response("waf_request_timeout must be an integer")
+    
+    if 'waf_block_tor_exit_nodes' in data:
+        site.waf_block_tor_exit_nodes = bool(data['waf_block_tor_exit_nodes'])
+    
+    if 'waf_rate_limiting_enabled' in data:
+        site.waf_rate_limiting_enabled = bool(data['waf_rate_limiting_enabled'])
+    
+    if 'waf_rate_limiting_requests' in data:
+        try:
+            requests = int(data['waf_rate_limiting_requests'])
+            if requests < 10 or requests > 10000:
+                return error_response("waf_rate_limiting_requests must be between 10 and 10000")
+            site.waf_rate_limiting_requests = requests
+        except ValueError:
+            return error_response("waf_rate_limiting_requests must be an integer")
+    
+    if 'waf_rate_limiting_burst' in data:
+        try:
+            burst = int(data['waf_rate_limiting_burst'])
+            if burst < 10 or burst > 20000:
+                return error_response("waf_rate_limiting_burst must be between 10 and 20000")
+            site.waf_rate_limiting_burst = burst
+        except ValueError:
+            return error_response("waf_rate_limiting_burst must be an integer")
+    
+    if 'waf_custom_rules' in data:
+        site.waf_custom_rules = data['waf_custom_rules']
+    
+    # Save changes to database
+    db.session.commit()
+    
+    # If auto-deploy is requested, update configs on all nodes
+    if data.get('deploy', False):
+        try:
+            from app.services.nginx_service import generate_nginx_config, deploy_to_node
+            
+            # Generate updated Nginx configuration with WAF settings
+            nginx_config = generate_nginx_config(site)
+            
+            # Deploy to each node
+            site_nodes = SiteNode.query.filter_by(site_id=site_id).all()
+            deployment_results = []
+            
+            for site_node in site_nodes:
+                try:
+                    deploy_to_node(site.id, site_node.node_id, nginx_config)
+                    deployment_results.append({
+                        'node_id': site_node.node_id,
+                        'success': True
+                    })
+                    
+                    # Log the action
+                    log = DeploymentLog(
+                        site_id=site_id,
+                        node_id=site_node.node_id,
+                        user_id=current_user.id,
+                        action="Update WAF settings",
+                        status="success",
+                        message="WAF settings updated via API"
+                    )
+                    db.session.add(log)
+                except Exception as e:
+                    deployment_results.append({
+                        'node_id': site_node.node_id,
+                        'success': False,
+                        'error': str(e)
+                    })
+                    
+                    # Log the error
+                    log = DeploymentLog(
+                        site_id=site_id,
+                        node_id=site_node.node_id,
+                        user_id=current_user.id,
+                        action="Update WAF settings",
+                        status="error",
+                        message=f"Error updating WAF settings: {str(e)}"
+                    )
+                    db.session.add(log)
+            
+            db.session.commit()
+            
+            return success_response({
+                'waf_settings_updated': True,
+                'deployments': deployment_results
+            })
+        except Exception as e:
+            db.session.rollback()
+            return error_response(f"WAF settings updated but deployment failed: {str(e)}")
+    
+    return success_response({'waf_settings_updated': True})
