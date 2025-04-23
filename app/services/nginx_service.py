@@ -1,3 +1,4 @@
+import re
 import os
 import paramiko
 import tempfile
@@ -834,15 +835,15 @@ def get_node_stats(node):
             'bandwidth_usage': 'N/A'
         }
 
-def get_nginx_details(node):
+def get_nginx_info(node):
     """
-    Get detailed Nginx information from a node via SSH
+    Get detailed Nginx information from a node, including version, modules, and configuration
     
     Args:
-        node: Node object to retrieve details from
+        node: Node object to retrieve Nginx info from
         
     Returns:
-        dict: A dictionary containing Nginx server details
+        dict: A dictionary containing Nginx information
     """
     try:
         # Connect to the node via SSH
@@ -867,125 +868,161 @@ def get_nginx_details(node):
                 timeout=10
             )
         
+        # Use the detected nginx path if available
+        nginx_path = node.detected_nginx_path if hasattr(node, 'detected_nginx_path') and node.detected_nginx_path else "nginx"
+        
         # Get Nginx version
-        stdin, stdout, stderr = ssh_client.exec_command("nginx -v 2>&1 || echo 'Nginx not installed'")
-        nginx_version_output = stdout.read().decode('utf-8').strip() + stderr.read().decode('utf-8').strip()
+        stdin, stdout, stderr = ssh_client.exec_command(f"{nginx_path} -v 2>&1")
+        version_output = stdout.read().decode('utf-8').strip() + stderr.read().decode('utf-8').strip()
         
-        # Parse nginx version
-        if "nginx version" in nginx_version_output.lower():
-            # Extract version from output like "nginx version: nginx/1.18.0 (Ubuntu)"
-            nginx_version = nginx_version_output.split(':', 1)[1].strip() if ':' in nginx_version_output else nginx_version_output
-        else:
-            nginx_version = "Not installed or not detected"
+        # Extract version number
+        version_match = re.search(r'nginx/(\d+\.\d+\.\d+)', version_output)
+        nginx_version = version_match.group(1) if version_match else "Unknown"
         
-        # Get Nginx modules and compiled options
-        stdin, stdout, stderr = ssh_client.exec_command("nginx -V 2>&1 || echo 'Nginx details not available'")
-        nginx_modules_output = stdout.read().decode('utf-8').strip() + stderr.read().decode('utf-8').strip()
+        # Get Nginx configuration information
+        stdin, stdout, stderr = ssh_client.exec_command(f"{nginx_path} -V 2>&1")
+        config_output = stdout.read().decode('utf-8').strip() + stderr.read().decode('utf-8').strip()
         
-        # Parse modules and compiled options
-        compile_options = []
+        # Extract compiled modules
         modules = []
+        if '--with-' in config_output or '--without-' in config_output:
+            module_matches = re.findall(r'--with-([^\s]+)', config_output)
+            modules = [module for module in module_matches if module]
         
-        if "configure arguments" in nginx_modules_output.lower():
-            # Extract compile options
-            options_part = nginx_modules_output.split('configure arguments:', 1)[1].strip() if 'configure arguments:' in nginx_modules_output else ""
+        # Get compile flags
+        compile_flags = None
+        if 'configure arguments:' in config_output:
+            compile_flags = config_output.split('configure arguments:')[1].strip()
+        
+        # Check if common modules are enabled
+        has_http2 = 'http_v2_module' in config_output or 'with-http_v2_module' in config_output
+        has_ssl = 'http_ssl_module' in config_output or 'with-http_ssl_module' in config_output
+        has_gzip = 'http_gzip_module' in config_output or 'with-http_gzip_module' in config_output
+        
+        # Get Nginx configuration file locations
+        stdin, stdout, stderr = ssh_client.exec_command(f"{nginx_path} -T 2>/dev/null | grep 'configuration file' | head -1 || echo 'Unknown'")
+        config_file = stdout.read().decode('utf-8').strip()
+        if 'configuration file' in config_file:
+            config_file = config_file.split('configuration file')[1].strip()
+        
+        # Get Nginx process status
+        stdin, stdout, stderr = ssh_client.exec_command("ps aux | grep '[n]ginx: master' || echo 'Not running'")
+        process_status = stdout.read().decode('utf-8').strip()
+        is_running = process_status != 'Not running'
+        
+        # Get Nginx master process PID
+        pid = None
+        if is_running:
+            stdin, stdout, stderr = ssh_client.exec_command("ps aux | grep '[n]ginx: master' | awk '{print $2}' | head -1")
+            pid_output = stdout.read().decode('utf-8').strip()
+            try:
+                pid = int(pid_output)
+            except ValueError:
+                pid = None
+        
+        # Get worker processes count
+        worker_count = 0
+        if is_running:
+            stdin, stdout, stderr = ssh_client.exec_command("ps aux | grep '[n]ginx: worker' | wc -l")
+            worker_count_output = stdout.read().decode('utf-8').strip()
+            try:
+                worker_count = int(worker_count_output)
+            except ValueError:
+                worker_count = 0
+        
+        # Get server OS information
+        stdin, stdout, stderr = ssh_client.exec_command("lsb_release -ds 2>/dev/null || cat /etc/os-release 2>/dev/null | grep PRETTY_NAME | cut -d '\"' -f 2 || echo 'Unknown'")
+        os_info = stdout.read().decode('utf-8').strip()
+        
+        # Get RAM and CPU info
+        stdin, stdout, stderr = ssh_client.exec_command("grep 'model name' /proc/cpuinfo | uniq | cut -d ':' -f 2 | xargs || echo 'Unknown CPU'")
+        cpu_info = stdout.read().decode('utf-8').strip()
+        
+        stdin, stdout, stderr = ssh_client.exec_command("grep MemTotal /proc/meminfo | awk '{print $2 / 1024 / 1024}' | xargs printf '%.1f GB' || echo 'Unknown RAM'")
+        ram_info = stdout.read().decode('utf-8').strip()
+        
+        # Get configuration tree (basic structure)
+        config_tree = None
+        stdin, stdout, stderr = ssh_client.exec_command(f"{nginx_path} -T 2>/dev/null | grep -v '#' | grep -v '^$' | head -50 || echo 'Configuration not available'")
+        config_tree_raw = stdout.read().decode('utf-8').strip()
+        if config_tree_raw and config_tree_raw != 'Configuration not available':
+            config_tree = config_tree_raw
             
-            # Parse options into a structured format
-            if options_part:
-                raw_options = options_part.split('--')
-                for opt in raw_options:
-                    if opt.strip():
-                        compile_options.append(f"--{opt.strip()}")
-                        
-                        # Identify modules
-                        if 'with-' in opt or 'without-' in opt:
-                            if 'with-' in opt:
-                                module_name = opt.replace('with-', '').split('=')[0].strip()
-                                modules.append({'name': module_name, 'enabled': True})
-                            elif 'without-' in opt:
-                                module_name = opt.replace('without-', '').split('=')[0].strip()
-                                modules.append({'name': module_name, 'enabled': False})
+        # Parse virtual hosts (server blocks)
+        sites = []
         
-        # Get Nginx configuration test status
-        stdin, stdout, stderr = ssh_client.exec_command("nginx -t 2>&1 || echo 'Configuration test failed'")
-        config_test_output = stdout.read().decode('utf-8').strip() + stderr.read().decode('utf-8').strip()
+        # First, get list of all config files
+        stdin, stdout, stderr = ssh_client.exec_command(f"find {node.nginx_config_path} -type f -name '*.conf' | sort")
+        config_files = stdout.read().decode('utf-8').strip().split('\n')
         
-        # Determine if config is valid
-        config_valid = "syntax is ok" in config_test_output.lower() and "test is successful" in config_test_output.lower()
-        
-        # Get Nginx service status
-        stdin, stdout, stderr = ssh_client.exec_command("systemctl status nginx 2>&1 || service nginx status 2>&1 || echo 'Service status not available'")
-        service_status_output = stdout.read().decode('utf-8').strip()
-        
-        # Extract service status
-        service_running = False
-        if "active (running)" in service_status_output.lower():
-            service_running = True
-        elif "is running" in service_status_output.lower():
-            service_running = True
+        for config_file in config_files:
+            if not config_file:
+                continue
+                
+            # Extract server_name and listen directives
+            stdin, stdout, stderr = ssh_client.exec_command(f"grep -E 'server_name|listen' {config_file} | grep -v '#'")
+            server_directives = stdout.read().decode('utf-8').strip()
             
-        # Get Nginx binary path
-        nginx_path = node.detected_nginx_path or "Not detected"
-            
-        # Get total number of Nginx configuration files
-        stdin, stdout, stderr = ssh_client.exec_command(f"find {node.nginx_config_path} -name '*.conf' | wc -l")
-        total_configs = stdout.read().decode('utf-8').strip()
-        
-        try:
-            total_configs = int(total_configs)
-        except ValueError:
-            total_configs = 0
-            
-        # Get Nginx-specific system settings
-        stdin, stdout, stderr = ssh_client.exec_command("cat /proc/sys/net/core/somaxconn 2>/dev/null || echo 'Not available'")
-        somaxconn = stdout.read().decode('utf-8').strip()
-        
-        stdin, stdout, stderr = ssh_client.exec_command("cat /proc/sys/fs/file-max 2>/dev/null || echo 'Not available'")
-        file_max = stdout.read().decode('utf-8').strip()
-        
-        # Check if Nginx has SSL support
-        has_ssl = any("ssl" in opt.lower() for opt in compile_options)
-        
-        # Check if HTTP/2 is supported
-        has_http2 = any("http_v2" in opt.lower() for opt in compile_options)
+            if 'server_name' in server_directives:
+                server_blocks = server_directives.split('server_name')
+                for i in range(1, len(server_blocks)):
+                    server_name = server_blocks[i].split(';')[0].strip()
+                    
+                    # Find corresponding listen directive
+                    listen_port = "80"  # Default
+                    ssl_enabled = False
+                    
+                    # Look for listen directive in the current or previous block
+                    if 'listen' in server_blocks[i-1] or (i < len(server_blocks)-1 and 'listen' in server_blocks[i]):
+                        listen_block = server_blocks[i-1] if 'listen' in server_blocks[i-1] else server_blocks[i]
+                        listen_match = re.search(r'listen\s+([^;]+);', listen_block)
+                        if listen_match:
+                            listen_port = listen_match.group(1).strip()
+                            if 'ssl' in listen_port or '443' in listen_port:
+                                ssl_enabled = True
+                    
+                    # Extract root directive
+                    stdin, stdout, stderr = ssh_client.exec_command(f"grep -E 'root' {config_file} | grep -v '#' | head -1")
+                    root_directive = stdout.read().decode('utf-8').strip()
+                    root_path = None
+                    if root_directive:
+                        root_match = re.search(r'root\s+([^;]+);', root_directive)
+                        if root_match:
+                            root_path = root_match.group(1).strip()
+                    
+                    # Add to sites list
+                    sites.append({
+                        'server_name': server_name,
+                        'listen': listen_port,
+                        'ssl_enabled': ssl_enabled,
+                        'root': root_path,
+                        'config_file': os.path.basename(config_file)
+                    })
         
         ssh_client.close()
         
-        # Return Nginx details
         return {
             'version': nginx_version,
-            'binary_path': nginx_path,
-            'config_path': node.nginx_config_path,
-            'total_configs': total_configs,
-            'config_valid': config_valid,
-            'service_running': service_running,
+            'version_full': version_output,
+            'is_running': is_running,
+            'pid': pid,
+            'worker_count': worker_count,
+            'config_file': config_file,
             'modules': modules,
-            'compile_options': compile_options,
-            'has_ssl': has_ssl,
+            'compile_flags': compile_flags,
             'has_http2': has_http2,
-            'system_settings': {
-                'somaxconn': somaxconn,
-                'file_max': file_max
-            }
+            'has_ssl': has_ssl,
+            'has_gzip': has_gzip,
+            'os_info': os_info,
+            'cpu_info': cpu_info,
+            'ram_info': ram_info,
+            'config_tree': config_tree,
+            'sites': sites
         }
         
     except Exception as e:
-        # If there's an error, return default values with error information
-        error_message = str(e)
         return {
-            'version': 'Error detecting version',
-            'binary_path': 'Unknown',
-            'config_path': node.nginx_config_path,
-            'total_configs': 0,
-            'config_valid': False,
-            'service_running': False,
-            'modules': [],
-            'compile_options': [],
-            'has_ssl': False,
-            'has_http2': False,
-            'system_settings': {
-                'somaxconn': 'N/A',
-                'file_max': 'N/A'
-            },
-            'error': error_message
+            'version': 'Unknown',
+            'error': str(e),
+            'is_running': False
         }

@@ -241,7 +241,14 @@
                             </tr>
                             <tr>
                                 <th>Nginx Config Path:</th>
-                                <td>{{ node.nginx_config_path }}</td>
+                                <td>
+                                    {{ node.nginx_config_path }}
+                                    {% if node.detected_nginx_path and node.detected_nginx_path != node.nginx_config_path %}
+                                    <span class="badge bg-warning" title="Detected path differs from configured path">
+                                        <i class="fas fa-exclamation-triangle"></i> Detected: {{ node.detected_nginx_path }}
+                                    </span>
+                                    {% endif %}
+                                </td>
                             </tr>
                             <tr>
                                 <th>Nginx Reload Command:</th>
@@ -251,6 +258,122 @@
                     </table>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- Nginx Information -->
+    <div class="card mb-4">
+        <div class="card-header bg-info text-white">
+            <h5 class="card-title mb-0">
+                <i class="fas fa-server me-2"></i>Nginx Information
+            </h5>
+        </div>
+        <div class="card-body">
+            {% if nginx_info and nginx_info.is_running %}
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="card bg-light mb-3">
+                            <div class="card-body">
+                                <h5 class="card-title"><i class="fas fa-code-branch me-2"></i>Version</h5>
+                                <p class="card-text mb-0">
+                                    <span class="badge bg-success fs-6">{{ nginx_info.version }}</span>
+                                </p>
+                                {% if nginx_info.modules %}
+                                    <hr>
+                                    <h6 class="text-muted">Installed Modules</h6>
+                                    <div class="module-list">
+                                        {% for module in nginx_info.modules %}
+                                            <span class="badge bg-secondary me-1 mb-1">{{ module }}</span>
+                                        {% endfor %}
+                                    </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card bg-light mb-3">
+                            <div class="card-body">
+                                <h5 class="card-title"><i class="fas fa-tachometer-alt me-2"></i>Status</h5>
+                                <div class="d-flex align-items-center mb-3">
+                                    <div class="pe-3">
+                                        <span class="badge bg-success fs-6">
+                                            <i class="fas fa-circle me-1"></i>Running
+                                        </span>
+                                    </div>
+                                    <div>
+                                        <span class="text-muted">PID:</span> 
+                                        <span class="fw-bold">{{ nginx_info.pid if nginx_info.pid else 'Unknown' }}</span>
+                                    </div>
+                                </div>
+                                
+                                {% if nginx_info.compile_flags %}
+                                    <hr>
+                                    <h6 class="text-muted">Compile Flags</h6>
+                                    <div class="compile-flags small">
+                                        <code class="d-block mb-2">{{ nginx_info.compile_flags }}</code>
+                                    </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row mt-3">
+                    <div class="col-12">
+                        <div class="card bg-light">
+                            <div class="card-body">
+                                <h5 class="card-title"><i class="fas fa-sitemap me-2"></i>Configuration</h5>
+                                {% if nginx_info.config_tree %}
+                                    <div class="config-tree">
+                                        <pre class="bg-dark text-light p-3 rounded"><code>{{ nginx_info.config_tree }}</code></pre>
+                                    </div>
+                                {% endif %}
+                                
+                                {% if nginx_info.sites %}
+                                    <h6 class="text-muted mt-4">Virtual Hosts</h6>
+                                    <div class="table-responsive">
+                                        <table class="table table-sm table-hover">
+                                            <thead>
+                                                <tr>
+                                                    <th>Server Name</th>
+                                                    <th>Listen</th>
+                                                    <th>Root</th>
+                                                    <th>SSL</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {% for site in nginx_info.sites %}
+                                                    <tr>
+                                                        <td>{{ site.server_name }}</td>
+                                                        <td>{{ site.listen }}</td>
+                                                        <td>{{ site.root if site.root else 'N/A' }}</td>
+                                                        <td>
+                                                            {% if site.ssl_enabled %}
+                                                                <span class="badge bg-success">Enabled</span>
+                                                            {% else %}
+                                                                <span class="badge bg-secondary">Disabled</span>
+                                                            {% endif %}
+                                                        </td>
+                                                    </tr>
+                                                {% endfor %}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            {% else %}
+                <div class="alert alert-warning">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    {% if nginx_info and nginx_info.error %}
+                        <strong>Error retrieving Nginx information:</strong> {{ nginx_info.error }}
+                    {% else %}
+                        <strong>Nginx is not running on this node</strong>. Install or start Nginx to see detailed information.
+                    {% endif %}
+                </div>
+            {% endif %}
         </div>
     </div>
 

@@ -291,7 +291,7 @@ def view_node(node_id):
     deployment_logs = DeploymentLog.query.filter_by(node_id=node_id).order_by(DeploymentLog.created_at.desc()).limit(10).all()
     
     # Get real server stats and connection info
-    from app.services.nginx_service import get_node_stats, get_nginx_details
+    from app.services.nginx_service import get_node_stats, get_nginx_info
     from app.services.nginx_validation_service import NginxValidationService
     
     # Check if Nginx is installed on the node
@@ -307,9 +307,12 @@ def view_node(node_id):
         nginx_missing = True
         nginx_missing_message = error_message
     
-    # Get node stats (CPU, memory, etc.)
     try:
+        # Get server stats and connection info
         server_stats, connection_stats = get_node_stats(node)
+        
+        # Get Nginx version and configuration info
+        nginx_info = get_nginx_info(node)
     except Exception as e:
         # Fallback to mock data if real stats can't be retrieved
         server_stats = {
@@ -327,23 +330,11 @@ def view_node(node_id):
             'requests_per_second': 42.7,
             'bandwidth_usage': '8.5 MB/s'
         }
-    
-    # Get Nginx details (version, config, modules)
-    try:
-        nginx_details = get_nginx_details(node)
-    except Exception as e:
-        nginx_details = {
-            'version': 'Error detecting version',
-            'binary_path': 'Unknown',
-            'config_path': node.nginx_config_path,
-            'total_configs': 0,
-            'config_valid': False,
-            'service_running': False,
-            'modules': [],
-            'compile_options': [],
-            'has_ssl': False,
-            'has_http2': False,
-            'error': str(e)
+        
+        nginx_info = {
+            'version': 'Unknown',
+            'error': str(e),
+            'is_running': False
         }
     
     return render_template('admin/nodes/view.html', 
@@ -353,9 +344,9 @@ def view_node(node_id):
                           deployment_logs=deployment_logs,
                           server_stats=server_stats,
                           connection_stats=connection_stats,
-                          nginx_details=nginx_details,
                           nginx_missing=nginx_missing,
-                          nginx_missing_message=nginx_missing_message)
+                          nginx_missing_message=nginx_missing_message,
+                          nginx_info=nginx_info)
 
 @admin.route('/nodes/<int:node_id>/toggle_active', methods=['POST'])
 @login_required
