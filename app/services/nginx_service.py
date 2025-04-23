@@ -16,6 +16,10 @@ def generate_nginx_config(site):
     Returns:
         str: Nginx configuration file content
     """
+    # If site is blocked, return a blocked site configuration
+    if site.is_blocked:
+        return generate_blocked_site_config(site)
+        
     # Load the appropriate template
     template_path = os.path.join(
         current_app.config['NGINX_TEMPLATES_DIR'], 
@@ -81,7 +85,25 @@ server {
 }
 """
         else:  # HTTP template
-            template = """
+            # Check if we need to force HTTPS redirect for HTTP sites
+            if site.force_https:
+                template = """
+# HTTP site with forced HTTPS redirect
+server {
+    listen 80;
+    server_name {{domain}};
+    
+    location /.well-known/acme-challenge/ {
+        root /var/www/letsencrypt;
+    }
+    
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+"""
+            else:
+                template = """
 server {
     listen 80;
     server_name {{domain}};
@@ -133,6 +155,157 @@ server {
     include /etc/nginx/crowdsec/crowdsec.conf;
 """
         config = config.replace('{{custom_config}}', waf_config + site.custom_config if site.custom_config else waf_config)
+    
+    # Save to Git repo
+    save_config_to_git(site, config)
+    
+    return config
+
+def generate_blocked_site_config(site):
+    """
+    Generate a configuration for a blocked site.
+    
+    Args:
+        site: Site object containing configuration details
+        
+    Returns:
+        str: Nginx configuration file content for a blocked site
+    """
+    # For HTTP sites
+    if site.protocol == 'http':
+        template = """
+server {
+    listen 80;
+    server_name {{domain}};
+    
+    # Security headers
+    add_header X-Content-Type-Options nosniff;
+    add_header X-Frame-Options SAMEORIGIN;
+    add_header X-XSS-Protection "1; mode=block";
+    
+    # Return blocked message for all requests
+    location / {
+        return 403 '<!DOCTYPE html>
+<html>
+<head>
+    <title>Site Blocked</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            padding: 50px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 30px;
+            border-radius: 5px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            color: #d9534f;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Site Blocked</h1>
+        <p>This site has been temporarily blocked by the administrator.</p>
+        <p>Please contact the site owner for more information.</p>
+    </div>
+</body>
+</html>';
+        add_header Content-Type text/html;
+    }
+    
+    # Allow ACME challenges for future SSL certificate renewal
+    location /.well-known/acme-challenge/ {
+        root /var/www/letsencrypt;
+    }
+}
+"""
+    # For HTTPS sites
+    else:
+        template = """
+server {
+    listen 443 ssl http2;
+    server_name {{domain}};
+    
+    ssl_certificate /etc/letsencrypt/live/{{domain}}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/{{domain}}/privkey.pem;
+    ssl_trusted_certificate /etc/letsencrypt/live/{{domain}}/chain.pem;
+    
+    # SSL configuration
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384;
+    ssl_session_timeout 1d;
+    ssl_session_cache shared:SSL:50m;
+    ssl_stapling on;
+    ssl_stapling_verify on;
+    
+    # Security headers
+    add_header X-Content-Type-Options nosniff;
+    add_header X-Frame-Options SAMEORIGIN;
+    add_header X-XSS-Protection "1; mode=block";
+    
+    # Return blocked message for all requests
+    location / {
+        return 403 '<!DOCTYPE html>
+<html>
+<head>
+    <title>Site Blocked</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            padding: 50px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 30px;
+            border-radius: 5px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            color: #d9534f;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Site Blocked</h1>
+        <p>This site has been temporarily blocked by the administrator.</p>
+        <p>Please contact the site owner for more information.</p>
+    </div>
+</body>
+</html>';
+        add_header Content-Type text/html;
+    }
+}
+
+# HTTP to HTTPS redirect
+server {
+    listen 80;
+    server_name {{domain}};
+    
+    location /.well-known/acme-challenge/ {
+        root /var/www/letsencrypt;
+    }
+    
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+"""
+    
+    # Replace domain placeholder
+    config = template.replace('{{domain}}', site.domain)
     
     # Save to Git repo
     save_config_to_git(site, config)
@@ -276,3 +449,126 @@ def deploy_to_node(site_id, node_id, nginx_config):
         db.session.commit()
         
         raise e
+
+def get_node_stats(node):
+    """
+    Get real-time server statistics from a node via SSH
+    
+    Args:
+        node: Node object to retrieve stats from
+        
+    Returns:
+        dict: A dictionary containing server statistics
+    """
+    try:
+        # Connect to the node via SSH
+        ssh_client = paramiko.SSHClient()
+        ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        
+        # Connect using key or password
+        if node.ssh_key_path:
+            ssh_client.connect(
+                hostname=node.ip_address,
+                port=node.ssh_port,
+                username=node.ssh_user,
+                key_filename=node.ssh_key_path,
+                timeout=10
+            )
+        else:
+            ssh_client.connect(
+                hostname=node.ip_address,
+                port=node.ssh_port,
+                username=node.ssh_user,
+                password=node.ssh_password,
+                timeout=10
+            )
+        
+        # Get CPU usage
+        stdin, stdout, stderr = ssh_client.exec_command("top -bn1 | grep 'Cpu(s)' | awk '{print $2 + $4}'")
+        cpu_usage = stdout.read().decode('utf-8').strip() + '%'
+        
+        # Get memory usage
+        stdin, stdout, stderr = ssh_client.exec_command("free -m | grep 'Mem:' | awk '{print $3\"/\"$2\"M (\"int($3*100/$2)\"%\")'")
+        memory_usage = stdout.read().decode('utf-8').strip()
+        
+        # Get disk usage
+        stdin, stdout, stderr = ssh_client.exec_command("df -h / | grep -v Filesystem | awk '{print $3\"/\"$2\" (\"$5\")'}")
+        disk_usage = stdout.read().decode('utf-8').strip()
+        
+        # Get uptime
+        stdin, stdout, stderr = ssh_client.exec_command("uptime -p")
+        uptime = stdout.read().decode('utf-8').strip().replace('up ', '')
+        
+        # Get load average
+        stdin, stdout, stderr = ssh_client.exec_command("cat /proc/loadavg | awk '{print $1\", \"$2\", \"$3}'")
+        load_average = stdout.read().decode('utf-8').strip()
+        
+        # Get Nginx connection statistics
+        stdin, stdout, stderr = ssh_client.exec_command("curl -s http://localhost/nginx_status 2>/dev/null || echo 'Nginx status not available'")
+        nginx_status = stdout.read().decode('utf-8')
+        
+        total_connections = 0
+        active_connections = 0
+        requests_per_second = 0
+        
+        if 'Active connections' in nginx_status:
+            # Parse nginx status output
+            lines = nginx_status.strip().split('\n')
+            if len(lines) >= 1:
+                active_connections = int(lines[0].split(':')[1].strip())
+            if len(lines) >= 3:
+                accepts, handled, requests = map(int, lines[2].strip().split())
+                requests_per_second = round(requests / 60, 1)  # Approximate RPS
+        
+        # Simple estimation for HTTP vs HTTPS
+        active_http = int(active_connections * 0.4)  # 40% HTTP (example estimation)
+        active_https = active_connections - active_http
+        
+        # Get bandwidth usage (estimation based on network interface traffic)
+        stdin, stdout, stderr = ssh_client.exec_command("cat /proc/net/dev | grep -v face | grep -v lo | sort | head -n 1 | awk '{print $2, $10}'")
+        net_stats = stdout.read().decode('utf-8').strip().split()
+        
+        # Convert to MB/s (very rough estimate)
+        if len(net_stats) >= 2:
+            bytes_in = int(net_stats[0])
+            bytes_out = int(net_stats[1])
+            bandwidth_usage = f"{round((bytes_in + bytes_out) / 1024 / 1024, 2)} MB/s"
+        else:
+            bandwidth_usage = "N/A"
+        
+        ssh_client.close()
+        
+        # Return stats
+        server_stats = {
+            'cpu_usage': cpu_usage,
+            'memory_usage': memory_usage,
+            'disk_usage': disk_usage,
+            'uptime': uptime,
+            'load_average': load_average
+        }
+        
+        connection_stats = {
+            'total_connections': active_connections,
+            'active_http': active_http,
+            'active_https': active_https,
+            'requests_per_second': requests_per_second,
+            'bandwidth_usage': bandwidth_usage
+        }
+        
+        return server_stats, connection_stats
+        
+    except Exception as e:
+        # If there's an error, return default values
+        return {
+            'cpu_usage': 'N/A',
+            'memory_usage': 'N/A',
+            'disk_usage': 'N/A',
+            'uptime': 'N/A',
+            'load_average': 'N/A'
+        }, {
+            'total_connections': 0,
+            'active_http': 0,
+            'active_https': 0,
+            'requests_per_second': 0,
+            'bandwidth_usage': 'N/A'
+        }

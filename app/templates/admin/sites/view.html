@@ -95,6 +95,27 @@
                                 <span class="badge bg-{{ 'success' if site.use_waf else 'secondary' }}">
                                     {{ 'Enabled' if site.use_waf else 'Disabled' }}
                                 </span>
+                                <form method="POST" action="{{ url_for('admin.toggle_site_waf', site_id=site.id) }}" class="d-inline ms-2">
+                                    <button type="submit" class="btn btn-sm btn-{{ 'warning' if site.use_waf else 'success' }}">
+                                        {{ 'Disable WAF' if site.use_waf else 'Enable WAF' }}
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Force HTTPS:</th>
+                            <td>
+                                <span class="badge bg-{{ 'success' if site.force_https else 'secondary' }}">
+                                    {{ 'Enabled' if site.force_https else 'Disabled' }}
+                                </span>
+                                <form method="POST" action="{{ url_for('admin.toggle_site_force_https', site_id=site.id) }}" class="d-inline ms-2">
+                                    <button type="submit" class="btn btn-sm btn-{{ 'warning' if site.force_https else 'success' }}">
+                                        {{ 'Disable' if site.force_https else 'Enable' }}
+                                    </button>
+                                </form>
+                                <div class="form-text small text-muted">
+                                    {% if site.force_https %}Redirects HTTP traffic to HTTPS{% else %}Allows both HTTP and HTTPS traffic{% endif %}
+                                </div>
                             </td>
                         </tr>
                         <tr>

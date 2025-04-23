@@ -2,6 +2,10 @@
 
 {% block title %}Node Details: {{ node.name }} - Italia CDN Proxy Manager{% endblock %}
 
+{% block head_extra %}
+<meta name="node-id" content="{{ node.id }}">
+{% endblock %}
+
 {% block content %}
 <div class="container py-4">
     <div class="row mb-4">
@@ -18,9 +22,17 @@
             <p class="text-muted">{{ node.ip_address }}</p>
         </div>
         <div class="col-md-4 text-md-end d-flex align-items-center justify-content-md-end">
+            <form method="POST" action="{{ url_for('admin.toggle_node_active', node_id=node.id) }}" class="me-2">
+                <button type="submit" class="btn btn-{{ 'warning' if node.is_active else 'success' }}">
+                    {{ 'Deactivate' if node.is_active else 'Activate' }}
+                </button>
+            </form>
             <a href="{{ url_for('admin.edit_node', node_id=node.id) }}" class="btn btn-primary me-2">
                 <i class="fas fa-edit me-1"></i>Edit Node
             </a>
+            <button type="button" class="btn btn-warning me-2" data-bs-toggle="modal" data-bs-target="#redeployModal">
+                <i class="fas fa-sync me-1"></i>Redeploy All Sites
+            </button>
             <form method="POST" action="{{ url_for('admin.delete_node', node_id=node.id) }}"
                   onsubmit="return confirm('Are you sure you want to delete this node? This action cannot be undone.');">
                 <button type="submit" class="btn btn-danger">
@@ -34,10 +46,17 @@
     <div class="row mb-4">
         <div class="col-md-6 mb-4">
             <div class="card h-100">
-                <div class="card-header bg-primary text-white">
+                <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
                     <h5 class="card-title mb-0">
                         <i class="fas fa-chart-line me-2"></i>Server Statistics
                     </h5>
+                    <div>
+                        <button id="toggleRefresh" class="btn btn-sm btn-success">Start Auto-Refresh</button>
+                        <span id="refreshIndicator" style="display: none;" class="ms-2">
+                            <i class="fas fa-sync fa-spin text-light"></i>
+                            <small class="text-light ms-1">Last: <span id="lastRefreshTime">-</span></small>
+                        </span>
+                    </div>
                 </div>
                 <div class="card-body">
                     <div class="row">
@@ -232,6 +251,12 @@
                                 <a href="{{ url_for('admin.view_site', site_id=site.id) }}" class="btn btn-sm btn-outline-primary">
                                     <i class="fas fa-eye"></i>
                                 </a>
+                                <form method="POST" action="{{ url_for('admin.toggle_site_blocked', site_id=site.id) }}" class="d-inline ms-1">
+                                    <button type="submit" class="btn btn-sm btn-{{ 'success' if site.is_blocked else 'outline-danger' }}">
+                                        <i class="fas fa-{{ 'unlock' if site.is_blocked else 'ban' }}"></i>
+                                        {{ 'Unblock' if site.is_blocked else 'Block' }}
+                                    </button>
+                                </form>
                             </td>
                         </tr>
                         {% endfor %}
@@ -294,4 +319,156 @@
         </div>
     </div>
 </div>
+
+<!-- Redeploy Modal -->
+<div class="modal fade" id="redeployModal" tabindex="-1" aria-labelledby="redeployModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="redeployModalLabel">Confirm Redeployment</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to redeploy all sites on this node?</p>
+                <p>This will regenerate and reapply the Nginx configuration for all {{ sites|length }} site(s) currently deployed on this node.</p>
+                <div class="alert alert-warning">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    This operation might cause brief downtime during the Nginx reload.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <form method="POST" action="{{ url_for('admin.redeploy_all_sites', node_id=node.id) }}">
+                    <button type="submit" class="btn btn-warning">Redeploy All Sites</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Auto-refresh functionality for stats
+        const nodeId = document.querySelector('meta[name="node-id"]').getAttribute('content');
+        let refreshInterval;
+        let isRefreshing = false;
+        const refreshToggle = document.getElementById('toggleRefresh');
+        const refreshIndicator = document.getElementById('refreshIndicator');
+        
+        if (refreshToggle) {
+            refreshToggle.addEventListener('click', function() {
+                if (isRefreshing) {
+                    stopAutoRefresh();
+                    refreshToggle.textContent = 'Start Auto-Refresh';
+                    refreshToggle.classList.replace('btn-danger', 'btn-success');
+                    refreshIndicator.style.display = 'none';
+                } else {
+                    startAutoRefresh();
+                    refreshToggle.textContent = 'Stop Auto-Refresh';
+                    refreshToggle.classList.replace('btn-success', 'btn-danger');
+                    refreshIndicator.style.display = 'inline-block';
+                }
+            });
+        }
+        
+        function startAutoRefresh() {
+            isRefreshing = true;
+            refreshStats(); // Do an immediate refresh
+            refreshInterval = setInterval(refreshStats, 10000); // Then every 10 seconds
+        }
+        
+        function stopAutoRefresh() {
+            isRefreshing = false;
+            clearInterval(refreshInterval);
+        }
+        
+        function refreshStats() {
+            fetch(`/admin/nodes/${nodeId}/stats`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        updateStatDisplay(data.serverStats, data.connectionStats);
+                    } else {
+                        console.error('Error refreshing stats:', data.error);
+                    }
+                })
+                .catch(error => {
+                    console.error('Failed to refresh node stats:', error);
+                });
+        }
+        
+        function updateStatDisplay(serverStats, connectionStats) {
+            // Update CPU usage
+            const cpuBar = document.querySelector('.progress-bar[aria-valuenow]');
+            if (cpuBar) {
+                cpuBar.style.width = serverStats.cpu_usage;
+                cpuBar.setAttribute('aria-valuenow', serverStats.cpu_usage.replace('%', ''));
+                cpuBar.textContent = serverStats.cpu_usage;
+            }
+            
+            // Update memory usage
+            const memBar = document.querySelector('.progress-bar.bg-info');
+            if (memBar && serverStats.memory_usage.includes('(') && serverStats.memory_usage.includes(')')) {
+                const memPercent = serverStats.memory_usage.split('(')[1].split(')')[0];
+                memBar.style.width = memPercent;
+                memBar.setAttribute('aria-valuenow', memPercent.replace('%', ''));
+                memBar.textContent = memPercent;
+                
+                const memText = document.querySelector('.col-md-6.mb-3:nth-of-type(2) small.text-muted');
+                if (memText) {
+                    memText.textContent = serverStats.memory_usage.split(' (')[0];
+                }
+            }
+            
+            // Update disk usage
+            const diskBar = document.querySelector('.progress-bar.bg-warning');
+            if (diskBar && serverStats.disk_usage.includes('(') && serverStats.disk_usage.includes(')')) {
+                const diskPercent = serverStats.disk_usage.split('(')[1].split(')')[0];
+                diskBar.style.width = diskPercent;
+                diskBar.setAttribute('aria-valuenow', diskPercent.replace('%', ''));
+                diskBar.textContent = diskPercent;
+                
+                const diskText = document.querySelector('.col-md-6.mb-3:nth-of-type(3) small.text-muted');
+                if (diskText) {
+                    diskText.textContent = serverStats.disk_usage.split(' (')[0];
+                }
+            }
+            
+            // Update load average
+            const loadText = document.querySelector('.col-md-6.mb-3:nth-of-type(4) p.mb-0');
+            if (loadText) {
+                loadText.textContent = serverStats.load_average;
+            }
+            
+            // Update uptime
+            const uptimeText = document.querySelector('.col-md-12.mb-3 p.mb-0');
+            if (uptimeText) {
+                uptimeText.textContent = serverStats.uptime;
+            }
+            
+            // Update connection stats
+            document.querySelector('.col-md-4.text-center:nth-of-type(1) h2.mb-0').textContent = 
+                connectionStats.total_connections;
+            document.querySelector('.col-md-4.text-center:nth-of-type(2) h2.mb-0').textContent = 
+                connectionStats.active_http;
+            document.querySelector('.col-md-4.text-center:nth-of-type(3) h2.mb-0').textContent = 
+                connectionStats.active_https;
+                
+            // Update RPS and bandwidth
+            document.querySelector('.col-md-6.text-center.mb-3:nth-of-type(1) h3.mb-0').textContent = 
+                connectionStats.requests_per_second;
+            document.querySelector('.col-md-6.text-center.mb-3:nth-of-type(2) h3.mb-0').textContent = 
+                connectionStats.bandwidth_usage;
+                
+            // Show a flash message to indicate successful refresh
+            const timestamp = new Date().toLocaleTimeString();
+            const refreshStatus = document.getElementById('lastRefreshTime');
+            if (refreshStatus) {
+                refreshStatus.textContent = timestamp;
+            }
+        }
+    });
+</script>
 {% endblock %}

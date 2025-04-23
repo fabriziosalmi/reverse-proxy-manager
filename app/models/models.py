@@ -93,8 +93,9 @@ class Site(db.Model):
     origin_port = db.Column(db.Integer, nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     is_active = db.Column(db.Boolean, default=True)
-    is_blocked = db.Column(db.Boolean, default=False) # Add this line
+    is_blocked = db.Column(db.Boolean, default=False) 
     use_waf = db.Column(db.Boolean, default=False)
+    force_https = db.Column(db.Boolean, default=True)  # New column to force HTTP to HTTPS redirect
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     custom_config = db.Column(db.Text, nullable=True)  # Additional Nginx configuration
@@ -113,8 +114,9 @@ class Site(db.Model):
             'origin_port': self.origin_port,
             'user_id': self.user_id,
             'is_active': self.is_active,
-            'is_blocked': self.is_blocked, # Add this line
+            'is_blocked': self.is_blocked, 
             'use_waf': self.use_waf,
+            'force_https': self.force_https,  # New column to force HTTP to HTTPS redirect
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'nodes': [site_node.node_id for site_node in self.site_nodes]

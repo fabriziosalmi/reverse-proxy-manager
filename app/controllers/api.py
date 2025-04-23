@@ -102,3 +102,28 @@ def get_site_nodes(site_id):
     
     site_nodes = SiteNode.query.filter_by(site_id=site_id).all()
     return success_response([site_node.to_dict() for site_node in site_nodes])
+
+@api.route('/api/deployments/recent', methods=['GET'])
+@login_required
+def api_recent_deployments():
+    """Get recent deployment logs for AJAX updates on dashboards"""
+    # Get user ID for filtering if not admin
+    user_id = current_user.id if not current_user.is_admin() else None
+    
+    # If client user, only show their sites' logs
+    if user_id and not current_user.is_admin():
+        site_ids = [site.id for site in Site.query.filter_by(user_id=user_id).all()]
+        if site_ids:
+            logs = DeploymentLog.query.filter(DeploymentLog.site_id.in_(site_ids)).order_by(
+                DeploymentLog.created_at.desc()
+            ).limit(20).all()
+        else:
+            logs = []
+    else:
+        # For admins, show all logs
+        logs = DeploymentLog.query.order_by(DeploymentLog.created_at.desc()).limit(20).all()
+    
+    return jsonify({
+        'success': True,
+        'logs': [log.to_dict() for log in logs]
+    })

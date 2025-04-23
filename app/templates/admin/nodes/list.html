@@ -6,9 +6,30 @@
 <div class="container py-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h1>Node Management</h1>
-        <a href="{{ url_for('admin.new_node') }}" class="btn btn-primary">
-            <i class="fas fa-plus"></i> Add New Node
-        </a>
+        <div>
+            <button class="btn btn-outline-secondary dropdown-toggle me-2" type="button" id="bulkActionsDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+                Bulk Actions
+            </button>
+            <ul class="dropdown-menu" aria-labelledby="bulkActionsDropdown">
+                <li>
+                    <form id="activateSelectedForm" action="{{ url_for('admin.bulk_toggle_nodes') }}" method="POST">
+                        <input type="hidden" name="action" value="activate">
+                        <input type="hidden" name="node_ids" id="activateNodeIds">
+                        <button type="submit" class="dropdown-item">Activate Selected</button>
+                    </form>
+                </li>
+                <li>
+                    <form id="deactivateSelectedForm" action="{{ url_for('admin.bulk_toggle_nodes') }}" method="POST">
+                        <input type="hidden" name="action" value="deactivate">
+                        <input type="hidden" name="node_ids" id="deactivateNodeIds">
+                        <button type="submit" class="dropdown-item">Deactivate Selected</button>
+                    </form>
+                </li>
+            </ul>
+            <a href="{{ url_for('admin.new_node') }}" class="btn btn-primary">
+                <i class="fas fa-plus"></i> Add New Node
+            </a>
+        </div>
     </div>
     
     {% with messages = get_flashed_messages(with_categories=true) %}
@@ -28,6 +49,9 @@
                 <table class="table table-striped table-hover">
                     <thead>
                         <tr>
+                            <th width="40">
+                                <input type="checkbox" id="selectAllNodes" class="form-check-input">
+                            </th>
                             <th>ID</th>
                             <th>Name</th>
                             <th>IP Address</th>
@@ -41,6 +65,9 @@
                     <tbody>
                         {% for node in nodes %}
                         <tr>
+                            <td>
+                                <input type="checkbox" class="form-check-input node-checkbox" data-node-id="{{ node.id }}" value="{{ node.id }}">
+                            </td>
                             <td>{{ node.id }}</td>
                             <td>{{ node.name }}</td>
                             <td>{{ node.ip_address }}</td>
@@ -104,6 +131,7 @@
 {% block scripts %}
 <script>
     document.addEventListener('DOMContentLoaded', function() {
+        // Delete Node Modal
         const deleteNodeModal = document.getElementById('deleteNodeModal');
         if (deleteNodeModal) {
             deleteNodeModal.addEventListener('show.bs.modal', function(event) {
@@ -113,6 +141,62 @@
                 
                 document.getElementById('deleteNodeName').textContent = nodeName;
                 document.getElementById('deleteNodeForm').action = "{{ url_for('admin.delete_node', node_id=0) }}".replace('0', nodeId);
+            });
+        }
+        
+        // Select All Nodes
+        const selectAllNodes = document.getElementById('selectAllNodes');
+        const nodeCheckboxes = document.querySelectorAll('.node-checkbox');
+        
+        if (selectAllNodes) {
+            selectAllNodes.addEventListener('change', function() {
+                nodeCheckboxes.forEach(checkbox => {
+                    checkbox.checked = selectAllNodes.checked;
+                });
+            });
+        }
+        
+        // Handle bulk actions
+        const activateForm = document.getElementById('activateSelectedForm');
+        const deactivateForm = document.getElementById('deactivateSelectedForm');
+        
+        function getSelectedNodeIds() {
+            const selectedNodes = [];
+            nodeCheckboxes.forEach(checkbox => {
+                if (checkbox.checked) {
+                    selectedNodes.push(checkbox.value);
+                }
+            });
+            return selectedNodes;
+        }
+        
+        if (activateForm) {
+            activateForm.addEventListener('submit', function(e) {
+                e.preventDefault();
+                const selectedNodes = getSelectedNodeIds();
+                
+                if (selectedNodes.length === 0) {
+                    alert('Please select at least one node');
+                    return;
+                }
+                
+                document.getElementById('activateNodeIds').value = selectedNodes.join(',');
+                activateForm.submit();
+            });
+        }
+        
+        if (deactivateForm) {
+            deactivateForm.addEventListener('submit', function(e) {
+                e.preventDefault();
+                const selectedNodes = getSelectedNodeIds();
+                
+                if (selectedNodes.length === 0) {
+                    alert('Please select at least one node');
+                    return;
+                }
+                
+                document.getElementById('deactivateNodeIds').value = selectedNodes.join(',');
+                deactivateForm.submit();
             });
         }
     });

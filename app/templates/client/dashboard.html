@@ -96,12 +96,19 @@
 
     <!-- Recent Logs -->
     <div class="card">
-        <div class="card-header">
+        <div class="card-header d-flex justify-content-between align-items-center">
             <h5 class="card-title mb-0">Recent Deployment Logs</h5>
+            <div>
+                <button id="toggleLogsRefresh" class="btn btn-sm btn-outline-success">Auto-Refresh</button>
+                <span id="logsRefreshIndicator" style="display: none;" class="ms-2">
+                    <i class="fas fa-sync fa-spin"></i>
+                    <small class="ms-1">Last: <span id="lastLogsRefreshTime">-</span></small>
+                </span>
+            </div>
         </div>
         <div class="card-body">
             {% if latest_logs %}
-            <div class="table-responsive">
+            <div class="table-responsive" id="logsTableContainer">
                 <table class="table table-bordered table-hover">
                     <thead>
                         <tr>
@@ -144,4 +151,120 @@
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Auto-refresh functionality for logs
+        let logsRefreshInterval;
+        let isLogsRefreshing = false;
+        const logsRefreshToggle = document.getElementById('toggleLogsRefresh');
+        const logsRefreshIndicator = document.getElementById('logsRefreshIndicator');
+        const logsTableContainer = document.getElementById('logsTableContainer');
+        
+        if (logsRefreshToggle) {
+            logsRefreshToggle.addEventListener('click', function() {
+                if (isLogsRefreshing) {
+                    stopLogsAutoRefresh();
+                    logsRefreshToggle.textContent = 'Auto-Refresh';
+                    logsRefreshToggle.classList.replace('btn-outline-danger', 'btn-outline-success');
+                    logsRefreshIndicator.style.display = 'none';
+                } else {
+                    startLogsAutoRefresh();
+                    logsRefreshToggle.textContent = 'Stop Refresh';
+                    logsRefreshToggle.classList.replace('btn-outline-success', 'btn-outline-danger');
+                    logsRefreshIndicator.style.display = 'inline-block';
+                }
+            });
+        }
+        
+        function startLogsAutoRefresh() {
+            isLogsRefreshing = true;
+            refreshLogs(); // Do an immediate refresh
+            logsRefreshInterval = setInterval(refreshLogs, 15000); // Then every 15 seconds
+        }
+        
+        function stopLogsAutoRefresh() {
+            isLogsRefreshing = false;
+            clearInterval(logsRefreshInterval);
+        }
+        
+        function refreshLogs() {
+            fetch('/api/deployments/recent')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success && data.logs.length > 0) {
+                        updateLogsTable(data.logs);
+                    }
+                })
+                .catch(error => {
+                    console.error('Failed to refresh logs:', error);
+                });
+                
+            // Update refresh timestamp
+            const timestamp = new Date().toLocaleTimeString();
+            const refreshStatus = document.getElementById('lastLogsRefreshTime');
+            if (refreshStatus) {
+                refreshStatus.textContent = timestamp;
+            }
+        }
+        
+        function updateLogsTable(logs) {
+            // Create new table HTML
+            let tableHtml = `
+                <table class="table table-bordered table-hover">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Site</th>
+                            <th>Node</th>
+                            <th>Action</th>
+                            <th>Status</th>
+                            <th>Message</th>
+                        </tr>
+                    </thead>
+                    <tbody>`;
+            
+            logs.forEach(log => {
+                const statusClass = log.status === 'success' 
+                    ? 'bg-success' 
+                    : (log.status === 'error' ? 'bg-danger' : 'bg-warning');
+                
+                const rowClass = log.status === 'error' ? 'table-danger' : '';
+                
+                // Format the date
+                const date = new Date(log.created_at);
+                const formattedDate = date.toLocaleString();
+                
+                tableHtml += `
+                    <tr class="${rowClass}">
+                        <td>${formattedDate}</td>
+                        <td>
+                            <a href="/client/sites/${log.site_id}" class="text-primary">
+                                ${log.site ? log.site.domain : 'Unknown Site'}
+                            </a>
+                        </td>
+                        <td>${log.node ? log.node.name : 'Unknown Node'}</td>
+                        <td>${log.action}</td>
+                        <td>
+                            <span class="badge rounded-pill ${statusClass}">
+                                ${log.status}
+                            </span>
+                        </td>
+                        <td class="text-truncate" style="max-width: 200px;">${log.message}</td>
+                    </tr>`;
+            });
+            
+            tableHtml += `
+                    </tbody>
+                </table>`;
+            
+            // Update the table container with new HTML
+            if (logsTableContainer) {
+                logsTableContainer.innerHTML = tableHtml;
+            }
+        }
+    });
+</script>
 {% endblock %}

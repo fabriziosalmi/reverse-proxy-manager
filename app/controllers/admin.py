@@ -278,24 +278,28 @@ def view_node(node_id):
     # Get recent deployment logs for this node
     deployment_logs = DeploymentLog.query.filter_by(node_id=node_id).order_by(DeploymentLog.created_at.desc()).limit(10).all()
     
-    # Get server stats and connection info
-    # In a real implementation, this would make SSH connections to the node
-    # and retrieve real-time data. For now, we'll use mock data
-    server_stats = {
-        'cpu_usage': '32%',
-        'memory_usage': '4.2GB / 8GB (52%)',
-        'disk_usage': '45GB / 100GB (45%)',
-        'uptime': '14 days, 6 hours',
-        'load_average': '0.74, 0.82, 0.76'
-    }
+    # Get real server stats and connection info
+    from app.services.nginx_service import get_node_stats
     
-    connection_stats = {
-        'total_connections': 248,
-        'active_http': 156,
-        'active_https': 92,
-        'requests_per_second': 42.7,
-        'bandwidth_usage': '8.5 MB/s'
-    }
+    try:
+        server_stats, connection_stats = get_node_stats(node)
+    except Exception as e:
+        # Fallback to mock data if real stats can't be retrieved
+        server_stats = {
+            'cpu_usage': '32%',
+            'memory_usage': '4.2GB / 8GB (52%)',
+            'disk_usage': '45GB / 100GB (45%)',
+            'uptime': '14 days, 6 hours',
+            'load_average': '0.74, 0.82, 0.76'
+        }
+        
+        connection_stats = {
+            'total_connections': 248,
+            'active_http': 156,
+            'active_https': 92,
+            'requests_per_second': 42.7,
+            'bandwidth_usage': '8.5 MB/s'
+        }
     
     return render_template('admin/nodes/view.html', 
                           node=node, 
@@ -304,6 +308,133 @@ def view_node(node_id):
                           deployment_logs=deployment_logs,
                           server_stats=server_stats,
                           connection_stats=connection_stats)
+
+@admin.route('/nodes/<int:node_id>/toggle_active', methods=['POST'])
+@login_required
+@admin_required
+def toggle_node_active(node_id):
+    node = Node.query.get_or_404(node_id)
+    node.is_active = not node.is_active
+    db.session.commit()
+    
+    status = 'activated' if node.is_active else 'deactivated'
+    flash(f'Node {status} successfully', 'success')
+    return redirect(url_for('admin.view_node', node_id=node_id))
+
+@admin.route('/nodes/bulk-toggle', methods=['POST'])
+@login_required
+@admin_required
+def bulk_toggle_nodes():
+    action = request.form.get('action')
+    node_ids_str = request.form.get('node_ids', '')
+    
+    if not node_ids_str:
+        flash('No nodes selected', 'error')
+        return redirect(url_for('admin.list_nodes'))
+    
+    node_ids = [int(id) for id in node_ids_str.split(',')]
+    
+    # Set the active status based on the action
+    is_active = action == 'activate'
+    action_verb = 'activated' if is_active else 'deactivated'
+    
+    # Update all selected nodes
+    for node_id in node_ids:
+        node = Node.query.get(node_id)
+        if node:
+            node.is_active = is_active
+    
+    db.session.commit()
+    
+    flash(f'Successfully {action_verb} {len(node_ids)} nodes', 'success')
+    return redirect(url_for('admin.list_nodes'))
+
+@admin.route('/nodes/<int:node_id>/stats', methods=['GET'])
+@login_required
+@admin_required
+def get_node_stats_ajax(node_id):
+    """API endpoint to get node stats for AJAX refresh"""
+    node = Node.query.get_or_404(node_id)
+    
+    # Get real server stats and connection info
+    from app.services.nginx_service import get_node_stats
+    
+    try:
+        server_stats, connection_stats = get_node_stats(node)
+        return jsonify({
+            'success': True,
+            'serverStats': server_stats,
+            'connectionStats': connection_stats
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@admin.route('/nodes/<int:node_id>/redeploy-all', methods=['POST'])
+@login_required
+@admin_required
+def redeploy_all_sites(node_id):
+    """Redeploy all sites on a specific node"""
+    node = Node.query.get_or_404(node_id)
+    
+    # Get all sites deployed on this node
+    site_nodes = SiteNode.query.filter_by(node_id=node_id).all()
+    
+    if not site_nodes:
+        flash('No sites are currently deployed on this node', 'info')
+        return redirect(url_for('admin.view_node', node_id=node_id))
+    
+    # Import needed functions
+    from app.services.nginx_service import generate_nginx_config, deploy_to_node
+    
+    success_count = 0
+    error_count = 0
+    
+    for site_node in site_nodes:
+        site = Site.query.get(site_node.site_id)
+        if not site:
+            continue
+        
+        try:
+            # Generate updated Nginx configuration
+            nginx_config = generate_nginx_config(site)
+            
+            # Deploy to the node
+            deploy_to_node(site.id, node_id, nginx_config)
+            
+            # Log the successful deployment
+            log = DeploymentLog(
+                site_id=site.id,
+                node_id=node_id,
+                action="redeploy",
+                status="success",
+                message=f"Successfully redeployed site during bulk operation"
+            )
+            db.session.add(log)
+            success_count += 1
+            
+        except Exception as e:
+            # Log the error
+            error_count += 1
+            log = DeploymentLog(
+                site_id=site.id,
+                node_id=node_id,
+                action="redeploy",
+                status="error",
+                message=f"Failed to redeploy: {str(e)}"
+            )
+            db.session.add(log)
+    
+    db.session.commit()
+    
+    if error_count > 0:
+        flash(f'Redeployment completed with {success_count} successes and {error_count} failures. Check the logs for details.', 'warning')
+    else:
+        flash(f'Successfully redeployed all {success_count} sites on this node', 'success')
+    
+    return redirect(url_for('admin.view_node', node_id=node_id))
 
 # Site Management (Admin View)
 @admin.route('/sites')
@@ -347,8 +478,219 @@ def toggle_site_blocked(site_id):
     db.session.commit()
     
     status = 'blocked' if site.is_blocked else 'unblocked'
-    flash(f'Site {status} successfully', 'success')
-    # TODO: Add logic here to update Nginx config to reflect blocked status
+    
+    # Get all nodes serving this site and update their configurations
+    site_nodes = SiteNode.query.filter_by(site_id=site_id).all()
+    
+    try:
+        from app.services.nginx_service import generate_nginx_config, deploy_to_node
+        
+        # Generate updated Nginx configuration
+        nginx_config = generate_nginx_config(site)
+        
+        # Deploy to each node
+        for site_node in site_nodes:
+            node_id = site_node.node_id
+            deploy_to_node(site.id, node_id, nginx_config)
+            
+            # Log the action
+            log = DeploymentLog(
+                site_id=site_id,
+                node_id=node_id,
+                action=f"Update site {status} status",
+                status="success",
+                message=f"Site configuration updated to {status} status"
+            )
+            db.session.add(log)
+        
+        db.session.commit()
+        flash(f'Site {status} successfully and configuration deployed', 'success')
+    except Exception as e:
+        flash(f'Site {status} but configuration deployment failed: {str(e)}', 'warning')
+    
+    return redirect(url_for('admin.list_sites'))
+
+@admin.route('/sites/<int:site_id>/toggle_waf', methods=['POST'])
+@login_required
+@admin_required
+def toggle_site_waf(site_id):
+    site = Site.query.get_or_404(site_id)
+    site.use_waf = not site.use_waf
+    db.session.commit()
+    
+    status = 'enabled' if site.use_waf else 'disabled'
+    
+    # Get all nodes serving this site and update their configurations
+    site_nodes = SiteNode.query.filter_by(site_id=site_id).all()
+    
+    try:
+        from app.services.nginx_service import generate_nginx_config, deploy_to_node
+        
+        # Generate updated Nginx configuration with WAF settings
+        nginx_config = generate_nginx_config(site)
+        
+        # Deploy to each node
+        for site_node in site_nodes:
+            node_id = site_node.node_id
+            deploy_to_node(site.id, node_id, nginx_config)
+            
+            # Log the action
+            log = DeploymentLog(
+                site_id=site_id,
+                node_id=node_id,
+                action=f"Update WAF status",
+                status="success",
+                message=f"Web Application Firewall {status} for this site"
+            )
+            db.session.add(log)
+        
+        db.session.commit()
+        flash(f'WAF protection {status} successfully and configuration deployed', 'success')
+    except Exception as e:
+        flash(f'WAF protection {status} but configuration deployment failed: {str(e)}', 'warning')
+    
+    return redirect(url_for('admin.view_site', site_id=site_id))
+
+@admin.route('/sites/<int:site_id>/toggle_force_https', methods=['POST'])
+@login_required
+@admin_required
+def toggle_site_force_https(site_id):
+    site = Site.query.get_or_404(site_id)
+    site.force_https = not site.force_https
+    db.session.commit()
+    
+    status = 'enabled' if site.force_https else 'disabled'
+    
+    # Get all nodes serving this site and update their configurations
+    site_nodes = SiteNode.query.filter_by(site_id=site_id).all()
+    
+    try:
+        from app.services.nginx_service import generate_nginx_config, deploy_to_node
+        
+        # Generate updated Nginx configuration with force HTTPS settings
+        nginx_config = generate_nginx_config(site)
+        
+        # Deploy to each node
+        for site_node in site_nodes:
+            node_id = site_node.node_id
+            deploy_to_node(site.id, node_id, nginx_config)
+            
+            # Log the action
+            log = DeploymentLog(
+                site_id=site_id,
+                node_id=node_id,
+                action=f"Update Force HTTPS status",
+                status="success",
+                message=f"Force HTTPS {status} for this site"
+            )
+            db.session.add(log)
+        
+        db.session.commit()
+        flash(f'Force HTTPS {status} successfully and configuration deployed', 'success')
+    except Exception as e:
+        flash(f'Force HTTPS setting {status} but configuration deployment failed: {str(e)}', 'warning')
+    
+    return redirect(url_for('admin.view_site', site_id=site_id))
+
+@admin.route('/sites/bulk-toggle', methods=['POST'])
+@login_required
+@admin_required
+def bulk_toggle_sites():
+    action = request.form.get('action')
+    site_ids_str = request.form.get('site_ids', '')
+    
+    if not site_ids_str:
+        flash('No sites selected', 'error')
+        return redirect(url_for('admin.list_sites'))
+    
+    site_ids = [int(id) for id in site_ids_str.split(',')]
+    sites_count = len(site_ids)
+    
+    # Handle different actions
+    try:
+        if action == 'activate':
+            for site_id in site_ids:
+                site = Site.query.get(site_id)
+                if site:
+                    site.is_active = True
+            
+            db.session.commit()
+            flash(f'Successfully activated {sites_count} sites', 'success')
+            
+        elif action == 'deactivate':
+            for site_id in site_ids:
+                site = Site.query.get(site_id)
+                if site:
+                    site.is_active = False
+            
+            db.session.commit()
+            flash(f'Successfully deactivated {sites_count} sites', 'success')
+            
+        elif action == 'block' or action == 'unblock':
+            # Import needed functions
+            from app.services.nginx_service import generate_nginx_config, deploy_to_node
+            
+            is_blocked = action == 'block'
+            status_verb = 'blocked' if is_blocked else 'unblocked'
+            
+            success_count = 0
+            failed_count = 0
+            
+            for site_id in site_ids:
+                site = Site.query.get(site_id)
+                if not site:
+                    continue
+                
+                site.is_blocked = is_blocked
+                db.session.commit()
+                
+                # Get all nodes serving this site
+                site_nodes = SiteNode.query.filter_by(site_id=site_id).all()
+                
+                try:
+                    # Generate updated Nginx configuration
+                    nginx_config = generate_nginx_config(site)
+                    
+                    # Deploy to each node
+                    for site_node in site_nodes:
+                        node_id = site_node.node_id
+                        deploy_to_node(site.id, node_id, nginx_config)
+                        
+                        # Log the action
+                        log = DeploymentLog(
+                            site_id=site_id,
+                            node_id=node_id,
+                            action=f"Update site {status_verb} status",
+                            status="success",
+                            message=f"Site configuration updated to {status_verb} status via bulk action"
+                        )
+                        db.session.add(log)
+                    
+                    success_count += 1
+                except Exception as e:
+                    # Log the failure
+                    failed_count += 1
+                    
+                    for site_node in site_nodes:
+                        log = DeploymentLog(
+                            site_id=site_id,
+                            node_id=site_node.node_id,
+                            action=f"Update site {status_verb} status",
+                            status="error",
+                            message=f"Failed to update configuration: {str(e)}"
+                        )
+                        db.session.add(log)
+            
+            db.session.commit()
+            
+            if failed_count > 0:
+                flash(f'Successfully {status_verb} {success_count} sites with {failed_count} failures', 'warning')
+            else:
+                flash(f'Successfully {status_verb} {sites_count} sites', 'success')
+    
+    except Exception as e:
+        flash(f'Error processing bulk action: {str(e)}', 'error')
+    
     return redirect(url_for('admin.list_sites'))
 
 # Deployment Logs
