@@ -201,6 +201,82 @@
                         </div>
                     </div>
                     
+                    <div id="wafAdvancedOptions" class="mb-4 card shadow-sm p-3" style="display: none;">
+                        <h5 class="fw-semibold mb-3">WAF Advanced Settings</h5>
+                        
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-6">
+                                <label for="waf_rule_level" class="form-label">Protection Level</label>
+                                <select class="form-select" id="waf_rule_level" name="waf_rule_level">
+                                    <option value="basic" {% if site.waf_rule_level == 'basic' %}selected{% endif %}>Basic - Low impact, essential protection</option>
+                                    <option value="medium" {% if site.waf_rule_level == 'medium' %}selected{% endif %}>Medium - Balanced protection</option>
+                                    <option value="strict" {% if site.waf_rule_level == 'strict' %}selected{% endif %}>Strict - Maximum security, may impact legitimate traffic</option>
+                                </select>
+                                <div class="form-text">Higher levels provide better protection but may cause false positives</div>
+                            </div>
+                            
+                            <div class="col-md-6">
+                                <label for="waf_max_request_size" class="form-label">Max Request Size (MB)</label>
+                                <input type="number" class="form-control" id="waf_max_request_size" name="waf_max_request_size" 
+                                       min="1" max="100" value="{{ site.waf_max_request_size if site else 1 }}">
+                                <div class="form-text">Maximum allowed size for client requests (in MB)</div>
+                            </div>
+                        </div>
+                        
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-6">
+                                <label for="waf_request_timeout" class="form-label">Request Timeout (seconds)</label>
+                                <input type="number" class="form-control" id="waf_request_timeout" name="waf_request_timeout" 
+                                       min="5" max="300" value="{{ site.waf_request_timeout if site else 60 }}">
+                                <div class="form-text">Maximum time allowed for processing requests</div>
+                            </div>
+                            
+                            <div class="col-md-6">
+                                <div class="form-check mt-4">
+                                    <input class="form-check-input" type="checkbox" name="waf_block_tor_exit_nodes" id="waf_block_tor_exit_nodes"
+                                           {% if site.waf_block_tor_exit_nodes %}checked{% endif %}>
+                                    <label class="form-check-label" for="waf_block_tor_exit_nodes">
+                                        Block Tor Exit Nodes
+                                        <div class="form-text">Block requests coming from known Tor exit nodes</div>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="waf_rate_limiting_enabled" id="waf_rate_limiting_enabled"
+                                       {% if site.waf_rate_limiting_enabled %}checked{% endif %}>
+                                <label class="form-check-label" for="waf_rate_limiting_enabled">
+                                    Enable Rate Limiting
+                                    <div class="form-text">Limit the number of requests allowed from a single client</div>
+                                </label>
+                            </div>
+                        </div>
+                        
+                        <div id="rateLimitingOptions" class="row g-3 mb-3" style="display: none;">
+                            <div class="col-md-6">
+                                <label for="waf_rate_limiting_requests" class="form-label">Requests per Minute</label>
+                                <input type="number" class="form-control" id="waf_rate_limiting_requests" name="waf_rate_limiting_requests" 
+                                       min="10" max="10000" value="{{ site.waf_rate_limiting_requests if site else 100 }}">
+                            </div>
+                            
+                            <div class="col-md-6">
+                                <label for="waf_rate_limiting_burst" class="form-label">Burst Size</label>
+                                <input type="number" class="form-control" id="waf_rate_limiting_burst" name="waf_rate_limiting_burst" 
+                                       min="10" max="10000" value="{{ site.waf_rate_limiting_burst if site else 200 }}">
+                                <div class="form-text">Number of requests that can exceed the rate temporarily</div>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="waf_custom_rules" class="form-label">Custom WAF Rules</label>
+                            <textarea class="form-control" id="waf_custom_rules" name="waf_custom_rules" rows="4" 
+                                      placeholder="# Enter custom ModSecurity rules here">{{ site.waf_custom_rules if site and site.waf_custom_rules else '' }}</textarea>
+                            <div class="form-text">Advanced users only. Enter custom ModSecurity directives.</div>
+                        </div>
+                    </div>
+                    
                     <div class="mb-3">
                         <label for="custom_config" class="form-label">Custom Nginx Configuration</label>
                         <textarea id="custom_config" name="custom_config" rows="6"
@@ -360,6 +436,44 @@
         
         // Add event listener for GeoIP checkbox changes
         enableGeoipCheckbox.addEventListener('change', toggleGeoipOptions);
+        
+        // Toggle WAF Advanced Options
+        const enableWafCheckbox = document.getElementById('use_waf');
+        const wafAdvancedOptions = document.getElementById('wafAdvancedOptions');
+        
+        // Function to toggle WAF options visibility
+        function toggleWafOptions() {
+            if (enableWafCheckbox.checked) {
+                wafAdvancedOptions.style.display = 'block';
+            } else {
+                wafAdvancedOptions.style.display = 'none';
+            }
+        }
+        
+        // Initial WAF toggle
+        toggleWafOptions();
+        
+        // Add event listener for WAF checkbox changes
+        enableWafCheckbox.addEventListener('change', toggleWafOptions);
+        
+        // Toggle Rate Limiting Options
+        const enableRateLimitingCheckbox = document.getElementById('waf_rate_limiting_enabled');
+        const rateLimitingOptions = document.getElementById('rateLimitingOptions');
+        
+        // Function to toggle Rate Limiting options visibility
+        function toggleRateLimitingOptions() {
+            if (enableRateLimitingCheckbox.checked) {
+                rateLimitingOptions.style.display = 'block';
+            } else {
+                rateLimitingOptions.style.display = 'none';
+            }
+        }
+        
+        // Initial Rate Limiting toggle
+        toggleRateLimitingOptions();
+        
+        // Add event listener for Rate Limiting checkbox changes
+        enableRateLimitingCheckbox.addEventListener('change', toggleRateLimitingOptions);
         
         // Country code selection helper
         document.querySelectorAll('#countryCodesModal li').forEach(function(item) {
