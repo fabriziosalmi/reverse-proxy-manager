@@ -16,6 +16,11 @@ class Config:
     
     # Nginx Templates Directory
     NGINX_TEMPLATES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'nginx_templates')
+    
+    # Node Discovery
+    AUTO_NODE_DISCOVERY = os.environ.get('AUTO_NODE_DISCOVERY', 'false').lower() == 'true'
+    AUTO_ACTIVATE_DISCOVERED_NODES = os.environ.get('AUTO_ACTIVATE_DISCOVERED_NODES', 'true').lower() == 'true'
+    NODES_YAML_PATH = os.environ.get('NODES_YAML_PATH')
 
 class DevelopmentConfig(Config):
     DEBUG = True

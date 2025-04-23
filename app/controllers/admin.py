@@ -298,6 +298,19 @@ def toggle_site_active(site_id):
     flash(f'Site {status} successfully', 'success')
     return redirect(url_for('admin.list_sites'))
 
+@admin.route('/sites/<int:site_id>/toggle_blocked', methods=['POST'])
+@login_required
+@admin_required
+def toggle_site_blocked(site_id):
+    site = Site.query.get_or_404(site_id)
+    site.is_blocked = not site.is_blocked
+    db.session.commit()
+    
+    status = 'blocked' if site.is_blocked else 'unblocked'
+    flash(f'Site {status} successfully', 'success')
+    # TODO: Add logic here to update Nginx config to reflect blocked status
+    return redirect(url_for('admin.list_sites'))
+
 # Deployment Logs
 @admin.route('/logs')
 @login_required

@@ -1,0 +1,27 @@
+# Italia CDN Proxy - Node Configuration
+# This file contains the configuration for proxy nodes that will be automatically discovered
+# and added to the database when AUTO_NODE_DISCOVERY is enabled
+
+# Format: List of node objects with the following properties:
+# - name: Unique name to identify the node (required)
+# - ip_address: IPv4 or IPv6 address of the node (required)
+# - ssh_user: Username for SSH authentication (required)
+# - ssh_port: SSH port for connecting to the node (optional, default: 22)
+# - ssh_key_path: Path to the SSH private key file (optional)
+# - ssh_password: Password for SSH authentication (optional, if not using key)
+# - nginx_config_path: Path to Nginx config directory on the node (optional, default: /etc/nginx/conf.d)
+# - nginx_reload_command: Command to reload Nginx (optional, default: sudo systemctl reload nginx)
+
+# Example nodes:
+- name: cdn-node-1
+  ip_address: 100.80.77.113
+  ssh_user: root
+  ssh_port: 22
+  ssh_key_path: /Users/fab/.ssh/id_rsa
+
+- name: cdn-node-2
+  ip_address: 100.99.139.9
+  ssh_user: ubuntu
+  ssh_port: 22
+  ssh_key_path: /Users/fab/.ssh/id_rsa
+  

@@ -58,6 +58,7 @@ class Node(db.Model):
     ssh_key_path = db.Column(db.String(256), nullable=True)  # Path to SSH key file
     ssh_password = db.Column(db.String(256), nullable=True)  # Encrypted password (if using password auth)
     is_active = db.Column(db.Boolean, default=True)
+    is_discovered = db.Column(db.Boolean, default=False)  # Whether this node was discovered from YAML
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     nginx_config_path = db.Column(db.String(256), default='/etc/nginx/conf.d')
@@ -74,6 +75,7 @@ class Node(db.Model):
             'ssh_port': self.ssh_port,
             'ssh_user': self.ssh_user,
             'is_active': self.is_active,
+            'is_discovered': self.is_discovered,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'nginx_config_path': self.nginx_config_path
@@ -91,6 +93,7 @@ class Site(db.Model):
     origin_port = db.Column(db.Integer, nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     is_active = db.Column(db.Boolean, default=True)
+    is_blocked = db.Column(db.Boolean, default=False) # Add this line
     use_waf = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -110,6 +113,7 @@ class Site(db.Model):
             'origin_port': self.origin_port,
             'user_id': self.user_id,
             'is_active': self.is_active,
+            'is_blocked': self.is_blocked, # Add this line
             'use_waf': self.use_waf,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,

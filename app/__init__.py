@@ -43,6 +43,27 @@ def create_app(config_name="default"):
     from app.controllers.api import api as api_blueprint
     app.register_blueprint(api_blueprint, url_prefix='/api')
     
+    # Initialize auto node discovery if enabled
+    with app.app_context():
+        if app.config.get('AUTO_NODE_DISCOVERY', False):
+            from app.services.node_discovery_service import NodeDiscoveryService
+            
+            # Use specified path or default path
+            yaml_path = app.config.get('NODES_YAML_PATH', None)
+            if not yaml_path:
+                yaml_path = NodeDiscoveryService.get_default_yaml_path()
+                
+            if yaml_path:
+                app.logger.info(f"Auto-discovering nodes from: {yaml_path}")
+                added, updated, failed, messages = NodeDiscoveryService.discover_nodes_from_yaml(
+                    yaml_path, 
+                    auto_activate=app.config.get('AUTO_ACTIVATE_DISCOVERED_NODES', True)
+                )
+                
+                app.logger.info(f"Node discovery results: {added} added, {updated} updated, {failed} failed")
+                for msg in messages:
+                    app.logger.debug(f"Node discovery: {msg}")
+    
     # Route for the index page
     @app.route('/')
     def index():

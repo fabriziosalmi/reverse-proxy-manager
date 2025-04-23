@@ -76,6 +76,19 @@
                                 </span>
                             </td>
                         </tr>
+                        <tr> {# Add this block for Blocked status #}
+                            <th>Blocked:</th>
+                            <td>
+                                <span class="badge bg-{{ 'danger' if site.is_blocked else 'success' }}">
+                                    {{ 'Yes' if site.is_blocked else 'No' }}
+                                </span>
+                                <form method="POST" action="{{ url_for('admin.toggle_site_blocked', site_id=site.id) }}" class="d-inline ms-2">
+                                    <button type="submit" class="btn btn-sm btn-{{ 'success' if site.is_blocked else 'danger' }}">
+                                        {{ 'Unblock' if site.is_blocked else 'Block' }}
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
                         <tr>
                             <th>WAF Protection:</th>
                             <td>

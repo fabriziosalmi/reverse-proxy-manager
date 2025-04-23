@@ -31,6 +31,7 @@
                             <th>Origin</th>
                             <th>Owner</th>
                             <th>Status</th>
+                            <th>Blocked</th> {# Add this header #}
                             <th>WAF</th>
                             <th>Created</th>
                             <th>Actions</th>
@@ -38,7 +39,7 @@
                     </thead>
                     <tbody>
                         {% for site in sites %}
-                        <tr>
+                        <tr class="{% if site.is_blocked %}table-danger{% endif %}"> {# Highlight blocked rows #}
                             <td>{{ site.id }}</td>
                             <td>{{ site.name }}</td>
                             <td>
@@ -49,9 +50,16 @@
                             <td>{{ site.protocol }}://{{ site.origin_address }}:{{ site.origin_port }}</td>
                             <td>{{ site.owner.username }}</td>
                             <td>
-                                <form method="POST" action="{{ url_for('admin.toggle_site_active', site_id=site.id) }}">
-                                    <button type="submit" class="btn btn-sm btn-{{ 'success' if site.is_active else 'danger' }}">
+                                <form method="POST" action="{{ url_for('admin.toggle_site_active', site_id=site.id) }}" class="d-inline">
+                                    <button type="submit" class="btn btn-sm btn-{{ 'success' if site.is_active else 'secondary' }}">
                                         {{ 'Active' if site.is_active else 'Inactive' }}
+                                    </button>
+                                </form>
+                            </td>
+                            <td> {# Add this cell for Blocked status #}
+                                <form method="POST" action="{{ url_for('admin.toggle_site_blocked', site_id=site.id) }}" class="d-inline">
+                                    <button type="submit" class="btn btn-sm btn-{{ 'danger' if site.is_blocked else 'outline-secondary' }}">
+                                        {{ 'Blocked' if site.is_blocked else 'Unblocked' }}
                                     </button>
                                 </form>
                             </td>
