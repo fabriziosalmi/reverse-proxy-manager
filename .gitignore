@@ -1,13 +1,43 @@
-# Python
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
+
+# Flask instance folder
+instance/
+
+# Virtual environment
+venv/
+
+# SQLite database
+*.db
+
+# Local environment files
+.env
+.env.*
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Nginx configs generated during runtime
+nginx_configs/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Python
 *.so
 .Python
 env/
-build/
 develop-eggs/
-dist/
 downloads/
 eggs/
 .eggs/
@@ -16,33 +46,23 @@ lib64/
 parts/
 sdist/
 var/
-*.egg-info/
 .installed.cfg
 *.egg
 
 # Flask
-instance/
 .webassets-cache
 app.db
 
 # Virtual Environment
-venv/
 ENV/
-.env
 
 # IDE files
-.idea/
-.vscode/
-*.swp
-*.swo
 .DS_Store
 
 # Log files
-*.log
 logs/
 
 # Database files
-*.db
 *.sqlite
 *.sqlite3
 
@@ -79,3 +99,7 @@ htmlcov/
 
 # Ansible
 ansible/*.retry
+
+*.pyc
+
+venv/

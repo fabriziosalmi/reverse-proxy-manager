@@ -2,6 +2,74 @@
 
 {% block title %}My Sites - Italia CDN Proxy Manager{% endblock %}
 
+{% block head_extra %}
+<style>
+    .empty-state {
+        text-align: center;
+        padding: 3rem 1rem;
+    }
+    
+    .empty-state-icon {
+        font-size: 3.5rem;
+        color: var(--primary-color);
+        opacity: 0.6;
+        margin-bottom: 1.5rem;
+        background-color: rgba(var(--bs-primary-rgb), 0.1);
+        height: 120px;
+        width: 120px;
+        border-radius: 60px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-left: auto;
+        margin-right: auto;
+    }
+    
+    .empty-state-title {
+        font-size: 1.5rem;
+        font-weight: 600;
+        margin-bottom: 1rem;
+        color: var(--text-color);
+    }
+    
+    .empty-state-description {
+        color: var(--feature-text);
+        max-width: 500px;
+        margin: 0 auto 1.5rem;
+    }
+    
+    .step-container {
+        display: flex;
+        max-width: 600px;
+        margin: 2rem auto;
+        text-align: left;
+    }
+    
+    .step-number {
+        width: 32px;
+        height: 32px;
+        background-color: var(--primary-color);
+        color: white;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        margin-right: 1rem;
+        flex-shrink: 0;
+    }
+    
+    .step-content {
+        flex: 1;
+    }
+    
+    .step-title {
+        font-weight: 600;
+        margin-bottom: 0.25rem;
+    }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="container py-4">
     <div class="row mb-4">
@@ -34,6 +102,12 @@
                     </thead>
                     <tbody>
                         {% for site in sites %}
+                        {% set pending_deployment = false %}
+                        {% for site_node in site.site_nodes %}
+                            {% if site_node.status == 'pending' %}
+                                {% set pending_deployment = true %}
+                            {% endif %}
+                        {% endfor %}
                         <tr>
                             <td>{{ site.name }}</td>
                             <td>{{ site.domain }}</td>
@@ -44,9 +118,15 @@
                                 </span>
                             </td>
                             <td>
-                                <span class="badge rounded-pill {% if site.is_active %}bg-success{% else %}bg-danger{% endif %}">
-                                    {{ 'Active' if site.is_active else 'Inactive' }}
-                                </span>
+                                {% if site.is_active %}
+                                    {% if pending_deployment %}
+                                        <span class="badge rounded-pill bg-warning text-dark">Pending Deployment</span>
+                                    {% else %}
+                                        <span class="badge rounded-pill bg-success">Active</span>
+                                    {% endif %}
+                                {% else %}
+                                    <span class="badge rounded-pill bg-danger">Inactive</span>
+                                {% endif %}
                             </td>
                             <td>{{ site.created_at.strftime('%Y-%m-%d') }}</td>
                             <td>
@@ -72,10 +152,41 @@
                 </table>
             </div>
             {% else %}
-            <div class="text-center py-5">
-                <p class="text-muted mb-4">You don't have any sites configured yet.</p>
-                <a href="{{ url_for('client.new_site') }}" class="btn btn-primary">
-                    Add Your First Site
+            <div class="empty-state">
+                <div class="empty-state-icon">
+                    <i class="fas fa-globe"></i>
+                </div>
+                <h3 class="empty-state-title">No sites yet</h3>
+                <p class="empty-state-description">
+                    You haven't added any sites to manage. Start by adding your first site to take advantage of our CDN proxy features.
+                </p>
+                
+                <div class="step-container">
+                    <div class="step-number">1</div>
+                    <div class="step-content">
+                        <div class="step-title">Add your first site</div>
+                        <p>Click the button below to create your first site configuration.</p>
+                    </div>
+                </div>
+                
+                <div class="step-container">
+                    <div class="step-number">2</div>
+                    <div class="step-content">
+                        <div class="step-title">Configure your origin</div>
+                        <p>Enter your origin server details and configure SSL settings if needed.</p>
+                    </div>
+                </div>
+                
+                <div class="step-container">
+                    <div class="step-number">3</div>
+                    <div class="step-content">
+                        <div class="step-title">Update your DNS</div>
+                        <p>Point your domain to our CDN nodes, and you're all set!</p>
+                    </div>
+                </div>
+                
+                <a href="{{ url_for('client.new_site') }}" class="btn btn-primary btn-lg mt-3">
+                    <i class="fas fa-plus me-2"></i>Add Your First Site
                 </a>
             </div>
             {% endif %}

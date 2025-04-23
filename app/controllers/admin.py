@@ -4,11 +4,14 @@ from app.models.models import db, User, Node, Site, SiteNode, DeploymentLog, Con
 from app.services.access_control import admin_required
 from app.services.ssl_certificate_service import SSLCertificateService
 from app.services.nginx_service import deploy_to_node, generate_nginx_config
-from datetime import datetime
+from datetime import datetime, timedelta
 import random
 import string
 import os
 import tempfile
+import paramiko
+import re
+from app.services.analytics_service import AnalyticsService
 
 admin = Blueprint('admin', __name__)
 
@@ -29,8 +32,29 @@ def dashboard():
     site_count = Site.query.count()
     active_site_count = Site.query.filter_by(is_active=True).count()
     
+    # Get current time for the dashboard
+    now = datetime.now()
+    
+    # Get error logs count for last 24h
+    error_log_count = DeploymentLog.query.filter(
+        DeploymentLog.status == 'error',
+        DeploymentLog.created_at >= datetime.now() - timedelta(days=1)
+    ).count()
+    
+    # Get SSL certificates expiring soon count
+    from app.models.models import SSLCertificate
+    ssl_expiring_count = SSLCertificate.query.filter(
+        SSLCertificate.valid_until <= datetime.now() + timedelta(days=30)
+    ).count()
+    
     # Get the latest deployment logs
     latest_logs = DeploymentLog.query.order_by(DeploymentLog.created_at.desc()).limit(10).all()
+    
+    # Get nodes for nodes list
+    nodes = Node.query.order_by(Node.name).limit(5).all()
+    
+    # Get recent sites for sites list
+    sites = Site.query.order_by(Site.created_at.desc()).limit(5).all()
     
     return render_template('admin/dashboard.html', 
                            user_count=user_count,
@@ -38,7 +62,12 @@ def dashboard():
                            active_node_count=active_node_count,
                            site_count=site_count,
                            active_site_count=active_site_count,
-                           latest_logs=latest_logs)
+                           latest_logs=latest_logs,
+                           now=now,
+                           error_log_count=error_log_count,
+                           ssl_expiring_count=ssl_expiring_count,
+                           nodes=nodes,
+                           sites=sites)
 
 # User Management
 @admin.route('/users')
@@ -1179,6 +1208,8 @@ def test_site_config(site_id):
 @admin_required
 def manage_ssl_certificates(site_id):
     """Manage SSL certificates for a site"""
+    from flask import session as flask_session  # Import session with a different name to avoid shadowing
+    
     site = Site.query.get_or_404(site_id)
     
     # Get all nodes serving this site
@@ -1202,101 +1233,62 @@ def manage_ssl_certificates(site_id):
             
             if 'error' in result:
                 flash(f"Error checking certificate: {result['error']}", 'error')
-            else:
-                # Store cert info in session for display
-                session['cert_check_result'] = result
-                
-                # Determine appropriate message
-                has_errors = any('error' in r for r in result['results'])
-                valid_certs = any(r.get('certificate', {}).get('status') == 'valid' 
-                                for r in result['results'] if 'certificate' in r)
-                
-                if has_errors:
-                    flash('Certificate check completed with some errors. See details below.', 'warning')
-                elif valid_certs:
-                    flash('Certificate check completed. Valid certificates found.', 'success')
-                else:
-                    flash('Certificate check completed. No valid certificates found.', 'warning')
-                    
-        elif action == 'check_dns':
-            # Check DNS resolution for the domain
-            result = SSLCertificateService.check_domain_dns(site.domain)
-            session['dns_check_result'] = result
             
-            if 'error' in result:
-                flash(f"Error checking DNS: {result['error']}", 'error')
-            elif result.get('dns_status') == 'ok':
-                flash('DNS check completed. Domain is correctly pointing to CDN nodes.', 'success')
-            else:
-                flash('DNS check completed. Domain is not correctly pointing to CDN nodes. See details below.', 'warning')
-        
-        elif action == 'get_recommendations':
-            # Get SSL issuance recommendations
-            result = SSLCertificateService.get_issuance_recommendations(site_id)
-            session['ssl_recommendations'] = result
-            
-            if 'error' in result:
-                flash(f"Error getting recommendations: {result['error']}", 'error')
-            else:
-                flash('SSL issuance recommendations generated. See details below.', 'info')
+            # Store result in session for template rendering
+            flask_session['cert_check_result'] = result
             
         elif action == 'request':
-            # Get certificate request parameters
+            # Request new certificate
             email = request.form.get('email')
             challenge_type = request.form.get('challenge_type', 'http')
             cert_type = request.form.get('cert_type', 'standard')
+            dns_provider = request.form.get('dns_provider')
             
-            # Handle DNS provider credentials if using DNS challenge
-            dns_provider = None
+            # Validate email for certificate requests
+            import re
+            if not email or not re.match(r"[^@]+@[^@]+\.[^@]+", email):
+                flash('Please provide a valid email address for certificate notifications', 'error')
+                return redirect(url_for('admin.manage_ssl_certificates', site_id=site_id))
+            
+            # Validate DNS provider for DNS challenges
+            if challenge_type == 'dns' and not dns_provider and dns_provider != 'manual':
+                flash('Please select a DNS provider for DNS validation', 'error')
+                return redirect(url_for('admin.manage_ssl_certificates', site_id=site_id))
+                
+            # Process DNS credentials if provided
             dns_credentials = None
-            
-            if challenge_type == 'dns':
-                dns_provider = request.form.get('dns_provider')
-                
-                if not dns_provider:
-                    flash('DNS provider is required for DNS challenge', 'error')
-                    return redirect(url_for('admin.manage_ssl_certificates', site_id=site_id))
-                
-                # Collect provider-specific credentials
+            if challenge_type == 'dns' and dns_provider:
+                dns_credentials = {}
                 if dns_provider == 'cloudflare':
-                    token = request.form.get('cloudflare_token')
-                    if not token:
-                        flash('Cloudflare API token is required', 'error')
+                    dns_credentials['token'] = request.form.get('cf_token')
+                    if not dns_credentials['token']:
+                        flash('Please provide a Cloudflare API token', 'error')
                         return redirect(url_for('admin.manage_ssl_certificates', site_id=site_id))
-                    dns_credentials = {'token': token}
-                    
                 elif dns_provider == 'route53':
-                    access_key = request.form.get('route53_access_key')
-                    secret_key = request.form.get('route53_secret_key')
-                    if not access_key or not secret_key:
-                        flash('AWS access key and secret key are required', 'error')
+                    dns_credentials['access_key'] = request.form.get('aws_access_key')
+                    dns_credentials['secret_key'] = request.form.get('aws_secret_key')
+                    if not dns_credentials['access_key'] or not dns_credentials['secret_key']:
+                        flash('Please provide both AWS Access Key and Secret Key', 'error')
                         return redirect(url_for('admin.manage_ssl_certificates', site_id=site_id))
-                    dns_credentials = {'access_key': access_key, 'secret_key': secret_key}
-                    
                 elif dns_provider == 'digitalocean':
-                    token = request.form.get('digitalocean_token')
-                    if not token:
-                        flash('DigitalOcean API token is required', 'error')
+                    dns_credentials['token'] = request.form.get('do_token')
+                    if not dns_credentials['token']:
+                        flash('Please provide a DigitalOcean API token', 'error')
                         return redirect(url_for('admin.manage_ssl_certificates', site_id=site_id))
-                    dns_credentials = {'token': token}
-                    
                 elif dns_provider == 'godaddy':
-                    key = request.form.get('godaddy_key')
-                    secret = request.form.get('godaddy_secret')
-                    if not key or not secret:
-                        flash('GoDaddy API key and secret are required', 'error')
+                    dns_credentials['key'] = request.form.get('godaddy_key')
+                    dns_credentials['secret'] = request.form.get('godaddy_secret')
+                    if not dns_credentials['key'] or not dns_credentials['secret']:
+                        flash('Please provide both GoDaddy API Key and Secret', 'error')
                         return redirect(url_for('admin.manage_ssl_certificates', site_id=site_id))
-                    dns_credentials = {'key': key, 'secret': secret}
-                    
                 elif dns_provider == 'namecheap':
-                    username = request.form.get('namecheap_username')
-                    api_key = request.form.get('namecheap_api_key')
-                    if not username or not api_key:
-                        flash('Namecheap username and API key are required', 'error')
+                    dns_credentials['username'] = request.form.get('namecheap_username')
+                    dns_credentials['api_key'] = request.form.get('namecheap_api_key')
+                    if not dns_credentials['username'] or not dns_credentials['api_key']:
+                        flash('Please provide both Namecheap Username and API Key', 'error')
                         return redirect(url_for('admin.manage_ssl_certificates', site_id=site_id))
-                    dns_credentials = {'username': username, 'api_key': api_key}
             
-            # Request the certificate with appropriate parameters
+            # Request certificate
             result = SSLCertificateService.request_certificate(
                 site_id=site_id, 
                 node_id=node_id, 
@@ -1310,32 +1302,35 @@ def manage_ssl_certificates(site_id):
             if result.get('success', False):
                 if challenge_type == 'manual-dns':
                     # Special handling for manual DNS challenge
-                    session['manual_dns_instructions'] = result
+                    flask_session['manual_dns_instructions'] = result
                     flash(f'Follow the manual DNS challenge instructions. You will need to create DNS TXT records.', 'info')
                 else:
                     cert_type_name = "wildcard" if cert_type == 'wildcard' else "standard"
                     flash(f'SSL {cert_type_name} certificate successfully requested and installed using {challenge_type} validation', 'success')
             else:
                 flash(f"Failed to request SSL certificate: {result.get('message', 'Unknown error')}", 'error')
+                
+        elif action == 'generate_self_signed':
+            # Generate self-signed certificate
+            result = SSLCertificateService.generate_self_signed_certificate(site_id, node_id)
+            
+            if result.get('success'):
+                flash('Self-signed certificate generated successfully.', 'success')
+            else:
+                flash(f"Self-signed certificate generation failed: {result.get('message', 'Unknown error')}", 'error')
         
         elif action == 'setup_renewal':
-            # Get renewal days parameter
-            renewal_days = request.form.get('renewal_days', 30)
-            try:
-                renewal_days = int(renewal_days)
-            except ValueError:
-                renewal_days = 30
-            
-            # Setup auto-renewal
-            result = SSLCertificateService.setup_auto_renewal(node_id, renewal_days=renewal_days)
+            # Setup auto renewal
+            renewal_days = int(request.form.get('renewal_days', 30))
+            result = SSLCertificateService.setup_auto_renewal(node_id, renewal_days)
             
             if result.get('success', False):
-                flash(f'Certificate auto-renewal successfully configured to renew {renewal_days} days before expiry', 'success')
+                flash('Certificate auto-renewal configured successfully', 'success')
             else:
-                flash(f"Failed to configure auto-renewal: {result.get('message', 'Unknown error')}", 'error')
+                flash(f"Failed to configure certificate auto-renewal: {result.get('message', 'Unknown error')}", 'error')
         
         elif action == 'revoke':
-            # Revoke a certificate
+            # Revoke certificate
             result = SSLCertificateService.revoke_certificate(site_id, node_id)
             
             if result.get('success', False):
@@ -1346,10 +1341,10 @@ def manage_ssl_certificates(site_id):
         return redirect(url_for('admin.manage_ssl_certificates', site_id=site_id))
     
     # Get certificate status from session if available
-    cert_check_result = session.pop('cert_check_result', None)
-    dns_check_result = session.pop('dns_check_result', None)
-    ssl_recommendations = session.pop('ssl_recommendations', None)
-    manual_dns_instructions = session.pop('manual_dns_instructions', None)
+    cert_check_result = flask_session.pop('cert_check_result', None)
+    dns_check_result = flask_session.pop('dns_check_result', None)
+    ssl_recommendations = flask_session.pop('ssl_recommendations', None)
+    manual_dns_instructions = flask_session.pop('manual_dns_instructions', None)
     
     # If HTTPS site and no other data is available, automatically do a DNS check
     if site.protocol == 'https' and not dns_check_result and not cert_check_result and not ssl_recommendations:
@@ -1375,19 +1370,20 @@ def manage_ssl_certificates(site_id):
     # Check certificate health
     cert_health = None
     if site.protocol == 'https':
-        from app.services.ssl_certificate_service import SSLCertificateService
-        cert_health = SSLCertificateService.certificate_health_check()
+        from app.models.models import SSLCertificate
+        ssl_certificates = SSLCertificate.query.filter_by(site_id=site_id).all()
     
     return render_template(
-        'admin/sites/ssl_management.html', 
-        site=site, 
-        nodes=nodes, 
+        'admin/sites/ssl_management.html',
+        site=site,
+        nodes=nodes,
         cert_status=cert_status,
         dns_check_result=dns_check_result,
         ssl_recommendations=ssl_recommendations,
         manual_dns_instructions=manual_dns_instructions,
         dns_providers=dns_providers,
-        cert_health=cert_health
+        cert_health=cert_health,
+        ssl_certificates=ssl_certificates if 'ssl_certificates' in locals() else []
     )
 
 @admin.route('/ssl-dashboard')
@@ -1759,6 +1755,12 @@ def manage_site_waf(site_id):
         site.waf_rate_limiting_enabled = 'waf_rate_limiting_enabled' in request.form
         site.waf_rate_limiting_requests = int(request.form.get('waf_rate_limiting_requests', 100))
         site.waf_rate_limiting_burst = int(request.form.get('waf_rate_limiting_burst', 200))
+        
+        # OWASP ModSecurity Core Rule Set settings
+        site.waf_use_owasp_crs = 'waf_use_owasp_crs' in request.form
+        site.waf_owasp_crs_paranoia = int(request.form.get('waf_owasp_crs_paranoia', 1))
+        site.waf_enabled_crs_rules = request.form.get('waf_enabled_crs_rules')
+        site.waf_disabled_crs_rules = request.form.get('waf_disabled_crs_rules')
         
         db.session.commit()
         

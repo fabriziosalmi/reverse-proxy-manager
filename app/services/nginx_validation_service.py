@@ -48,6 +48,17 @@ class NginxValidationService:
                 if match and '//' in match.group(1):
                     errors.append(f"Line {i+1} has potentially invalid location path: {line.strip()}")
         
+        # Add validation for potentially dangerous domain names
+        domain_match = re.search(r'server_name\s+([^;]+);', config_content)
+        if domain_match:
+            domain = domain_match.group(1).strip()
+            # Check for invalid characters in domain name
+            if re.search(r'[^a-zA-Z0-9\.\-\*]', domain):
+                errors.append(f"Domain name contains potentially invalid characters: {domain}")
+            # Check for very long domain names that might cause issues
+            if len(domain) > 253:
+                errors.append(f"Domain name exceeds maximum length (253 characters): {domain}")
+        
         # Return validation results
         is_valid = len(errors) == 0
         error_message = "\n".join(errors) if errors else "Configuration appears valid"
@@ -85,27 +96,42 @@ class NginxValidationService:
         remote_temp_path = None
         
         try:
-            # Connect to the node via SSH
+            # Connect to the node via SSH with retry logic
             ssh_client = paramiko.SSHClient()
             ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             
-            # Connect using key or password
-            if node.ssh_key_path:
-                ssh_client.connect(
-                    hostname=node.ip_address,
-                    port=node.ssh_port,
-                    username=node.ssh_user,
-                    key_filename=node.ssh_key_path,
-                    timeout=10
-                )
-            else:
-                ssh_client.connect(
-                    hostname=node.ip_address,
-                    port=node.ssh_port,
-                    username=node.ssh_user,
-                    password=node.ssh_password,
-                    timeout=10
-                )
+            # Implement retry logic for more reliable SSH connections
+            max_retries = 3
+            retry_delay = 2  # seconds
+            
+            for attempt in range(max_retries):
+                try:
+                    # Connect using key or password
+                    if node.ssh_key_path:
+                        ssh_client.connect(
+                            hostname=node.ip_address,
+                            port=node.ssh_port,
+                            username=node.ssh_user,
+                            key_filename=node.ssh_key_path,
+                            timeout=10
+                        )
+                    else:
+                        ssh_client.connect(
+                            hostname=node.ip_address,
+                            port=node.ssh_port,
+                            username=node.ssh_user,
+                            password=node.ssh_password,
+                            timeout=10
+                        )
+                    # If we get here, connection successful
+                    break
+                except (paramiko.SSHException, socket.timeout, socket.error) as ssh_error:
+                    if attempt == max_retries - 1:  # Last attempt failed
+                        log_activity('error', f"Failed to connect to node {node.name} after {max_retries} attempts: {str(ssh_error)}")
+                        raise  # Re-raise the last exception
+                    else:
+                        log_activity('warning', f"SSH connection attempt {attempt+1} failed, retrying: {str(ssh_error)}")
+                        time.sleep(retry_delay)
             
             # Detect if this is an HTTPS config
             is_https_config = "ssl_certificate" in config_content or "listen 443 ssl" in config_content
@@ -130,22 +156,59 @@ class NginxValidationService:
                 # This could be a subdomain using a wildcard cert for its parent domain
                 if detect_ssl_requirements:
                     domain_parts = domain.split('.')
+                    
+                    # Check for wildcard certificates at multiple levels
+                    potential_wildcard_domains = []
+                    
+                    # Add direct parent domain (e.g., example.com for sub.example.com)
                     if len(domain_parts) > 2:
-                        parent_domain = '.'.join(domain_parts[1:])
-                        wildcard_cert_path = f"/etc/letsencrypt/live/{parent_domain}/fullchain.pem"
+                        parent_domain = '.'.join(domain_parts[-2:])
+                        potential_wildcard_domains.append(parent_domain)
+                    
+                    # Add potential intermediate domains for deep subdomains
+                    # (e.g., service.region.example.com might use a cert for *.region.example.com)
+                    for i in range(1, len(domain_parts)-1):
+                        if len(domain_parts) > i+1:
+                            intermediate_domain = '.'.join(domain_parts[i:])
+                            if intermediate_domain not in potential_wildcard_domains:
+                                potential_wildcard_domains.append(intermediate_domain)
+                    
+                    # Check each potential wildcard domain for certificate existence
+                    wildcard_found = False
+                    for potential_domain in potential_wildcard_domains:
+                        wildcard_cert_path = f"/etc/letsencrypt/live/{potential_domain}/fullchain.pem"
                         
-                        # Check if a wildcard certificate exists for the parent domain
+                        # Check if a wildcard certificate exists for this domain
                         stdin, stdout, stderr = ssh_client.exec_command(f"test -f {wildcard_cert_path} && echo 'exists' || echo 'not found'")
                         wildcard_exists = stdout.read().decode('utf-8').strip() == 'exists'
                         
                         if wildcard_exists:
                             # Use the wildcard certificate instead
                             ssl_certificate = wildcard_cert_path
-                            ssl_certificate_key = f"/etc/letsencrypt/live/{parent_domain}/privkey.pem"
-                            cert_domain = parent_domain
+                            ssl_certificate_key = f"/etc/letsencrypt/live/{potential_domain}/privkey.pem"
+                            cert_domain = potential_domain
                             ssl_details["ssl_certificate"] = ssl_certificate
                             ssl_details["ssl_certificate_key"] = ssl_certificate_key
                             ssl_details["certificate_domain"] = cert_domain
+                            wildcard_found = True
+                            ssl_details["wildcard_domain"] = potential_domain
+                            log_activity('info', f"Found wildcard certificate for domain {domain} using {potential_domain}")
+                            break
+                    
+                    if not wildcard_found:
+                        log_activity('info', f"No wildcard certificates found for {domain}")
+                        
+                        # Also check for exact domain certificate
+                        exact_cert_path = f"/etc/letsencrypt/live/{domain}/fullchain.pem"
+                        stdin, stdout, stderr = ssh_client.exec_command(f"test -f {exact_cert_path} && echo 'exists' || echo 'not found'")
+                        exact_cert_exists = stdout.read().decode('utf-8').strip() == 'exists'
+                        
+                        if exact_cert_exists:
+                            ssl_certificate = exact_cert_path
+                            ssl_certificate_key = f"/etc/letsencrypt/live/{domain}/privkey.pem"
+                            ssl_details["ssl_certificate"] = ssl_certificate
+                            ssl_details["ssl_certificate_key"] = ssl_certificate_key
+                            ssl_details["certificate_domain"] = domain
                 
                 # Handle SSL for testing appropriately based on flags
                 if skip_ssl_check or detect_ssl_requirements:

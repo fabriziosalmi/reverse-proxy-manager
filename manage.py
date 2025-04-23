@@ -160,7 +160,7 @@ def discover_nodes(yaml_path=None, activate=True):
         for msg in messages:
             click.echo(f"  - {msg}")
 
- @cli.command('create-migration-is-discovered')
+@cli.command('create-migration-is-discovered')
 def create_migration_is_discovered():
     """Create a migration for adding the is_discovered field to the Node model."""
     with app.app_context():

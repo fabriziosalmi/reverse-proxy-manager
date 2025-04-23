@@ -6,5 +6,5 @@ from app.models.models import User
 def load_user(user_id):
     return User.query.get(int(user_id))
 
-# Add UserMixin to User class to implement Flask-Login methods
-User.__bases__ = (UserMixin,) + User.__bases__
+# UserMixin is already part of User class definition in models.py, no need to add it again
+# User.__bases__ = (UserMixin,) + User.__bases__

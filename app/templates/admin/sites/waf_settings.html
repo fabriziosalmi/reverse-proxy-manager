@@ -39,6 +39,58 @@
                             </p>
                         </div>
 
+                        <!-- OWASP ModSecurity Core Rule Set (CRS) Card -->
+                        <div class="card mb-3">
+                            <div class="card-header bg-light">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="waf_use_owasp_crs" name="waf_use_owasp_crs" 
+                                        {{ 'checked' if site.waf_use_owasp_crs else '' }}>
+                                    <label class="form-check-label" for="waf_use_owasp_crs">Enable OWASP ModSecurity Core Rule Set</label>
+                                </div>
+                                <div class="form-text">
+                                    <i class="fas fa-shield-alt me-1"></i>
+                                    The OWASP ModSecurity Core Rule Set (CRS) is a set of generic attack detection rules for use with ModSecurity.
+                                </div>
+                            </div>
+                            <div class="card-body" id="owasp_crs_options" style="{{ 'display:none;' if not site.waf_use_owasp_crs else '' }}">
+                                <div class="row mb-3">
+                                    <div class="col-md-6">
+                                        <label for="waf_owasp_crs_paranoia" class="form-label">Paranoia Level</label>
+                                        <select class="form-select" id="waf_owasp_crs_paranoia" name="waf_owasp_crs_paranoia">
+                                            <option value="1" {{ 'selected' if site.waf_owasp_crs_paranoia == 1 else '' }}>Level 1 (Default)</option>
+                                            <option value="2" {{ 'selected' if site.waf_owasp_crs_paranoia == 2 else '' }}>Level 2 (Medium)</option>
+                                            <option value="3" {{ 'selected' if site.waf_owasp_crs_paranoia == 3 else '' }}>Level 3 (High)</option>
+                                            <option value="4" {{ 'selected' if site.waf_owasp_crs_paranoia == 4 else '' }}>Level 4 (Very High)</option>
+                                        </select>
+                                        <div class="form-text">
+                                            <i class="fas fa-info-circle me-1"></i>
+                                            Higher levels provide more security but may result in more false positives.
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="row">
+                                    <div class="col-md-6 mb-3">
+                                        <label for="waf_disabled_crs_rules" class="form-label">Disabled Rule IDs</label>
+                                        <input type="text" class="form-control" id="waf_disabled_crs_rules" name="waf_disabled_crs_rules" 
+                                            value="{{ site.waf_disabled_crs_rules or '' }}" placeholder="942100, 942190, 941180">
+                                        <div class="form-text">
+                                            <i class="fas fa-info-circle me-1"></i>
+                                            Comma-separated list of rule IDs to disable. Use this to reduce false positives.
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6 mb-3">
+                                        <label for="waf_enabled_crs_rules" class="form-label">Specifically Enabled Rule IDs</label>
+                                        <input type="text" class="form-control" id="waf_enabled_crs_rules" name="waf_enabled_crs_rules" 
+                                            value="{{ site.waf_enabled_crs_rules or '' }}" placeholder="900000, 900005">
+                                        <div class="form-text">
+                                            <i class="fas fa-info-circle me-1"></i>
+                                            Comma-separated list of rule IDs to explicitly enable. Use with caution.
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
                         <div class="row mb-3">
                             <div class="col-md-6">
                                 <label for="waf_rule_level" class="form-label">Protection Level</label>
@@ -58,6 +110,10 @@
                                             {% endif %}
                                         {% endfor %}
                                     </span>
+                                </div>
+                                <div class="form-text mt-2 text-warning">
+                                    <i class="fas fa-exclamation-triangle me-1"></i>
+                                    Note: This setting is only used when OWASP CRS is disabled.
                                 </div>
                             </div>
                             <div class="col-md-6">
@@ -217,6 +273,35 @@ SecRule REQUEST_URI "@contains /admin/backup" "id:1002,phase:1,deny,status:403,l
                                 </div>
                             </div>
                         </div>
+                        <div class="accordion-item">
+                            <h2 class="accordion-header" id="headingFive">
+                                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseFive" aria-expanded="false" aria-controls="collapseFive">
+                                    OWASP ModSecurity Core Rule Set (CRS)
+                                </button>
+                            </h2>
+                            <div id="collapseFive" class="accordion-collapse collapse" aria-labelledby="headingFive" data-bs-parent="#wafInfoAccordion">
+                                <div class="accordion-body">
+                                    <p>The OWASP ModSecurity Core Rule Set (CRS) is a set of generic attack detection rules for use with ModSecurity or compatible web application firewalls. The CRS aims to protect web applications from a wide range of attacks, including the OWASP Top Ten, with a minimum of false alerts.</p>
+                                    
+                                    <h6 class="mt-3">Paranoia Levels</h6>
+                                    <ul>
+                                        <li><strong>Level 1 (Default):</strong> Designed to be reasonably safe for most sites with minimal false positives.</li>
+                                        <li><strong>Level 2 (Medium):</strong> Includes more rules to catch more potential attacks, with moderate false positive risk.</li>
+                                        <li><strong>Level 3 (High):</strong> Adds additional hardening measures and security checks, with higher false positive risk.</li>
+                                        <li><strong>Level 4 (Very High):</strong> Maximum security, but likely to produce significant false positives requiring tuning.</li>
+                                    </ul>
+                                    
+                                    <h6 class="mt-3">Rule Tuning</h6>
+                                    <p>If you experience false positives, you can disable specific rule IDs by adding them to the "Disabled Rule IDs" field, separated by commas. Common rule IDs that may need tuning include:</p>
+                                    <ul>
+                                        <li><strong>942100-942999:</strong> SQL Injection rules</li>
+                                        <li><strong>941100-941999:</strong> XSS (Cross-site scripting) rules</li>
+                                        <li><strong>920000-920999:</strong> Protocol violation rules</li>
+                                        <li><strong>930000-930999:</strong> Local file inclusion rules</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -245,6 +330,14 @@ document.addEventListener('DOMContentLoaded', function() {
     
     rateLimitingEnabled.addEventListener('change', function() {
         rateLimitingOptions.style.display = this.checked ? 'block' : 'none';
+    });
+
+    // Toggle OWASP CRS options visibility
+    const owaspCrsEnabled = document.getElementById('waf_use_owasp_crs');
+    const owaspCrsOptions = document.getElementById('owasp_crs_options');
+    
+    owaspCrsEnabled.addEventListener('change', function() {
+        owaspCrsOptions.style.display = this.checked ? 'block' : 'none';
     });
 });
 </script>
