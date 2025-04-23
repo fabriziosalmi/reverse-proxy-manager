@@ -504,7 +504,16 @@ def deploy_to_node(site_id, node_id, nginx_config, test_only=False):
     warnings.extend(security_warnings)
     
     # Test the configuration
-    is_valid, error_message = NginxValidationService.test_config_on_node(node_id, nginx_config, domain)
+    is_valid, error_message, ssl_details = NginxValidationService.test_config_on_node(node_id, nginx_config, domain)
+    
+    # Handle SSL details if available
+    if ssl_details and ssl_details.get('is_https', False):
+        if ssl_details.get('certificates_needed', False):
+            warnings.append("SSL certificates need to be provisioned")
+            if ssl_details.get('ssl_certificate'):
+                warnings.append(f"Certificate path: {ssl_details['ssl_certificate']}")
+            if ssl_details.get('ssl_certificate_key'):
+                warnings.append(f"Certificate key path: {ssl_details['ssl_certificate_key']}")
     
     # Special handling for SSL certificate errors - they're expected if certs don't exist yet
     # We'll let the deployment proceed but warn the user

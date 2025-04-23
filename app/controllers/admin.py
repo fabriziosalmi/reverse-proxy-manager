@@ -300,7 +300,7 @@ def view_node(node_id):
     
     # Test Nginx with a simple config to check if it's installed
     test_config = "server { listen 80; server_name _; location / { return 200; } }"
-    is_valid, error_message = NginxValidationService.test_config_on_node(node_id, test_config, "test")
+    is_valid, error_message, _ = NginxValidationService.test_config_on_node(node_id, test_config, "test")
     
     # If Nginx is missing, we'll get a specific error message about it
     if not is_valid and "Could not find nginx executable on the server" in error_message:
