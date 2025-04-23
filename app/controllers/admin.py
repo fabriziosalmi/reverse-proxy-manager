@@ -2,7 +2,7 @@ from flask import Blueprint, render_template, request, flash, redirect, url_for,
 from flask_login import login_required, current_user
 from app.models.models import db, User, Node, Site, SiteNode, DeploymentLog, ConfigVersion
 from app.services.access_control import admin_required
-from datetime import datetime
+from datetime import datetime, timedelta
 import random
 import string
 
@@ -25,6 +25,21 @@ def dashboard():
     site_count = Site.query.count()
     active_site_count = Site.query.filter_by(is_active=True).count()
     
+    # Get current time for the dashboard
+    now = datetime.now()
+    
+    # Get error logs count for last 24h
+    error_log_count = DeploymentLog.query.filter(
+        DeploymentLog.status == 'error',
+        DeploymentLog.created_at >= datetime.now() - timedelta(days=1)
+    ).count()
+    
+    # Get SSL certificates expiring soon count
+    from app.models.models import SSLCertificate
+    ssl_expiring_count = SSLCertificate.query.filter(
+        SSLCertificate.valid_until <= datetime.now() + timedelta(days=30)
+    ).count()
+    
     # Get the latest deployment logs
     latest_logs = DeploymentLog.query.order_by(DeploymentLog.created_at.desc()).limit(10).all()
     
@@ -34,7 +49,10 @@ def dashboard():
                            active_node_count=active_node_count,
                            site_count=site_count,
                            active_site_count=active_site_count,
-                           latest_logs=latest_logs)
+                           latest_logs=latest_logs,
+                           now=now,
+                           error_log_count=error_log_count,
+                           ssl_expiring_count=ssl_expiring_count)
 
 # User Management
 @admin.route('/users')
