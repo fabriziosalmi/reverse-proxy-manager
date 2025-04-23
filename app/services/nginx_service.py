@@ -717,20 +717,28 @@ def get_node_stats(node):
                 timeout=10
             )
         
-        # Get CPU usage
-        stdin, stdout, stderr = ssh_client.exec_command("top -bn1 | grep 'Cpu(s)' | awk '{print $2 + $4}'")
-        cpu_usage = stdout.read().decode('utf-8').strip() + '%'
+        # Get CPU usage - improved command that works across different Linux variants
+        stdin, stdout, stderr = ssh_client.exec_command("top -bn1 | grep '%Cpu' | awk '{print $2+$4+$6}' | awk '{printf \"%.1f%%\", $1}'")
+        cpu_usage = stdout.read().decode('utf-8').strip()
+        # If the command didn't work, try alternative command
+        if not cpu_usage:
+            stdin, stdout, stderr = ssh_client.exec_command("mpstat 1 1 | grep -A 5 '%idle' | tail -n 1 | awk '{print 100-$NF\"%\"}' || echo 'N/A'")
+            cpu_usage = stdout.read().decode('utf-8').strip()
+        # If still not working, try yet another alternative
+        if not cpu_usage or cpu_usage == 'N/A':
+            stdin, stdout, stderr = ssh_client.exec_command("vmstat 1 2 | tail -1 | awk '{print 100-$15\"%\"}' || echo 'N/A'")
+            cpu_usage = stdout.read().decode('utf-8').strip()
         
-        # Get memory usage
-        stdin, stdout, stderr = ssh_client.exec_command("free -m | grep 'Mem:' | awk '{print $3\"/\"$2\"M (\"int($3*100/$2)\"%\")'")
+        # Get memory usage - fixed command with proper quotes
+        stdin, stdout, stderr = ssh_client.exec_command("free -m | grep 'Mem:' | awk '{printf \"%d/%dMB (%d%%)\", $3, $2, int($3*100/$2)}'")
         memory_usage = stdout.read().decode('utf-8').strip()
         
-        # Get disk usage
-        stdin, stdout, stderr = ssh_client.exec_command("df -h / | grep -v Filesystem | awk '{print $3\"/\"$2\" (\"$5\")'}")
+        # Get disk usage - fixed command with proper quotes
+        stdin, stdout, stderr = ssh_client.exec_command("df -h / | grep -v Filesystem | awk '{printf \"%s/%s (%s)\", $3, $2, $5}'")
         disk_usage = stdout.read().decode('utf-8').strip()
         
         # Get uptime
-        stdin, stdout, stderr = ssh_client.exec_command("uptime -p")
+        stdin, stdout, stderr = ssh_client.exec_command("uptime -p 2>/dev/null || uptime | sed 's/.*up \\([^,]*\\),.*/\\1/' || echo 'N/A'")
         uptime = stdout.read().decode('utf-8').strip().replace('up ', '')
         
         # Get load average
@@ -753,6 +761,23 @@ def get_node_stats(node):
             if len(lines) >= 3:
                 accepts, handled, requests = map(int, lines[2].strip().split())
                 requests_per_second = round(requests / 60, 1)  # Approximate RPS
+        else:
+            # Try alternative method to get connections
+            stdin, stdout, stderr = ssh_client.exec_command("netstat -an | grep :80 | grep ESTABLISHED | wc -l")
+            http_connections = stdout.read().decode('utf-8').strip()
+            try:
+                active_http = int(http_connections)
+            except ValueError:
+                active_http = 0
+                
+            stdin, stdout, stderr = ssh_client.exec_command("netstat -an | grep :443 | grep ESTABLISHED | wc -l")
+            https_connections = stdout.read().decode('utf-8').strip()
+            try:
+                active_https = int(https_connections)
+            except ValueError:
+                active_https = 0
+                
+            active_connections = active_http + active_https
         
         # Simple estimation for HTTP vs HTTPS
         active_http = int(active_connections * 0.4)  # 40% HTTP (example estimation)
@@ -774,11 +799,11 @@ def get_node_stats(node):
         
         # Return stats
         server_stats = {
-            'cpu_usage': cpu_usage,
-            'memory_usage': memory_usage,
-            'disk_usage': disk_usage,
-            'uptime': uptime,
-            'load_average': load_average
+            'cpu_usage': cpu_usage if cpu_usage else 'N/A',
+            'memory_usage': memory_usage if memory_usage else 'N/A',
+            'disk_usage': disk_usage if disk_usage else 'N/A',
+            'uptime': uptime if uptime else 'N/A',
+            'load_average': load_average if load_average else 'N/A'
         }
         
         connection_stats = {
@@ -792,13 +817,15 @@ def get_node_stats(node):
         return server_stats, connection_stats
         
     except Exception as e:
-        # If there's an error, return default values
+        # If there's an error, return default values with error information
+        error_message = str(e)
         return {
             'cpu_usage': 'N/A',
             'memory_usage': 'N/A',
             'disk_usage': 'N/A',
             'uptime': 'N/A',
-            'load_average': 'N/A'
+            'load_average': 'N/A',
+            'error': error_message
         }, {
             'total_connections': 0,
             'active_http': 0,
