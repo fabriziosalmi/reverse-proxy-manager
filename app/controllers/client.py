@@ -412,6 +412,57 @@ def manage_ssl_certificates(site_id):
         dns_providers=dns_providers
     )
 
+@client.route('/ssl-dashboard')
+@login_required
+@client_required
+def ssl_dashboard():
+    """SSL certificate dashboard showing all sites and their certificate status"""
+    # Get all sites owned by the current user
+    user = current_user
+    sites = Site.query.filter_by(user_id=user.id).all()
+    
+    # Get certificate health status
+    certificates = []
+    expiring_soon = []
+    expired = []
+    
+    for site in sites:
+        # Get all certificates for this site
+        site_certs = SSLCertificate.query.filter_by(site_id=site.id).all()
+        
+        for cert in site_certs:
+            node = Node.query.get(cert.node_id)
+            if not node:
+                continue
+                
+            cert_info = {
+                'site_id': site.id,
+                'domain': site.domain,
+                'node_id': node.id,
+                'node_name': node.name,
+                'status': cert.status,
+                'issuer': cert.issuer,
+                'valid_until': cert.valid_until,
+                'days_remaining': cert.days_remaining,
+                'is_self_signed': cert.is_self_signed
+            }
+            
+            certificates.append(cert_info)
+            
+            if cert.status == 'expired':
+                expired.append(cert_info)
+            elif cert.status == 'expiring_soon':
+                expiring_soon.append(cert_info)
+    
+    # Sort by days remaining
+    certificates.sort(key=lambda x: (x['status'] != 'expired', x['status'] != 'expiring_soon', x['days_remaining'] if x['days_remaining'] is not None else 999))
+    
+    return render_template('client/ssl_dashboard.html', 
+                          sites=sites,
+                          certificates=certificates,
+                          expired=expired,
+                          expiring_soon=expiring_soon)
+
 # API endpoints for client actions
 @client.route('/api/sites', methods=['GET'])
 @login_required

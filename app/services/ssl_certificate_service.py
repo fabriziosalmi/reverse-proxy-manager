@@ -1436,3 +1436,202 @@ fi
             "failed_count": len(failed_replacements),
             "failed_replacements": failed_replacements
         }
+    
+    @staticmethod
+    def get_recommended_node(site_id):
+        """
+        Determine the best node for a new certificate based on load, availability, etc.
+        
+        Args:
+            site_id: ID of the site needing a certificate
+            
+        Returns:
+            Node: The recommended node or None if no suitable node found
+        """
+        # Get all active nodes
+        nodes = Node.query.filter_by(is_active=True).all()
+        if not nodes:
+            return None
+            
+        # Get site-node relationships
+        site_nodes = SiteNode.query.filter_by(site_id=site_id).all()
+        
+        # If the site is already deployed on nodes, prefer those nodes
+        deployed_nodes = [sn.node_id for sn in site_nodes if sn.status == 'deployed']
+        if deployed_nodes:
+            return Node.query.filter(Node.id.in_(deployed_nodes)).first()
+            
+        # Otherwise, find a node with fewest certificates (for load balancing)
+        node_cert_counts = {}
+        for node in nodes:
+            cert_count = SSLCertificate.query.filter_by(node_id=node.id).count()
+            node_cert_counts[node.id] = cert_count
+            
+        # Get node with the lowest certificate count
+        if node_cert_counts:
+            min_cert_node_id = min(node_cert_counts, key=node_cert_counts.get)
+            return Node.query.get(min_cert_node_id)
+            
+        # Fallback to the first available node
+        return nodes[0]
+    
+    @staticmethod
+    def get_certificates_health_dashboard():
+        """
+        Generate a comprehensive dashboard of certificate health across all sites and nodes
+        
+        Returns:
+            dict: Certificate health data categorized by status
+        """
+        # Get all certificates from database
+        certificates = SSLCertificate.query.all()
+        
+        # Initialize dashboard data structure
+        dashboard = {
+            'total_certificates': len(certificates),
+            'valid_certificates': 0,
+            'expiring_soon': [],
+            'expired': [],
+            'self_signed': [],
+            'by_node': {},
+            'by_site': {},
+            'renewal_status': {
+                'configured': 0,
+                'not_configured': 0
+            }
+        }
+        
+        # Process each certificate
+        for cert in certificates:
+            site = Site.query.get(cert.site_id)
+            node = Node.query.get(cert.node_id)
+            
+            if not site or not node:
+                continue
+                
+            # Add certificate to appropriate category
+            if cert.is_self_signed:
+                dashboard['self_signed'].append({
+                    'domain': site.domain,
+                    'site_id': site.id,
+                    'node_id': node.id,
+                    'node_name': node.name,
+                    'valid_until': cert.valid_until,
+                    'days_remaining': cert.days_remaining
+                })
+            elif cert.status == 'valid':
+                dashboard['valid_certificates'] += 1
+            elif cert.status == 'expiring_soon':
+                dashboard['expiring_soon'].append({
+                    'domain': site.domain,
+                    'site_id': site.id,
+                    'node_id': node.id,
+                    'node_name': node.name,
+                    'valid_until': cert.valid_until,
+                    'days_remaining': cert.days_remaining,
+                    'is_wildcard': cert.is_wildcard
+                })
+            elif cert.status == 'expired':
+                dashboard['expired'].append({
+                    'domain': site.domain,
+                    'site_id': site.id,
+                    'node_id': node.id,
+                    'node_name': node.name,
+                    'valid_until': cert.valid_until,
+                    'days_remaining': cert.days_remaining,
+                    'is_wildcard': cert.is_wildcard
+                })
+                
+            # Group certificates by node
+            if node.id not in dashboard['by_node']:
+                dashboard['by_node'][node.id] = {
+                    'node_name': node.name,
+                    'total': 0,
+                    'valid': 0,
+                    'expiring_soon': 0,
+                    'expired': 0,
+                    'self_signed': 0
+                }
+                
+            dashboard['by_node'][node.id]['total'] += 1
+            
+            if cert.is_self_signed:
+                dashboard['by_node'][node.id]['self_signed'] += 1
+            elif cert.status == 'valid':
+                dashboard['by_node'][node.id]['valid'] += 1
+            elif cert.status == 'expiring_soon':
+                dashboard['by_node'][node.id]['expiring_soon'] += 1
+            elif cert.status == 'expired':
+                dashboard['by_node'][node.id]['expired'] += 1
+                
+            # Group certificates by site
+            if site.id not in dashboard['by_site']:
+                dashboard['by_site'][site.id] = {
+                    'domain': site.domain,
+                    'total': 0,
+                    'valid': 0,
+                    'expiring_soon': 0,
+                    'expired': 0,
+                    'self_signed': 0,
+                    'nodes': []
+                }
+                
+            if node.id not in dashboard['by_site'][site.id]['nodes']:
+                dashboard['by_site'][site.id]['nodes'].append(node.id)
+                
+            dashboard['by_site'][site.id]['total'] += 1
+            
+            if cert.is_self_signed:
+                dashboard['by_site'][site.id]['self_signed'] += 1
+            elif cert.status == 'valid':
+                dashboard['by_site'][site.id]['valid'] += 1
+            elif cert.status == 'expiring_soon':
+                dashboard['by_site'][site.id]['expiring_soon'] += 1
+            elif cert.status == 'expired':
+                dashboard['by_site'][site.id]['expired'] += 1
+                
+        # Check auto-renewal configuration
+        for node_id in dashboard['by_node']:
+            try:
+                node = Node.query.get(node_id)
+                if not node:
+                    continue
+                    
+                # Connect to node
+                import paramiko
+                ssh_client = paramiko.SSHClient()
+                ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                
+                if node.ssh_key_path:
+                    ssh_client.connect(
+                        hostname=node.ip_address,
+                        port=node.ssh_port,
+                        username=node.ssh_user,
+                        key_filename=node.ssh_key_path,
+                        timeout=5
+                    )
+                else:
+                    ssh_client.connect(
+                        hostname=node.ip_address,
+                        port=node.ssh_port,
+                        username=node.ssh_user,
+                        password=node.ssh_password,
+                        timeout=5
+                    )
+                    
+                # Check if certbot renewal is in crontab
+                stdin, stdout, stderr = ssh_client.exec_command("crontab -l 2>/dev/null | grep 'certbot renew' || echo 'not configured'")
+                renewal_configured = stdout.read().decode('utf-8').strip() != 'not configured'
+                
+                ssh_client.close()
+                
+                if renewal_configured:
+                    dashboard['renewal_status']['configured'] += 1
+                else:
+                    dashboard['renewal_status']['not_configured'] += 1
+                    
+            except Exception:
+                # If we can't connect, assume renewal is not configured
+                dashboard['renewal_status']['not_configured'] += 1
+                
+        return dashboard

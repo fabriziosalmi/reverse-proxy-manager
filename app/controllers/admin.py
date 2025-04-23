@@ -1313,6 +1313,28 @@ def manage_ssl_certificates(site_id):
         cert_health=cert_health
     )
 
+@admin.route('/ssl-dashboard')
+@login_required
+@admin_required
+def ssl_dashboard():
+    """Dashboard view for all SSL certificates across sites"""
+    from app.services.ssl_certificate_service import SSLCertificateService
+    
+    # Get certificate health dashboard data
+    cert_health = SSLCertificateService.get_certificates_health_dashboard()
+    
+    # Get sites with SSL certificates
+    from app.models.models import SSLCertificate, Site
+    sites_with_certs = db.session.query(Site).join(
+        SSLCertificate, SSLCertificate.site_id == Site.id
+    ).distinct().all()
+    
+    return render_template(
+        'admin/ssl_dashboard.html',
+        cert_health=cert_health,
+        sites_with_certs=sites_with_certs
+    )
+
 @admin.route('/templates')
 @login_required
 @admin_required
