@@ -262,6 +262,145 @@ def toggle_site_active(site_id):
     flash(f'Site {status} successfully', 'success')
     return redirect(url_for('client.list_sites'))
 
+@client.route('/sites/<int:site_id>/ssl', methods=['GET', 'POST'])
+@login_required
+@client_required
+def manage_ssl_certificates(site_id):
+    """SSL certificate management for client sites"""
+    site = Site.query.filter_by(id=site_id, user_id=current_user.id).first_or_404()
+    
+    # Get all nodes serving this site
+    site_nodes = SiteNode.query.filter_by(site_id=site_id).all()
+    nodes = [Node.query.get(sn.node_id) for sn in site_nodes]
+    
+    if request.method == 'POST':
+        # Determine what action we're taking
+        action = request.form.get('action')
+        node_id = request.form.get('node_id')
+        
+        if not node_id and action not in ['check_dns', 'get_recommendations']:
+            flash('Please select a node', 'error')
+            return redirect(url_for('client.manage_ssl_certificates', site_id=site_id))
+        
+        from app.services.ssl_certificate_service import SSLCertificateService
+        
+        if action == 'check':
+            # Check certificate status
+            result = SSLCertificateService.check_certificate_status(site_id, node_id)
+            
+            if 'error' in result:
+                flash(f"Error checking certificate: {result['error']}", 'error')
+            
+            # Store result in session for template rendering
+            from flask import session
+            session['cert_check_result'] = result
+            
+        elif action == 'request':
+            # Request new certificate
+            email = request.form.get('email')
+            challenge_type = request.form.get('challenge_type', 'http')
+            cert_type = request.form.get('cert_type', 'standard')
+            dns_provider = request.form.get('dns_provider')
+            
+            # Process DNS credentials if provided
+            dns_credentials = None
+            if challenge_type == 'dns' and dns_provider:
+                dns_credentials = {}
+                if dns_provider == 'cloudflare':
+                    dns_credentials['token'] = request.form.get('cf_token')
+                elif dns_provider == 'route53':
+                    dns_credentials['access_key'] = request.form.get('aws_access_key')
+                    dns_credentials['secret_key'] = request.form.get('aws_secret_key')
+                elif dns_provider == 'digitalocean':
+                    dns_credentials['token'] = request.form.get('do_token')
+                elif dns_provider == 'godaddy':
+                    dns_credentials['key'] = request.form.get('godaddy_key')
+                    dns_credentials['secret'] = request.form.get('godaddy_secret')
+            
+            # Request certificate with appropriate validation method
+            result = SSLCertificateService.request_certificate(
+                site_id, 
+                node_id, 
+                email, 
+                challenge_type=challenge_type,
+                dns_provider=dns_provider,
+                dns_credentials=dns_credentials,
+                cert_type=cert_type
+            )
+            
+            if result.get('success'):
+                flash('Certificate request initiated. Please check status in a few minutes.', 'success')
+                
+                # If manual DNS challenge, display information
+                if challenge_type == 'manual-dns' and 'txt_records' in result:
+                    from flask import session
+                    session['dns_challenge'] = {
+                        'txt_records': result.get('txt_records', []),
+                        'instructions': result.get('instructions', '')
+                    }
+            else:
+                flash(f"Certificate request failed: {result.get('message', 'Unknown error')}", 'error')
+        
+        elif action == 'generate_self_signed':
+            # Generate self-signed certificate
+            result = SSLCertificateService.generate_self_signed_certificate(site_id, node_id)
+            
+            if result.get('success'):
+                flash('Self-signed certificate generated successfully.', 'success')
+            else:
+                flash(f"Self-signed certificate generation failed: {result.get('message', 'Unknown error')}", 'error')
+        
+        elif action == 'setup_renewal':
+            # Setup auto renewal
+            result = SSLCertificateService.setup_auto_renewal(node_id)
+            
+            if result.get('success'):
+                flash('Certificate auto-renewal configured successfully.', 'success')
+            else:
+                flash(f"Failed to set up auto-renewal: {result.get('message', 'Unknown error')}", 'error')
+        
+        elif action == 'revoke':
+            # Revoke certificate
+            result = SSLCertificateService.revoke_certificate(site_id, node_id)
+            
+            if result.get('success'):
+                flash('Certificate revoked successfully.', 'success')
+            else:
+                flash(f"Failed to revoke certificate: {result.get('message', 'Unknown error')}", 'error')
+                
+        elif action == 'check_dns':
+            # Check DNS settings for the domain
+            result = SSLCertificateService.check_domain_dns(site.domain)
+            
+            # Store result in session for template rendering
+            from flask import session
+            session['dns_check_result'] = result
+        
+        elif action == 'get_recommendations':
+            # Get certificate issuance recommendations
+            result = SSLCertificateService.get_issuance_recommendations(site_id)
+            
+            # Store result in session for template rendering
+            from flask import session
+            session['cert_recommendations'] = result
+        
+        return redirect(url_for('client.manage_ssl_certificates', site_id=site_id))
+    
+    # Get existing certificates
+    ssl_certificates = SSLCertificate.query.filter_by(site_id=site_id).all()
+    
+    # Get supported DNS providers
+    from app.services.ssl_certificate_service import SSLCertificateService
+    dns_providers = SSLCertificateService.get_supported_dns_providers()
+    
+    return render_template(
+        'client/sites/ssl_management.html',
+        site=site,
+        nodes=nodes,
+        ssl_certificates=ssl_certificates,
+        dns_providers=dns_providers
+    )
+
 # API endpoints for client actions
 @client.route('/api/sites', methods=['GET'])
 @login_required

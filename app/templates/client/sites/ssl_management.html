@@ -1,0 +1,423 @@
+{% extends "base.html" %}
+
+{% block title %}SSL Certificate Management - {{ site.domain }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert alert-{{ category if category != 'error' else 'danger' }} alert-dismissible fade show" role="alert">
+                    {{ message }}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1>SSL Certificate Management: {{ site.domain }}</h1>
+    </div>
+
+    {% if site.protocol != 'https' %}
+        <div class="alert alert-warning">
+            <i class="fas fa-exclamation-triangle me-2"></i>
+            This site is not configured for HTTPS. Configure the site to use HTTPS protocol before managing SSL certificates.
+        </div>
+    {% else %}
+        <div class="row">
+            <div class="col-md-4">
+                <div class="card shadow-sm mb-4">
+                    <div class="card-header bg-primary text-white">
+                        <h5 class="card-title mb-0">SSL Actions</h5>
+                    </div>
+                    <div class="card-body">
+                        <form method="POST" id="sslActionForm">
+                            <div class="mb-3">
+                                <label for="node_id" class="form-label">Select Node</label>
+                                <select class="form-select" id="node_id" name="node_id" required>
+                                    <option value="">Choose a node...</option>
+                                    {% for node in nodes %}
+                                        <option value="{{ node.id }}">{{ node.name }} ({{ node.ip_address }})</option>
+                                    {% endfor %}
+                                </select>
+                                <div class="form-text">Select the node to check or request a certificate for.</div>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="action" class="form-label">Action</label>
+                                <select class="form-select" id="action" name="action" required>
+                                    <option value="check">Check Certificate Status</option>
+                                    <option value="request">Request New Certificate</option>
+                                    <option value="generate_self_signed">Generate Self-Signed Certificate</option>
+                                    <option value="setup_renewal">Setup Auto-Renewal</option>
+                                    <option value="revoke">Revoke Certificate</option>
+                                </select>
+                            </div>
+                            
+                            <!-- Certificate Type Selection -->
+                            <div id="cert_type_field" class="mb-3 d-none">
+                                <label for="cert_type" class="form-label">Certificate Type</label>
+                                <select class="form-select" id="cert_type" name="cert_type">
+                                    <option value="standard">Standard Certificate</option>
+                                    <option value="wildcard">Wildcard Certificate (*.domain.com)</option>
+                                </select>
+                                <div class="form-text">Wildcard certificates require DNS validation.</div>
+                            </div>
+                            
+                            <!-- Email for Let's Encrypt notifications -->
+                            <div id="email_field" class="mb-3 d-none">
+                                <label for="email" class="form-label">Email Address</label>
+                                <input type="email" class="form-control" id="email" name="email" placeholder="your.email@example.com">
+                                <div class="form-text">Email address for Let's Encrypt notifications and recovery.</div>
+                            </div>
+                            
+                            <!-- Challenge Type Selection -->
+                            <div id="challenge_type_field" class="mb-3 d-none">
+                                <label for="challenge_type" class="form-label">Validation Method</label>
+                                <select class="form-select" id="challenge_type" name="challenge_type">
+                                    <option value="http">HTTP Validation</option>
+                                    <option value="dns">DNS API Validation</option>
+                                    <option value="manual-dns">Manual DNS Validation</option>
+                                </select>
+                                <div class="form-text">HTTP validation requires your domain to be pointing to this server. DNS validation works for any domain.</div>
+                            </div>
+                            
+                            <!-- DNS Provider Selection -->
+                            <div id="dns_provider_field" class="mb-3 d-none">
+                                <label for="dns_provider" class="form-label">DNS Provider</label>
+                                <select class="form-select" id="dns_provider" name="dns_provider">
+                                    <option value="">Select provider...</option>
+                                    {% for provider in dns_providers %}
+                                        <option value="{{ provider.id }}">{{ provider.name }}</option>
+                                    {% endfor %}
+                                </select>
+                                <div class="form-text">Select your DNS provider for API-based validation.</div>
+                            </div>
+                            
+                            <!-- DNS Credentials (Cloudflare) -->
+                            <div id="cloudflare_creds" class="dns-creds mb-3 d-none">
+                                <label for="cf_token" class="form-label">Cloudflare API Token</label>
+                                <input type="password" class="form-control" id="cf_token" name="cf_token">
+                                <div class="form-text">Create a token with Zone:DNS:Edit permissions.</div>
+                            </div>
+                            
+                            <!-- DNS Credentials (Route53) -->
+                            <div id="route53_creds" class="dns-creds mb-3 d-none">
+                                <label for="aws_access_key" class="form-label">AWS Access Key</label>
+                                <input type="text" class="form-control" id="aws_access_key" name="aws_access_key">
+                                <label for="aws_secret_key" class="form-label mt-2">AWS Secret Key</label>
+                                <input type="password" class="form-control" id="aws_secret_key" name="aws_secret_key">
+                                <div class="form-text">IAM user needs Route53 permissions.</div>
+                            </div>
+                            
+                            <!-- DNS Credentials (DigitalOcean) -->
+                            <div id="digitalocean_creds" class="dns-creds mb-3 d-none">
+                                <label for="do_token" class="form-label">DigitalOcean API Token</label>
+                                <input type="password" class="form-control" id="do_token" name="do_token">
+                                <div class="form-text">Create a token with read/write access.</div>
+                            </div>
+                            
+                            <!-- DNS Credentials (GoDaddy) -->
+                            <div id="godaddy_creds" class="dns-creds mb-3 d-none">
+                                <label for="godaddy_key" class="form-label">GoDaddy API Key</label>
+                                <input type="text" class="form-control" id="godaddy_key" name="godaddy_key">
+                                <label for="godaddy_secret" class="form-label mt-2">GoDaddy API Secret</label>
+                                <input type="password" class="form-control" id="godaddy_secret" name="godaddy_secret">
+                                <div class="form-text">Create API credentials in GoDaddy developer portal.</div>
+                            </div>
+
+                            <div class="d-grid gap-2">
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="fas fa-certificate me-1"></i> Execute Action
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-8">
+                <!-- Certificate Status -->
+                {% if session.get('cert_check_result') %}
+                    <div class="card shadow-sm mb-4">
+                        <div class="card-header bg-info text-white">
+                            <h5 class="card-title mb-0">
+                                <i class="fas fa-info-circle me-1"></i>
+                                Certificate Status
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                            {% if session.get('cert_check_result').get('error') %}
+                                <div class="alert alert-danger">
+                                    {{ session.get('cert_check_result').get('error') }}
+                                </div>
+                            {% else %}
+                                <div class="table-responsive">
+                                    <table class="table table-striped">
+                                        <thead>
+                                            <tr>
+                                                <th>Node</th>
+                                                <th>Status</th>
+                                                <th>Issuer</th>
+                                                <th>Valid Until</th>
+                                                <th>Days Remaining</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for result in session.get('cert_check_result').get('results', []) %}
+                                                <tr>
+                                                    <td>{{ result.get('node_name') }}</td>
+                                                    <td>
+                                                        {% if result.get('certificate', {}).get('status') == 'valid' %}
+                                                            <span class="badge bg-success">Valid</span>
+                                                        {% elif result.get('certificate', {}).get('status') == 'expiring' %}
+                                                            <span class="badge bg-warning">Expiring Soon</span>
+                                                        {% elif result.get('certificate', {}).get('status') == 'expired' %}
+                                                            <span class="badge bg-danger">Expired</span>
+                                                        {% else %}
+                                                            <span class="badge bg-secondary">Not Found</span>
+                                                        {% endif %}
+                                                    </td>
+                                                    <td>{{ result.get('certificate', {}).get('issuer', 'N/A') }}</td>
+                                                    <td>{{ result.get('certificate', {}).get('valid_until', 'N/A') }}</td>
+                                                    <td>{{ result.get('certificate', {}).get('days_remaining', 'N/A') }}</td>
+                                                </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                
+                                {% if session.get('cert_check_result').get('results', [])|length == 0 %}
+                                    <div class="alert alert-info">
+                                        No certificate information found. You may need to request a new certificate.
+                                    </div>
+                                {% endif %}
+                            {% endif %}
+                        </div>
+                    </div>
+                {% endif %}
+                
+                <!-- DNS Challenge Instructions -->
+                {% if session.get('dns_challenge') %}
+                    <div class="card shadow-sm mb-4">
+                        <div class="card-header bg-warning text-dark">
+                            <h5 class="card-title mb-0">
+                                <i class="fas fa-exclamation-triangle me-1"></i>
+                                DNS Challenge Instructions
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                            <p>Add the following TXT records to your DNS configuration to validate your domain ownership:</p>
+                            <div class="table-responsive">
+                                <table class="table table-bordered">
+                                    <thead>
+                                        <tr>
+                                            <th>Record</th>
+                                            <th>Value</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for record in session.get('dns_challenge', {}).get('txt_records', []) %}
+                                            {% if '_acme-challenge' in record %}
+                                                {% set parts = record.split(' ') %}
+                                                <tr>
+                                                    <td><code>{{ parts[0] }}</code></td>
+                                                    <td><code>{{ parts[1:] | join(' ') }}</code></td>
+                                                </tr>
+                                            {% endif %}
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div class="alert alert-info mt-3">
+                                <i class="fas fa-info-circle me-1"></i>
+                                <strong>Next Steps:</strong> After adding these DNS records and waiting for DNS propagation (can take up to 24 hours), run the <code>./scripts/complete_dns_challenge.py {{ site.domain }}</code> command to complete the certificate issuance.
+                            </div>
+                        </div>
+                    </div>
+                {% endif %}
+                
+                <!-- Existing Certificates -->
+                <div class="card shadow-sm mb-4">
+                    <div class="card-header bg-success text-white">
+                        <h5 class="card-title mb-0">
+                            <i class="fas fa-certificate me-1"></i>
+                            Installed SSL Certificates
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        {% if ssl_certificates %}
+                            <div class="table-responsive">
+                                <table class="table table-striped">
+                                    <thead>
+                                        <tr>
+                                            <th>Node</th>
+                                            <th>Status</th>
+                                            <th>Issuer</th>
+                                            <th>Valid From</th>
+                                            <th>Valid Until</th>
+                                            <th>Days Remaining</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for cert in ssl_certificates %}
+                                            <tr>
+                                                <td>{{ cert.node.name if cert.node else 'Unknown Node' }}</td>
+                                                <td>
+                                                    {% if cert.status == 'valid' %}
+                                                        <span class="badge bg-success">Valid</span>
+                                                    {% elif cert.status == 'expiring' %}
+                                                        <span class="badge bg-warning">Expiring Soon</span>
+                                                    {% elif cert.status == 'expired' %}
+                                                        <span class="badge bg-danger">Expired</span>
+                                                    {% elif cert.status == 'self-signed' %}
+                                                        <span class="badge bg-info">Self-Signed</span>
+                                                    {% else %}
+                                                        <span class="badge bg-secondary">Unknown</span>
+                                                    {% endif %}
+                                                </td>
+                                                <td>{{ cert.issuer }}</td>
+                                                <td>{{ cert.valid_from.strftime('%Y-%m-%d') }}</td>
+                                                <td>{{ cert.valid_until.strftime('%Y-%m-%d') }}</td>
+                                                <td>{{ cert.days_remaining }}</td>
+                                            </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        {% else %}
+                            <div class="alert alert-info">
+                                <i class="fas fa-info-circle me-1"></i>
+                                No SSL certificates have been installed yet for this site.
+                                Use the form on the left to request a certificate.
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <!-- Certificate Information -->
+                <div class="card shadow-sm mb-4">
+                    <div class="card-header bg-light">
+                        <h5 class="card-title mb-0">SSL Certificate Information</h5>
+                    </div>
+                    <div class="card-body">
+                        <h6>About Let's Encrypt Certificates</h6>
+                        <ul>
+                            <li>Certificates are valid for 90 days</li>
+                            <li>Auto-renewal should be configured to renew certificates automatically before expiry</li>
+                            <li>Your domain must be publicly accessible on port 80 for HTTP validation</li>
+                            <li>The HTTP-01 challenge is used to verify domain ownership through the /.well-known/acme-challenge/ path</li>
+                            <li>DNS validation allows for wildcard certificates and works for servers behind firewalls</li>
+                        </ul>
+                        
+                        <h6>Self-Signed Certificates</h6>
+                        <ul>
+                            <li>Self-signed certificates can be used for testing or internal use only</li>
+                            <li>Browsers will show security warnings for self-signed certificates</li>
+                            <li>They're useful for getting the proxy running before obtaining a valid certificate</li>
+                        </ul>
+                        
+                        <h6>SSL Certificate Best Practices</h6>
+                        <ul>
+                            <li>Use strong SSL protocols (TLSv1.2, TLSv1.3) and ciphers</li>
+                            <li>Enable OCSP stapling for improved performance</li>
+                            <li>Set up HTTP Strict Transport Security (HSTS) for better security</li>
+                            <li>Redirect all HTTP traffic to HTTPS</li>
+                            <li>Ensure certificates are renewed at least 30 days before expiry</li>
+                        </ul>
+                        
+                        <h6>DNS Challenge & Wildcard Certificates</h6>
+                        <ul>
+                            <li>Wildcard certificates (*.domain.com) can only be obtained using DNS validation</li>
+                            <li>DNS validation requires access to your DNS provider's API</li>
+                            <li>Your DNS provider API credentials are stored securely on the server</li>
+                            <li>For security, use API tokens with minimal permissions when available</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Show/hide the email field based on the action
+        const actionSelect = document.getElementById('action');
+        const emailField = document.getElementById('email_field');
+        const certTypeField = document.getElementById('cert_type_field');
+        const challengeTypeField = document.getElementById('challenge_type_field');
+        const dnsProviderField = document.getElementById('dns_provider_field');
+        const dnsCredFields = document.querySelectorAll('.dns-creds');
+        
+        function updateFormFields() {
+            // Hide all DNS credential fields
+            dnsCredFields.forEach(field => {
+                field.classList.add('d-none');
+            });
+            
+            // Show/hide fields based on selected action
+            if (actionSelect.value === 'request') {
+                emailField.classList.remove('d-none');
+                certTypeField.classList.remove('d-none');
+                challengeTypeField.classList.remove('d-none');
+                
+                // Show DNS provider field if DNS challenge is selected
+                const challengeType = document.getElementById('challenge_type').value;
+                if (challengeType === 'dns') {
+                    dnsProviderField.classList.remove('d-none');
+                    
+                    // Show appropriate credentials fields based on provider
+                    const provider = document.getElementById('dns_provider').value;
+                    if (provider) {
+                        document.getElementById(provider + '_creds')?.classList.remove('d-none');
+                    }
+                } else {
+                    dnsProviderField.classList.add('d-none');
+                }
+            } else {
+                emailField.classList.add('d-none');
+                certTypeField.classList.add('d-none');
+                challengeTypeField.classList.add('d-none');
+                dnsProviderField.classList.add('d-none');
+            }
+        }
+        
+        // Update fields on initial load
+        updateFormFields();
+        
+        // Add event listeners
+        actionSelect.addEventListener('change', updateFormFields);
+        
+        document.getElementById('challenge_type')?.addEventListener('change', function() {
+            const certType = document.getElementById('cert_type').value;
+            
+            // If wildcard is selected, force DNS validation
+            if (certType === 'wildcard' && this.value === 'http') {
+                this.value = 'dns';
+                alert('Wildcard certificates require DNS validation.');
+            }
+            
+            updateFormFields();
+        });
+        
+        document.getElementById('cert_type')?.addEventListener('change', function() {
+            const challengeType = document.getElementById('challenge_type').value;
+            
+            // If wildcard is selected, force DNS validation
+            if (this.value === 'wildcard' && challengeType === 'http') {
+                document.getElementById('challenge_type').value = 'dns';
+                alert('Wildcard certificates require DNS validation.');
+                updateFormFields();
+            }
+        });
+        
+        document.getElementById('dns_provider')?.addEventListener('change', function() {
+            updateFormFields();
+        });
+    });
+</script>
+{% endblock %}
