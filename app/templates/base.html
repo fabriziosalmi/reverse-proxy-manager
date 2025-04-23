@@ -12,275 +12,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
     
     <!-- Custom styles -->
-    <style>
-        :root {
-            /* Light theme variables */
-            --primary-color: #0066CC;
-            --primary-dark: #0052a3;
-            --success-color: #198754;
-            --info-color: #0dcaf0;
-            --warning-color: #ffc107;
-            --danger-color: #dc3545;
-            --bg-color: #f8f9fa;
-            --text-color: #343a40;
-            --card-bg: #ffffff;
-            --border-color: rgba(0, 0, 0, 0.075);
-            --box-shadow-color: rgba(0, 0, 0, 0.05);
-            --box-shadow-hover: rgba(0, 0, 0, 0.08);
-            --table-stripe-bg: rgba(0, 0, 0, 0.02);
-            --table-hover-bg: rgba(0, 102, 204, 0.03);
-            --nav-hover-bg: rgba(255, 255, 255, 0.1);
-            --input-focus-shadow: rgba(0, 102, 204, 0.25);
-            --dropdown-hover-bg: rgba(0, 102, 204, 0.05);
-            --footer-bg: #f8f9fa;
-            --footer-text: #6c757d;
-            --progress-bg: #e9ecef;
-        }
-        
-        [data-bs-theme="dark"] {
-            /* Dark theme variables */
-            --primary-color: #0d6efd;
-            --primary-dark: #0a58ca;
-            --bg-color: #212529;
-            --text-color: #f8f9fa;
-            --card-bg: #2c3034;
-            --border-color: rgba(255, 255, 255, 0.075);
-            --box-shadow-color: rgba(0, 0, 0, 0.15);
-            --box-shadow-hover: rgba(0, 0, 0, 0.25);
-            --table-stripe-bg: rgba(255, 255, 255, 0.05);
-            --table-hover-bg: rgba(13, 110, 253, 0.1);
-            --nav-hover-bg: rgba(255, 255, 255, 0.1);
-            --input-focus-shadow: rgba(13, 110, 253, 0.25);
-            --dropdown-hover-bg: rgba(13, 110, 253, 0.1);
-            --footer-bg: #212529;
-            --footer-text: #adb5bd;
-            --progress-bg: #495057;
-        }
-        
-        body {
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            background-color: var(--bg-color);
-            color: var(--text-color);
-            transition: background-color 0.3s ease, color 0.3s ease;
-        }
-        
-        main {
-            flex: 1;
-            padding: 1.5rem 0;
-        }
-        
-        .navbar-brand {
-            font-weight: 700;
-            letter-spacing: -0.5px;
-        }
-        
-        .navbar {
-            box-shadow: 0 2px 10px var(--box-shadow-color);
-            padding: 0.75rem 1rem;
-            transition: box-shadow 0.3s ease;
-        }
-        
-        .nav-link {
-            font-weight: 500;
-            transition: all 0.2s ease;
-            padding: 0.5rem 1rem;
-            border-radius: 4px;
-            margin: 0 0.125rem;
-        }
-        
-        .nav-link:hover {
-            background-color: var(--nav-hover-bg);
-        }
-        
-        .card {
-            border-radius: 0.625rem;
-            box-shadow: 0 4px 12px var(--box-shadow-color);
-            border: none;
-            margin-bottom: 1.75rem;
-            overflow: hidden;
-            transition: transform 0.2s, box-shadow 0.2s;
-            background-color: var(--card-bg);
-        }
-        
-        .card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 15px var(--box-shadow-hover);
-        }
-        
-        .card-header {
-            border-bottom: 1px solid var(--border-color);
-            background-color: var(--card-bg);
-            padding: 1rem 1.25rem;
-            font-weight: 600;
-        }
-        
-        .card-body {
-            padding: 1.5rem;
-        }
-        
-        .btn {
-            border-radius: 0.375rem;
-            padding: 0.5rem 1rem;
-            font-weight: 500;
-            transition: all 0.2s;
-        }
-        
-        .btn-sm {
-            border-radius: 0.25rem;
-            padding: 0.25rem 0.5rem;
-        }
-        
-        .btn-primary {
-            background-color: var(--primary-color);
-            border-color: var(--primary-color);
-        }
-        
-        .btn-primary:hover, .btn-primary:focus {
-            background-color: var(--primary-dark);
-            border-color: var(--primary-dark);
-        }
-        
-        .bg-primary {
-            background-color: var(--primary-color) !important;
-        }
-        
-        .table {
-            font-size: 0.95rem;
-        }
-        
-        .table th {
-            font-weight: 600;
-            border-top: none;
-        }
-        
-        .table-striped tbody tr:nth-of-type(odd) {
-            background-color: var(--table-stripe-bg);
-        }
-        
-        .table-hover tbody tr:hover {
-            background-color: var(--table-hover-bg);
-        }
-        
-        .badge {
-            font-weight: 500;
-            padding: 0.35em 0.65em;
-        }
-        
-        .progress {
-            height: 0.75rem;
-            border-radius: 0.5rem;
-            background-color: var(--progress-bg);
-        }
-        
-        .nav-link.active {
-            font-weight: 600;
-            background-color: var(--nav-hover-bg);
-        }
-        
-        .form-control, .form-select {
-            border-radius: 0.375rem;
-            padding: 0.5rem 0.75rem;
-            border-color: var(--border-color);
-            background-color: var(--card-bg);
-            color: var(--text-color);
-            transition: border-color 0.3s ease, background-color 0.3s ease, color 0.3s ease;
-        }
-        
-        .form-control:focus, .form-select:focus {
-            box-shadow: 0 0 0 0.25rem var(--input-focus-shadow);
-        }
-        
-        .dropdown-menu {
-            border-radius: 0.5rem;
-            box-shadow: 0 0.5rem 1rem var(--box-shadow-color);
-            padding: 0.5rem 0;
-            border: none;
-            background-color: var(--card-bg);
-            transition: background-color 0.3s ease;
-        }
-        
-        .dropdown-item {
-            padding: 0.5rem 1.25rem;
-            font-weight: 500;
-            color: var(--text-color);
-            transition: color 0.3s ease;
-        }
-        
-        .dropdown-item:hover {
-            background-color: var(--dropdown-hover-bg);
-        }
-        
-        .alert {
-            border-radius: 0.5rem;
-            border: none;
-            box-shadow: 0 2px 6px var(--box-shadow-color);
-        }
-        
-        footer {
-            font-size: 0.9rem;
-            color: var(--footer-text);
-            background-color: var(--footer-bg);
-            transition: background-color 0.3s ease, color 0.3s ease;
-        }
-        
-        pre, code {
-            background-color: var(--table-stripe-bg);
-            color: var(--text-color);
-            transition: background-color 0.3s ease, color 0.3s ease;
-            border-radius: 0.375rem;
-        }
-        
-        /* Theme toggle button */
-        .theme-toggle {
-            cursor: pointer;
-            padding: 0.375rem 0.75rem;
-            font-size: 0.85rem;
-            display: flex;
-            align-items: center;
-            border-radius: 1.5rem;
-            transition: all 0.3s ease;
-            background-color: rgba(255, 255, 255, 0.15);
-            margin-left: 1rem;
-        }
-        
-        .theme-toggle:hover {
-            background-color: rgba(255, 255, 255, 0.25);
-        }
-        
-        [data-bs-theme="dark"] .theme-toggle .fa-moon {
-            display: none;
-        }
-        
-        [data-bs-theme="dark"] .theme-toggle .fa-sun {
-            display: inline-block;
-        }
-        
-        [data-bs-theme="light"] .theme-toggle .fa-sun {
-            display: none;
-        }
-        
-        [data-bs-theme="light"] .theme-toggle .fa-moon {
-            display: inline-block;
-        }
-        
-        @media (max-width: 767.98px) {
-            .sidebar {
-                position: static;
-                padding-top: 20px;
-            }
-            
-            .card-body {
-                padding: 1.25rem;
-            }
-            
-            .theme-toggle {
-                margin-left: 0;
-                margin-top: 0.5rem;
-            }
-        }
-    </style>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
     
     {% block head_extra %}{% endblock %}
 </head>
@@ -338,6 +70,11 @@
                                                 <i class="fas fa-clipboard-list me-2"></i> System Logs
                                             </a>
                                         </li>
+                                        <li>
+                                            <a class="dropdown-item" href="{{ url_for('admin.analytics_dashboard') }}">
+                                                <i class="fas fa-chart-line me-2"></i> Analytics
+                                            </a>
+                                        </li>
                                         <li><hr class="dropdown-divider"></li>
                                         <li>
                                             <a class="dropdown-item text-danger" href="{{ url_for('admin.system_reset') }}">
@@ -355,6 +92,11 @@
                                 <li class="nav-item">
                                     <a class="nav-link {% if 'client.list_sites' in request.endpoint %}active{% endif %}" href="{{ url_for('client.list_sites') }}">
                                         <i class="fas fa-globe me-1"></i> My Sites
+                                    </a>
+                                </li>
+                                <li class="nav-item">
+                                    <a class="nav-link {% if request.endpoint == 'client.analytics' %}active{% endif %}" href="{{ url_for('client.analytics') }}">
+                                        <i class="fas fa-chart-bar me-1"></i> Analytics
                                     </a>
                                 </li>
                             {% endif %}

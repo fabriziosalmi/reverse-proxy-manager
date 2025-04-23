@@ -1,0 +1,81 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Flask
+instance/
+.webassets-cache
+app.db
+
+# Virtual Environment
+venv/
+ENV/
+.env
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Log files
+*.log
+logs/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# SSL certificates (in development)
+*.pem
+*.key
+*.crt
+
+# Temporary files
+tmp/
+temp/
+
+# Compiled Javascript
+node_modules/
+package-lock.json
+
+# Generated Nginx configs
+nginx_configs/sites/*
+!nginx_configs/sites/.gitkeep
+
+# Migrations
+migrations/versions/*
+!migrations/versions/.gitkeep
+
+# Local configuration
+config/local_settings.py
+
+# Coverage reports
+.coverage
+htmlcov/
+
+# Docker
+.dockerignore
+
+# Ansible
+ansible/*.retry
