@@ -1194,6 +1194,7 @@ fi
             
             if cert_record:
                 # Update existing record
+                cert_record.domain = domain  # Ensure domain is set
                 cert_record.issuer = domain
                 cert_record.subject = domain
                 cert_record.valid_from = now
@@ -1208,6 +1209,7 @@ fi
                 cert_record = SSLCertificate(
                     site_id=site_id,
                     node_id=node_id,
+                    domain=domain,  # Explicitly set the domain value
                     issuer=domain,
                     subject=domain,
                     valid_from=now,
@@ -1474,6 +1476,176 @@ fi
             
         # Fallback to the first available node
         return nodes[0]
+    
+    @staticmethod
+    def ensure_ssl_directories(site_id, node_id):
+        """
+        Ensure SSL directories exist on a node for a site to prevent Nginx from failing to reload
+        
+        Args:
+            site_id: ID of the site
+            node_id: ID of the node
+            
+        Returns:
+            dict: Result of the operation
+        """
+        site = Site.query.get(site_id)
+        node = Node.query.get(node_id)
+        
+        if not site or not node:
+            return {"success": False, "message": "Site or node not found"}
+            
+        try:
+            # Connect to the node
+            ssh_client = paramiko.SSHClient()
+            ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            
+            if node.ssh_key_path:
+                ssh_client.connect(
+                    hostname=node.ip_address,
+                    port=node.ssh_port,
+                    username=node.ssh_user,
+                    key_filename=node.ssh_key_path,
+                    timeout=5
+                )
+            else:
+                ssh_client.connect(
+                    hostname=node.ip_address,
+                    port=node.ssh_port,
+                    username=node.ssh_user,
+                    password=node.ssh_password,
+                    timeout=5
+                )
+                
+            # Create directories and initial placeholder certificates if they don't exist
+            domain = site.domain
+            cert_dir = f"/etc/letsencrypt/live/{domain}"
+            
+            # Create the directory structure
+            stdin, stdout, stderr = ssh_client.exec_command(f"mkdir -p {cert_dir}")
+            exit_status = stdout.channel.recv_exit_status()
+            
+            if exit_status != 0:
+                error = stderr.read().decode('utf-8')
+                ssh_client.close()
+                return {
+                    "success": False,
+                    "message": f"Failed to create SSL certificate directory: {error}"
+                }
+                
+            # Check if certificates already exist
+            stdin, stdout, stderr = ssh_client.exec_command(f"test -f {cert_dir}/fullchain.pem && echo 'exists' || echo 'missing'")
+            cert_exists = stdout.read().decode('utf-8').strip() == 'exists'
+            
+            # If certificates don't exist, create self-signed placeholders
+            if not cert_exists:
+                # Generate a minimal self-signed certificate to prevent Nginx from failing
+                # This is a temporary fix until proper certificates are obtained
+                log_activity('info', f"Creating temporary self-signed certificate for {domain} on node {node.name}")
+                
+                # Create a minimal OpenSSL configuration
+                openssl_config = f"""
+[req]
+distinguished_name = req_distinguished_name
+req_extensions = v3_req
+prompt = no
+
+[req_distinguished_name]
+CN = {domain}
+
+[v3_req]
+keyUsage = keyEncipherment, dataEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName = DNS:{domain}, DNS:www.{domain}
+"""
+                
+                # Write the configuration to a temporary file on the node
+                sftp = ssh_client.open_sftp()
+                temp_config_path = f"/tmp/{domain}_openssl.cnf"
+                with sftp.file(temp_config_path, 'w') as f:
+                    f.write(openssl_config)
+                
+                # Generate private key and certificate
+                stdin, stdout, stderr = ssh_client.exec_command(f"""
+                openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+                -keyout {cert_dir}/privkey.pem -out {cert_dir}/fullchain.pem \
+                -config {temp_config_path} -extensions v3_req && \
+                cp {cert_dir}/fullchain.pem {cert_dir}/chain.pem && \
+                cp {cert_dir}/fullchain.pem {cert_dir}/cert.pem && \
+                chmod 600 {cert_dir}/privkey.pem && \
+                chmod 644 {cert_dir}/fullchain.pem {cert_dir}/chain.pem {cert_dir}/cert.pem && \
+                rm {temp_config_path}
+                """)
+                
+                exit_status = stdout.channel.recv_exit_status()
+                cmd_output = stdout.read().decode('utf-8')
+                cmd_error = stderr.read().decode('utf-8')
+                
+                if exit_status != 0:
+                    ssh_client.close()
+                    return {
+                        "success": False,
+                        "message": f"Failed to create temporary SSL certificate: {cmd_error}"
+                    }
+                
+                # Create a database record for this self-signed certificate
+                now = datetime.now()
+                expiry_date = now + timedelta(days=365)
+                
+                cert_record = SSLCertificate.query.filter_by(
+                    site_id=site_id, 
+                    node_id=node_id
+                ).first()
+                
+                if cert_record:
+                    # Update existing record
+                    cert_record.domain = domain  # Ensure domain is set
+                    cert_record.issuer = domain
+                    cert_record.subject = domain
+                    cert_record.valid_from = now
+                    cert_record.valid_until = expiry_date
+                    cert_record.days_remaining = 365
+                    cert_record.status = "valid"
+                    cert_record.is_wildcard = False
+                    cert_record.is_self_signed = True
+                    cert_record.updated_at = now
+                else:
+                    # Create new record
+                    cert_record = SSLCertificate(
+                        site_id=site_id,
+                        node_id=node_id,
+                        domain=domain,  # Explicitly set the domain value
+                        issuer=domain,
+                        subject=domain,
+                        valid_from=now,
+                        valid_until=expiry_date,
+                        days_remaining=365,
+                        status="valid",
+                        is_wildcard=False,
+                        is_self_signed=True,
+                        created_at=now,
+                        updated_at=now
+                    )
+                    db.session.add(cert_record)
+                
+                db.session.commit()
+                
+                log_activity('info', f"Created temporary self-signed certificate for {domain} on node {node.name}")
+                
+            ssh_client.close()
+            
+            return {
+                "success": True,
+                "message": f"SSL certificate directories and files are ready for {domain}",
+                "certificate_exists": cert_exists
+            }
+            
+        except Exception as e:
+            log_activity('error', f"Error ensuring SSL directories for {site.domain} on node {node.name}: {str(e)}")
+            return {
+                "success": False,
+                "message": f"Failed to ensure SSL directories: {str(e)}"
+            }
     
     @staticmethod
     def get_certificates_health_dashboard():

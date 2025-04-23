@@ -505,6 +505,16 @@ def deploy_to_node(site_id, node_id, nginx_config, test_only=False):
     _, security_warnings = NginxValidationService.validate_security_headers(nginx_config)
     warnings.extend(security_warnings)
     
+    # Ensure SSL directories and placeholder certificates exist if this is an HTTPS site
+    # This prevents Nginx from failing to reload due to missing certificate files
+    if site.protocol == 'https' and not test_only:
+        from app.services.ssl_certificate_service import SSLCertificateService
+        ssl_dir_result = SSLCertificateService.ensure_ssl_directories(site_id, node_id)
+        if not ssl_dir_result.get('success', False):
+            warnings.append(f"Warning: {ssl_dir_result.get('message', 'Failed to prepare SSL directories')}")
+        elif ssl_dir_result.get('certificate_exists', False) == False:
+            warnings.append("Created temporary self-signed certificate. Remember to request a real certificate.")
+    
     # Test the configuration
     is_valid, error_message, ssl_details = NginxValidationService.test_config_on_node(node_id, nginx_config, domain)
     
@@ -628,29 +638,6 @@ def deploy_to_node(site_id, node_id, nginx_config, test_only=False):
         
         # Move the temporary file to the final location (atomic operation)
         ssh_client.exec_command(f"mv {temp_file_path} {config_file_path}")
-        
-        # Special handling for HTTPS sites - check and create SSL directories if needed
-        if site.protocol == 'https':
-            # Extract SSL certificate paths
-            ssl_certificate, ssl_certificate_key = NginxValidationService.extract_ssl_file_paths(nginx_config)
-            
-            # If certificate paths exist, ensure their parent directories exist
-            if ssl_certificate:
-                cert_dir = os.path.dirname(ssl_certificate)
-                stdin, stdout, stderr = ssh_client.exec_command(f"mkdir -p {cert_dir}")
-            
-            if ssl_certificate_key:
-                key_dir = os.path.dirname(ssl_certificate_key)
-                stdin, stdout, stderr = ssh_client.exec_command(f"mkdir -p {key_dir}")
-            
-            # Check if SSL certificates exist and log a warning if not
-            all_exist, missing_files, _ = NginxValidationService.check_ssl_certificate_paths(node_id, nginx_config)
-            if not all_exist:
-                missing_files_str = ", ".join(missing_files)
-                log_activity('warning', f"Deployed HTTPS site {domain} but SSL certificates are missing: {missing_files_str}")
-                
-                # Add to warnings but allow deployment to continue
-                warnings.append(f"Deployed HTTPS site but SSL certificates are missing: {missing_files_str}")
         
         # Reload Nginx
         stdin, stdout, stderr = ssh_client.exec_command(node.nginx_reload_command)
