@@ -359,28 +359,45 @@ class SSLCertificate(db.Model):
     
     id = db.Column(db.Integer, primary_key=True)
     site_id = db.Column(db.Integer, db.ForeignKey('sites.id'), nullable=False)
+    node_id = db.Column(db.Integer, db.ForeignKey('nodes.id'), nullable=False)
     domain = db.Column(db.String(255), nullable=False)
     certificate_path = db.Column(db.String(256), nullable=True)
     private_key_path = db.Column(db.String(256), nullable=True)
     fullchain_path = db.Column(db.String(256), nullable=True)
     issuer = db.Column(db.String(64), default='letsencrypt')
-    status = db.Column(db.String(20), default='pending')  # pending, active, expired, error
+    subject = db.Column(db.String(255), nullable=True)
+    fingerprint = db.Column(db.String(255), nullable=True)
+    valid_from = db.Column(db.DateTime, nullable=True)
+    valid_until = db.Column(db.DateTime, nullable=True)
+    days_remaining = db.Column(db.Integer, nullable=True)
+    is_wildcard = db.Column(db.Boolean, default=False)
+    is_self_signed = db.Column(db.Boolean, default=False)
+    # Status can be: 'valid', 'expired', 'expiring_soon', 'not_yet_valid'
+    status = db.Column(db.String(20), default='pending')
     error_message = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    expires_at = db.Column(db.DateTime, nullable=True)
+    
+    # Use foreign_keys to explicitly indicate which columns to join on
+    node = db.relationship('Node', foreign_keys=[node_id])
     
     def to_dict(self):
         return {
             'id': self.id,
             'site_id': self.site_id,
+            'node_id': self.node_id,
             'domain': self.domain,
             'issuer': self.issuer,
+            'subject': self.subject,
+            'valid_from': self.valid_from.isoformat() if self.valid_from else None,
+            'valid_until': self.valid_until.isoformat() if self.valid_until else None,
+            'days_remaining': self.days_remaining,
             'status': self.status,
+            'is_wildcard': self.is_wildcard,
+            'is_self_signed': self.is_self_signed,
             'error_message': self.error_message,
             'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
-            'expires_at': self.expires_at.isoformat() if self.expires_at else None
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
 
 

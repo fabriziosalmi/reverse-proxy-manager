@@ -196,13 +196,17 @@
                                                     <div class="col-md-6">
                                                         <p><strong>Expiry Date:</strong> {{ result.certificate.expiry_date }}</p>
                                                         <p>
-                                                            <strong>Days Remaining:</strong>
-                                                            {% if result.certificate.days_remaining > 30 %}
-                                                                <span class="text-success">{{ result.certificate.days_remaining }} days</span>
-                                                            {% elif result.certificate.days_remaining > 14 %}
-                                                                <span class="text-warning">{{ result.certificate.days_remaining }} days</span>
+                                                            <strong>Status:</strong>
+                                                            {% if result.certificate.status == 'valid' %}
+                                                                <span class="text-success">Valid</span>
+                                                            {% elif result.certificate.status == 'expiring_soon' %}
+                                                                <span class="text-warning">Expiring Soon</span>
+                                                            {% elif result.certificate.status == 'expired' %}
+                                                                <span class="text-danger">Expired</span>
+                                                            {% elif result.certificate.status == 'not_yet_valid' %}
+                                                                <span class="text-info">Not Yet Valid</span>
                                                             {% else %}
-                                                                <span class="text-danger">{{ result.certificate.days_remaining }} days</span>
+                                                                <span class="text-secondary">Unknown</span>
                                                             {% endif %}
                                                         </p>
                                                     </div>
@@ -276,6 +280,7 @@
         const dnsProviderField = document.getElementById('dns_provider_field');
         const dnsCredentialsFields = document.getElementById('dns_credentials_fields');
         const renewalOptions = document.getElementById('renewal_options');
+        const sslActionForm = document.getElementById('sslActionForm');
         
         // Get all DNS provider-specific fields
         const allDnsProviderFields = document.querySelectorAll('.dns-provider-fields');
@@ -366,6 +371,87 @@
             } else {
                 dnsCredentialsFields.classList.add('d-none');
             }
+        });
+        
+        // Form validation
+        sslActionForm.addEventListener('submit', function(event) {
+            const action = actionSelect.value;
+            const nodeId = document.getElementById('node_id').value;
+            
+            // Always require node selection except for specific actions
+            if (!nodeId && !['check_dns', 'get_recommendations'].includes(action)) {
+                event.preventDefault();
+                alert('Please select a node before proceeding.');
+                return false;
+            }
+            
+            // Validation for certificate request
+            if (action === 'request') {
+                const email = document.getElementById('email').value;
+                const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                
+                if (!email || !emailPattern.test(email)) {
+                    event.preventDefault();
+                    alert('Please enter a valid email address.');
+                    return false;
+                }
+                
+                const challengeType = document.getElementById('challenge_type').value;
+                
+                // For DNS validation, verify provider
+                if (challengeType === 'dns') {
+                    const provider = document.getElementById('dns_provider').value;
+                    
+                    if (!provider) {
+                        event.preventDefault();
+                        alert('Please select a DNS provider for DNS validation.');
+                        return false;
+                    }
+                    
+                    // Check provider-specific credentials
+                    if (provider === 'cloudflare' && !document.getElementById('cloudflare_token').value) {
+                        event.preventDefault();
+                        alert('Please enter your Cloudflare API Token.');
+                        return false;
+                    } else if (provider === 'route53') {
+                        const accessKey = document.getElementById('route53_access_key').value;
+                        const secretKey = document.getElementById('route53_secret_key').value;
+                        if (!accessKey || !secretKey) {
+                            event.preventDefault();
+                            alert('Please enter both AWS Access Key and Secret Key.');
+                            return false;
+                        }
+                    } else if (provider === 'digitalocean' && !document.getElementById('digitalocean_token').value) {
+                        event.preventDefault();
+                        alert('Please enter your DigitalOcean API Token.');
+                        return false;
+                    } else if (provider === 'godaddy') {
+                        const key = document.getElementById('godaddy_key').value;
+                        const secret = document.getElementById('godaddy_secret').value;
+                        if (!key || !secret) {
+                            event.preventDefault();
+                            alert('Please enter both GoDaddy API Key and Secret.');
+                            return false;
+                        }
+                    } else if (provider === 'namecheap') {
+                        const username = document.getElementById('namecheap_username').value;
+                        const apiKey = document.getElementById('namecheap_api_key').value;
+                        if (!username || !apiKey) {
+                            event.preventDefault();
+                            alert('Please enter both Namecheap Username and API Key.');
+                            return false;
+                        }
+                    }
+                }
+            } else if (action === 'revoke') {
+                // Add confirmation for destructive actions
+                if (!confirm('Are you sure you want to revoke this certificate? This action cannot be undone.')) {
+                    event.preventDefault();
+                    return false;
+                }
+            }
+            
+            return true;
         });
     });
 </script>

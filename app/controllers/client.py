@@ -302,6 +302,17 @@ def manage_ssl_certificates(site_id):
             cert_type = request.form.get('cert_type', 'standard')
             dns_provider = request.form.get('dns_provider')
             
+            # Validate email for certificate requests
+            import re
+            if not email or not re.match(r"[^@]+@[^@]+\.[^@]+", email):
+                flash('Please provide a valid email address for certificate notifications', 'error')
+                return redirect(url_for('client.manage_ssl_certificates', site_id=site_id))
+            
+            # Validate DNS provider for DNS challenges
+            if challenge_type == 'dns' and not dns_provider and dns_provider != 'manual-dns':
+                flash('Please select a DNS provider for DNS validation', 'error')
+                return redirect(url_for('client.manage_ssl_certificates', site_id=site_id))
+                
             # Process DNS credentials if provided
             dns_credentials = None
             if challenge_type == 'dns' and dns_provider:

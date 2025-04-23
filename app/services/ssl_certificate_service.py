@@ -20,36 +20,54 @@ class SSLCertificateService:
     @staticmethod
     def check_certificate_status(site_id, node_id=None):
         """
-        Check the status of SSL certificates for a site, optionally on a specific node
-        
+        Check the status of SSL certificates for a site
+    
         Args:
-            site_id: ID of the site to check
-            node_id: Optional ID of a specific node to check
-            
+            site_id (int): Site ID
+            node_id (int, optional): Node ID. If provided, only check that node.
+    
         Returns:
-            dict: Certificate status information
+            dict: Certificate status results
         """
         site = Site.query.get(site_id)
+    
         if not site:
-            return {"error": "Site not found"}
-        
-        # Get all nodes serving this site or just the specified node
+            return {
+                "error": f"Site with ID {site_id} not found"
+            }
+    
+        # Get site-nodes relationships
         if node_id:
-            nodes = [Node.query.get(node_id)]
-            if not nodes[0]:
-                return {"error": f"Node with ID {node_id} not found"}
+            site_nodes = SiteNode.query.filter_by(site_id=site_id, node_id=node_id).all()
         else:
             site_nodes = SiteNode.query.filter_by(site_id=site_id).all()
-            nodes = [Node.query.get(sn.node_id) for sn in site_nodes]
-        
+    
+        if not site_nodes:
+            return {
+                "error": f"No nodes found for site {site.domain}"
+            }
+    
         results = []
-        
-        for node in nodes:
+    
+        for site_node in site_nodes:
+            node = Node.query.get(site_node.node_id)
+    
+            if not node:
+                continue
+    
             try:
-                # Connect to the node
+                # Connect to node via SSH
+                import paramiko
+                import tempfile
+                import os
+                from cryptography import x509
+                from cryptography.hazmat.backends import default_backend
+                from cryptography.x509.oid import NameOID
+                from cryptography.hazmat.primitives import hashes
+    
                 ssh_client = paramiko.SSHClient()
                 ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                
+    
                 if node.ssh_key_path:
                     ssh_client.connect(
                         hostname=node.ip_address,
@@ -64,49 +82,50 @@ class SSLCertificateService:
                         username=node.ssh_user,
                         password=node.ssh_password
                     )
-                
+    
                 # Define certificate paths based on site domain
                 cert_path = f"/etc/letsencrypt/live/{site.domain}/fullchain.pem"
                 key_path = f"/etc/letsencrypt/live/{site.domain}/privkey.pem"
-                
+    
                 # Check if certificates exist
                 stdin, stdout, stderr = ssh_client.exec_command(f"test -f {cert_path} && echo 'exists' || echo 'not found'")
                 cert_exists = stdout.read().decode('utf-8').strip() == 'exists'
-                
+    
                 stdin, stdout, stderr = ssh_client.exec_command(f"test -f {key_path} && echo 'exists' || echo 'not found'")
                 key_exists = stdout.read().decode('utf-8').strip() == 'exists'
-                
+    
                 node_result = {
                     "node_id": node.id,
                     "node_name": node.name,
+                    "ip_address": node.ip_address,
                     "certificate_exists": cert_exists,
                     "key_exists": key_exists
                 }
-                
+    
                 # If certificates exist, get detailed information
                 if cert_exists:
                     # Read the certificate
                     sftp = ssh_client.open_sftp()
                     temp_cert_path = tempfile.mktemp()
                     sftp.get(cert_path, temp_cert_path)
-                    
+    
                     with open(temp_cert_path, 'rb') as cert_file:
                         cert_data = cert_file.read()
                         cert = x509.load_pem_x509_certificate(cert_data, default_backend())
-                    
+    
                     # Clean up temp file
                     os.unlink(temp_cert_path)
-                    
+    
                     # Parse certificate information
                     issuer = cert.issuer.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value
                     subject = cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value
                     valid_from = cert.not_valid_before
                     valid_until = cert.not_valid_after
                     days_remaining = (valid_until - datetime.now()).days
-                    
+    
                     # Get certificate fingerprint
                     fingerprint = cert.fingerprint(hashes.SHA256()).hex(':')
-                    
+    
                     # Check SAN (Subject Alternative Names)
                     san = []
                     try:
@@ -117,24 +136,24 @@ class SSLCertificateService:
                     except x509.extensions.ExtensionNotFound:
                         # No SAN extension
                         pass
-                    
+    
                     # Check if certificate matches domain
                     domain_match = site.domain in san or site.domain == subject or f"*.{site.domain.split('.', 1)[1]}" in san
-                    
+    
                     # Check if it's a wildcard certificate
                     is_wildcard = any(name.startswith('*.') for name in san)
-                    
+    
                     # Check certificate status (valid, expired, etc.)
                     now = datetime.now()
                     if now < valid_from:
-                        status = "not yet valid"
+                        status = "not_yet_valid"
                     elif now > valid_until:
                         status = "expired"
                     elif days_remaining < 7:
-                        status = "expiring soon"
+                        status = "expiring_soon"
                     else:
                         status = "valid"
-                    
+    
                     certificate_info = {
                         "issuer": issuer,
                         "subject": subject,
@@ -147,16 +166,16 @@ class SSLCertificateService:
                         "fingerprint": fingerprint,
                         "status": status
                     }
-                    
+    
                     # Add certificate info to node_result
                     node_result["certificate"] = certificate_info
-                    
+    
                     # Check if certificate is in the database and update if needed
                     cert_record = SSLCertificate.query.filter_by(
                         site_id=site_id, 
                         node_id=node.id
                     ).first()
-                    
+    
                     if cert_record:
                         # Update existing record
                         cert_record.issuer = issuer
@@ -185,36 +204,36 @@ class SSLCertificateService:
                             updated_at=datetime.now()
                         )
                         db.session.add(cert_record)
-                    
+    
                     db.session.commit()
-                
+    
                 # Check if Let's Encrypt client (certbot) is installed
                 stdin, stdout, stderr = ssh_client.exec_command("which certbot 2>/dev/null || echo 'not found'")
                 certbot_path = stdout.read().decode('utf-8').strip()
                 node_result["certbot_installed"] = certbot_path != 'not found'
-                
+    
                 # Check if certificate renewal is configured in cron
                 stdin, stdout, stderr = ssh_client.exec_command("crontab -l 2>/dev/null | grep 'certbot renew' || echo 'not found'")
                 renewal_cron = stdout.read().decode('utf-8').strip()
                 node_result["renewal_configured"] = renewal_cron != 'not found'
-                
+    
                 # Close connection
                 ssh_client.close()
-                
+    
                 # Add to results
                 results.append(node_result)
-                
+    
             except Exception as e:
                 # Log exception
                 log_activity('error', f"Error checking certificate for site {site.domain} on node {node.name}: {str(e)}")
-                
+    
                 # Add error result
                 results.append({
                     "node_id": node.id,
                     "node_name": node.name,
                     "error": str(e)
                 })
-        
+    
         return {
             "site_id": site_id,
             "domain": site.domain,

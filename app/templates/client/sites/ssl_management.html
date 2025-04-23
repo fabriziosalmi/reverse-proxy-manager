@@ -171,10 +171,12 @@
                                                     <td>
                                                         {% if result.get('certificate', {}).get('status') == 'valid' %}
                                                             <span class="badge bg-success">Valid</span>
-                                                        {% elif result.get('certificate', {}).get('status') == 'expiring' %}
+                                                        {% elif result.get('certificate', {}).get('status') == 'expiring_soon' %}
                                                             <span class="badge bg-warning">Expiring Soon</span>
                                                         {% elif result.get('certificate', {}).get('status') == 'expired' %}
                                                             <span class="badge bg-danger">Expired</span>
+                                                        {% elif result.get('certificate', {}).get('status') == 'not_yet_valid' %}
+                                                            <span class="badge bg-info">Not Yet Valid</span>
                                                         {% else %}
                                                             <span class="badge bg-secondary">Not Found</span>
                                                         {% endif %}
@@ -222,8 +224,8 @@
                                             {% if '_acme-challenge' in record %}
                                                 {% set parts = record.split(' ') %}
                                                 <tr>
-                                                    <td><code>{{ parts[0] }}</code></td>
-                                                    <td><code>{{ parts[1:] | join(' ') }}</code></td>
+                                                    <td><code>{{ parts[0] }}</code> <button class="btn btn-sm btn-outline-secondary copy-btn" data-copy="{{ parts[0] }}"><i class="fas fa-copy"></i></button></td>
+                                                    <td><code>{{ parts[1:] | join(' ') }}</code> <button class="btn btn-sm btn-outline-secondary copy-btn" data-copy="{{ parts[1:] | join(' ') }}"><i class="fas fa-copy"></i></button></td>
                                                 </tr>
                                             {% endif %}
                                         {% endfor %}
@@ -267,12 +269,14 @@
                                                 <td>
                                                     {% if cert.status == 'valid' %}
                                                         <span class="badge bg-success">Valid</span>
-                                                    {% elif cert.status == 'expiring' %}
+                                                    {% elif cert.status == 'expiring_soon' %}
                                                         <span class="badge bg-warning">Expiring Soon</span>
                                                     {% elif cert.status == 'expired' %}
                                                         <span class="badge bg-danger">Expired</span>
-                                                    {% elif cert.status == 'self-signed' %}
-                                                        <span class="badge bg-info">Self-Signed</span>
+                                                    {% elif cert.status == 'not_yet_valid' %}
+                                                        <span class="badge bg-info">Not Yet Valid</span>
+                                                    {% elif cert.is_self_signed %}
+                                                        <span class="badge bg-secondary">Self-Signed</span>
                                                     {% else %}
                                                         <span class="badge bg-secondary">Unknown</span>
                                                     {% endif %}
@@ -352,6 +356,7 @@
         const challengeTypeField = document.getElementById('challenge_type_field');
         const dnsProviderField = document.getElementById('dns_provider_field');
         const dnsCredFields = document.querySelectorAll('.dns-creds');
+        const sslActionForm = document.getElementById('sslActionForm');
         
         function updateFormFields() {
             // Hide all DNS credential fields
@@ -417,6 +422,110 @@
         
         document.getElementById('dns_provider')?.addEventListener('change', function() {
             updateFormFields();
+        });
+        
+        // Form validation
+        sslActionForm.addEventListener('submit', function(event) {
+            const action = actionSelect.value;
+            const nodeId = document.getElementById('node_id').value;
+            
+            // Always require node selection except for specific actions
+            if (!nodeId && !['check_dns', 'get_recommendations'].includes(action)) {
+                event.preventDefault();
+                alert('Please select a node before proceeding.');
+                return false;
+            }
+            
+            // Validation for certificate request
+            if (action === 'request') {
+                const email = document.getElementById('email').value;
+                const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                
+                if (!email || !emailPattern.test(email)) {
+                    event.preventDefault();
+                    alert('Please enter a valid email address.');
+                    return false;
+                }
+                
+                const challengeType = document.getElementById('challenge_type').value;
+                
+                // For DNS validation, verify provider and credentials
+                if (challengeType === 'dns') {
+                    const provider = document.getElementById('dns_provider').value;
+                    
+                    if (!provider) {
+                        event.preventDefault();
+                        alert('Please select a DNS provider for DNS validation.');
+                        return false;
+                    }
+                    
+                    // Check provider-specific credentials
+                    if (provider === 'cloudflare') {
+                        const token = document.getElementById('cf_token').value;
+                        if (!token) {
+                            event.preventDefault();
+                            alert('Please enter your Cloudflare API Token.');
+                            return false;
+                        }
+                    } else if (provider === 'route53') {
+                        const accessKey = document.getElementById('aws_access_key').value;
+                        const secretKey = document.getElementById('aws_secret_key').value;
+                        if (!accessKey || !secretKey) {
+                            event.preventDefault();
+                            alert('Please enter both AWS Access Key and Secret Key.');
+                            return false;
+                        }
+                    } else if (provider === 'digitalocean') {
+                        const token = document.getElementById('do_token').value;
+                        if (!token) {
+                            event.preventDefault();
+                            alert('Please enter your DigitalOcean API Token.');
+                            return false;
+                        }
+                    } else if (provider === 'godaddy') {
+                        const key = document.getElementById('godaddy_key').value;
+                        const secret = document.getElementById('godaddy_secret').value;
+                        if (!key || !secret) {
+                            event.preventDefault();
+                            alert('Please enter both GoDaddy API Key and Secret.');
+                            return false;
+                        }
+                    }
+                }
+            } else if (action === 'revoke') {
+                // Add confirmation for destructive actions
+                if (!confirm('Are you sure you want to revoke this certificate? This action cannot be undone.')) {
+                    event.preventDefault();
+                    return false;
+                }
+            }
+            
+            return true;
+        });
+        
+        // Implement copy-to-clipboard functionality for DNS TXT records
+        document.querySelectorAll('.copy-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const textToCopy = this.getAttribute('data-copy');
+                navigator.clipboard.writeText(textToCopy)
+                    .then(() => {
+                        // Temporarily change button appearance to indicate success
+                        const originalHTML = this.innerHTML;
+                        this.innerHTML = '<i class="fas fa-check"></i>';
+                        this.classList.remove('btn-outline-secondary');
+                        this.classList.add('btn-success');
+                        
+                        setTimeout(() => {
+                            this.innerHTML = originalHTML;
+                            this.classList.remove('btn-success');
+                            this.classList.add('btn-outline-secondary');
+                        }, 1500);
+                    })
+                    .catch(err => {
+                        console.error('Failed to copy text: ', err);
+                        alert('Failed to copy to clipboard. Please copy the text manually.');
+                    });
+            });
         });
     });
 </script>
