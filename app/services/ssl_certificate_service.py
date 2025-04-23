@@ -1516,13 +1516,23 @@ fi
                     password=node.ssh_password,
                     timeout=5
                 )
-                
-            # Create directories and initial placeholder certificates if they don't exist
-            domain = site.domain
-            cert_dir = f"/etc/letsencrypt/live/{domain}"
             
-            # Create the directory structure
-            stdin, stdout, stderr = ssh_client.exec_command(f"mkdir -p {cert_dir}")
+            # Create all necessary directories with proper permissions
+            domain = site.domain
+            base_dir = "/etc/letsencrypt"
+            archive_dir = f"{base_dir}/archive/{domain}"
+            live_dir = f"{base_dir}/live/{domain}"
+            
+            # Create the directory structure with proper permissions
+            mkdir_cmd = f"""
+            mkdir -p {base_dir}
+            mkdir -p {live_dir}
+            mkdir -p {archive_dir}
+            chmod 755 {base_dir}
+            chmod 755 {live_dir}
+            chmod 700 {archive_dir}
+            """
+            stdin, stdout, stderr = ssh_client.exec_command(mkdir_cmd)
             exit_status = stdout.channel.recv_exit_status()
             
             if exit_status != 0:
@@ -1530,17 +1540,17 @@ fi
                 ssh_client.close()
                 return {
                     "success": False,
-                    "message": f"Failed to create SSL certificate directory: {error}"
+                    "message": f"Failed to create SSL certificate directories: {error}"
                 }
                 
-            # Check if certificates already exist
-            stdin, stdout, stderr = ssh_client.exec_command(f"test -f {cert_dir}/fullchain.pem && echo 'exists' || echo 'missing'")
-            cert_exists = stdout.read().decode('utf-8').strip() == 'exists'
+            # Check if certificates already exist (either as real files or symlinks)
+            stdin, stdout, stderr = ssh_client.exec_command(f"ls -la {live_dir}/fullchain.pem 2>/dev/null || echo 'missing'")
+            cert_check = stdout.read().decode('utf-8').strip()
+            cert_exists = 'missing' not in cert_check
             
             # If certificates don't exist, create self-signed placeholders
             if not cert_exists:
-                # Generate a minimal self-signed certificate to prevent Nginx from failing
-                # This is a temporary fix until proper certificates are obtained
+                # Generate a proper self-signed certificate to prevent Nginx from failing
                 log_activity('info', f"Creating temporary self-signed certificate for {domain} on node {node.name}")
                 
                 # Create a minimal OpenSSL configuration
@@ -1565,18 +1575,32 @@ subjectAltName = DNS:{domain}, DNS:www.{domain}
                 with sftp.file(temp_config_path, 'w') as f:
                     f.write(openssl_config)
                 
+                # Generate all required certificate files in the archive directory
+                ssl_gen_cmd = f"""
                 # Generate private key and certificate
-                stdin, stdout, stderr = ssh_client.exec_command(f"""
                 openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-                -keyout {cert_dir}/privkey.pem -out {cert_dir}/fullchain.pem \
-                -config {temp_config_path} -extensions v3_req && \
-                cp {cert_dir}/fullchain.pem {cert_dir}/chain.pem && \
-                cp {cert_dir}/fullchain.pem {cert_dir}/cert.pem && \
-                chmod 600 {cert_dir}/privkey.pem && \
-                chmod 644 {cert_dir}/fullchain.pem {cert_dir}/chain.pem {cert_dir}/cert.pem && \
-                rm {temp_config_path}
-                """)
+                -keyout {archive_dir}/privkey1.pem -out {archive_dir}/cert1.pem \
+                -config {temp_config_path} -extensions v3_req
                 
+                # Create chain and fullchain
+                cp {archive_dir}/cert1.pem {archive_dir}/chain1.pem
+                cat {archive_dir}/cert1.pem {archive_dir}/chain1.pem > {archive_dir}/fullchain1.pem
+                
+                # Set correct permissions
+                chmod 600 {archive_dir}/privkey1.pem
+                chmod 644 {archive_dir}/cert1.pem {archive_dir}/chain1.pem {archive_dir}/fullchain1.pem
+                
+                # Create symlinks from live to archive
+                ln -sf {archive_dir}/privkey1.pem {live_dir}/privkey.pem
+                ln -sf {archive_dir}/cert1.pem {live_dir}/cert.pem
+                ln -sf {archive_dir}/chain1.pem {live_dir}/chain.pem
+                ln -sf {archive_dir}/fullchain1.pem {live_dir}/fullchain.pem
+                
+                # Clean up temporary file
+                rm {temp_config_path}
+                """
+                
+                stdin, stdout, stderr = ssh_client.exec_command(ssl_gen_cmd)
                 exit_status = stdout.channel.recv_exit_status()
                 cmd_output = stdout.read().decode('utf-8')
                 cmd_error = stderr.read().decode('utf-8')
@@ -1586,6 +1610,18 @@ subjectAltName = DNS:{domain}, DNS:www.{domain}
                     return {
                         "success": False,
                         "message": f"Failed to create temporary SSL certificate: {cmd_error}"
+                    }
+                
+                # Verify that certificates are now in place
+                stdin, stdout, stderr = ssh_client.exec_command(f"ls -la {live_dir}/fullchain.pem 2>/dev/null || echo 'still missing'")
+                cert_check = stdout.read().decode('utf-8').strip()
+                cert_exists = 'still missing' not in cert_check
+                
+                if not cert_exists:
+                    ssh_client.close()
+                    return {
+                        "success": False,
+                        "message": "Failed to verify SSL certificates after creation"
                     }
                 
                 # Create a database record for this self-signed certificate
