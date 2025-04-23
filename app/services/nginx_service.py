@@ -543,30 +543,84 @@ def deploy_to_node(site_id, node_id, nginx_config, test_only=False):
         # Remove the temporary local file
         os.unlink(temp_path)
         
-        # Find the nginx executable path - similar to what we do in test_config_on_node
-        nginx_paths = [
-            "nginx",                      # If in PATH
-            "/usr/sbin/nginx",            # Debian/Ubuntu common location
-            "/usr/local/nginx/sbin/nginx", # Manual install common location
-            "/usr/local/sbin/nginx",      # Some package managers
-            "/opt/nginx/sbin/nginx"       # Custom installs
-        ]
+        # Enhanced nginx executable discovery specifically for Ubuntu systems
         
-        # Try to find working nginx path
-        nginx_path = None
-        for path in nginx_paths:
-            stdin, stdout, stderr = ssh_client.exec_command(f"which {path} 2>/dev/null || echo 'not found'")
-            result = stdout.read().decode('utf-8').strip()
-            if result != 'not found' and 'nginx' in result:
-                nginx_path = path
-                break
+        # First try standard environment PATH with a full env sourcing
+        stdin, stdout, stderr = ssh_client.exec_command("bash -l -c 'which nginx' 2>/dev/null || echo 'not found'")
+        result = stdout.read().decode('utf-8').strip()
+        if result != 'not found' and 'nginx' in result:
+            nginx_path = result
+        else:
+            # Try common Ubuntu/Debian installation paths
+            nginx_paths = [
+                "/usr/sbin/nginx",            # Standard Debian/Ubuntu location
+                "/usr/bin/nginx",             # Alternative location
+                "/usr/local/nginx/sbin/nginx", # Manual install common location
+                "/usr/local/sbin/nginx",      # Some package managers
+                "/usr/share/nginx/sbin/nginx", # Some package managers
+                "/opt/nginx/sbin/nginx",      # Custom installs
+                "/snap/bin/nginx"             # Snap installation
+            ]
+            
+            # Try to find working nginx path
+            nginx_path = None
+            for path in nginx_paths:
+                stdin, stdout, stderr = ssh_client.exec_command(f"test -x {path} && echo {path} || echo 'not found'")
+                result = stdout.read().decode('utf-8').strip()
+                if result != 'not found':
+                    nginx_path = result
+                    break
         
+        # If nginx binary still not found, try active service detection
         if not nginx_path:
-            # As a last resort, try to find it using find command
-            stdin, stdout, stderr = ssh_client.exec_command("find /usr -name nginx -type f -executable 2>/dev/null | head -1")
+            # Check if nginx service is active and get its path
+            stdin, stdout, stderr = ssh_client.exec_command("systemctl status nginx 2>/dev/null | grep 'Main PID' | awk '{print $3}' || echo 'not found'")
             result = stdout.read().decode('utf-8').strip()
-            if result:
+            if result != 'not found' and result.isdigit():
+                # Get the executable path from the process
+                pid = result
+                stdin, stdout, stderr = ssh_client.exec_command(f"readlink -f /proc/{pid}/exe 2>/dev/null || echo 'not found'")
+                result = stdout.read().decode('utf-8').strip()
+                if result != 'not found' and 'nginx' in result:
+                    nginx_path = result
+        
+        # If still not found, try a comprehensive file search
+        if not nginx_path:
+            # Try finding executable with dpkg (Debian/Ubuntu package manager)
+            stdin, stdout, stderr = ssh_client.exec_command("dpkg -l | grep nginx | awk '{print $2}' | grep -v lib | head -1 || echo 'not found'")
+            result = stdout.read().decode('utf-8').strip()
+            if result != 'not found':
+                # If any package is found, try dpkg to find binary
+                package_name = result
+                stdin, stdout, stderr = ssh_client.exec_command(f"dpkg -L {package_name} | grep bin/nginx || echo 'not found'")
+                result = stdout.read().decode('utf-8').strip()
+                if result != 'not found' and 'nginx' in result:
+                    # Take the first line as the binary path
+                    nginx_path = result.split('\n')[0]
+        
+        # Last resort: deep file search
+        if not nginx_path:
+            # This might be slow but will find nginx in most cases
+            stdin, stdout, stderr = ssh_client.exec_command("find /usr /etc /opt /snap -name nginx -type f -executable 2>/dev/null | head -1 || echo 'not found'")
+            result = stdout.read().decode('utf-8').strip()
+            if result != 'not found':
                 nginx_path = result
+        
+        # If nginx binary still not found, provide installation instructions
+        if not nginx_path:
+            # Try to determine the OS for better help message
+            stdin, stdout, stderr = ssh_client.exec_command("lsb_release -ds 2>/dev/null || cat /etc/os-release 2>/dev/null | grep PRETTY_NAME | cut -d '\"' -f 2 || echo 'Unknown'")
+            os_info = stdout.read().decode('utf-8').strip()
+            
+            if "Ubuntu" in os_info or "Debian" in os_info:
+                raise Exception(f"Could not find nginx executable on the server ({os_info}). Please install nginx using: sudo apt update && sudo apt install -y nginx")
+            else:
+                raise Exception(f"Could not find nginx executable on the server ({os_info}). Please check nginx installation.")
+        
+        # Store the detected nginx path in node properties for future use
+        if hasattr(node, 'detected_nginx_path') and not node.detected_nginx_path == nginx_path:
+            node.detected_nginx_path = nginx_path
+            db.session.commit()
         
         # Get the custom reload command or use default with found nginx path
         if 'systemctl' in node.nginx_reload_command:
