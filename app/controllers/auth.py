@@ -83,6 +83,22 @@ def login():
 @auth.route('/logout')
 @login_required
 def logout():
+    # Get user info before logout for logging
+    user_id = current_user.id
+    username = current_user.username
+    
+    # Import logger service
+    from app.services.logger_service import log_activity
+    
+    # Log the logout activity
+    log_activity(
+        category='auth',
+        action='logout',
+        resource_type='user',
+        resource_id=user_id,
+        details=f'User {username} logged out'
+    )
+    
     logout_user()
     flash('You have been logged out', 'info')
     return redirect(url_for('auth.login'))
