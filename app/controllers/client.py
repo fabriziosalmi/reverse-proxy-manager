@@ -78,7 +78,13 @@ def new_site():
             user_id=current_user.id,
             use_waf=use_waf,
             custom_config=custom_config,
-            is_active=True
+            is_active=True,
+            # Cache configuration
+            enable_cache='enable_cache' in request.form,
+            cache_time=int(request.form.get('cache_time', 3600)),
+            cache_static_time=int(request.form.get('cache_static_time', 86400)),
+            cache_browser_time=int(request.form.get('cache_browser_time', 3600)),
+            custom_cache_rules=request.form.get('custom_cache_rules')
         )
         
         db.session.add(site)
@@ -135,72 +141,57 @@ def view_site(site_id):
 
 @client.route('/sites/<int:site_id>/edit', methods=['GET', 'POST'])
 @login_required
-@client_required
 def edit_site(site_id):
-    site = Site.query.get_or_404(site_id)
-    
-    # Check if the site belongs to the current user
-    if site.user_id != current_user.id:
-        abort(403)
-    
-    if request.method == 'GET':
-        # Get all active nodes and the ones currently assigned to this site
-        all_nodes = Node.query.filter_by(is_active=True).all()
-        assigned_node_ids = [sn.node_id for sn in SiteNode.query.filter_by(site_id=site_id).all()]
-        
-        return render_template('client/sites/edit.html', 
-                               site=site, 
-                               nodes=all_nodes, 
-                               assigned_node_ids=assigned_node_ids)
+    # Check if site exists and belongs to the current user
+    site = Site.query.filter_by(id=site_id, user_id=current_user.id).first_or_404()
     
     if request.method == 'POST':
+        # Extract data from form
         name = request.form.get('name')
-        # Domain cannot be changed once set
-        protocol = request.form.get('protocol', 'https')
+        protocol = request.form.get('protocol')
         origin_address = request.form.get('origin_address')
         origin_port = request.form.get('origin_port')
         use_waf = 'use_waf' in request.form
         custom_config = request.form.get('custom_config')
+        node_ids = request.form.getlist('nodes')
         
-        # Get selected nodes
-        new_node_ids = request.form.getlist('nodes')
+        # Cache configuration
+        enable_cache = 'enable_cache' in request.form
+        cache_time = int(request.form.get('cache_time', 3600))
+        cache_static_time = int(request.form.get('cache_static_time', 86400))
+        cache_browser_time = int(request.form.get('cache_browser_time', 3600))
+        custom_cache_rules = request.form.get('custom_cache_rules')
         
-        if not new_node_ids:
-            flash('Please select at least one deployment node', 'error')
-            all_nodes = Node.query.filter_by(is_active=True).all()
-            assigned_node_ids = [sn.node_id for sn in SiteNode.query.filter_by(site_id=site_id).all()]
-            return render_template('client/sites/edit.html', 
-                                  site=site, 
-                                  nodes=all_nodes, 
-                                  assigned_node_ids=assigned_node_ids)
-        
-        # Update site properties
+        # Update site in database
         site.name = name
         site.protocol = protocol
         site.origin_address = origin_address
         site.origin_port = origin_port
         site.use_waf = use_waf
         site.custom_config = custom_config
-        site.updated_at = datetime.utcnow()
         
-        # Get current site-node relationships
-        current_site_nodes = SiteNode.query.filter_by(site_id=site_id).all()
-        current_node_ids = [sn.node_id for sn in current_site_nodes]
+        # Update cache configuration
+        site.enable_cache = enable_cache
+        site.cache_time = cache_time
+        site.cache_static_time = cache_static_time
+        site.cache_browser_time = cache_browser_time
+        site.custom_cache_rules = custom_cache_rules
+        
+        db.session.commit()
+        
+        # Handle node associations
+        current_nodes = [sn.node_id for sn in site.site_nodes]
+        nodes_to_add = [int(node_id) for node_id in node_ids if int(node_id) not in current_nodes]
+        nodes_to_remove = [node_id for node_id in current_nodes if node_id not in [int(id) for id in node_ids]]
         
         # Remove nodes that are no longer selected
-        for site_node in current_site_nodes:
-            if str(site_node.node_id) not in new_node_ids:
-                db.session.delete(site_node)
+        for node_id in nodes_to_remove:
+            SiteNode.query.filter_by(site_id=site_id, node_id=node_id).delete()
         
         # Add new nodes
-        for node_id in new_node_ids:
-            if int(node_id) not in current_node_ids:
-                site_node = SiteNode(
-                    site_id=site.id,
-                    node_id=int(node_id),
-                    status='pending'
-                )
-                db.session.add(site_node)
+        for node_id in nodes_to_add:
+            site_node = SiteNode(site_id=site_id, node_id=node_id, status='pending')
+            db.session.add(site_node)
         
         db.session.commit()
         
@@ -210,7 +201,7 @@ def edit_site(site_id):
             nginx_config = generate_nginx_config(site)
             
             # Deploy to each node
-            for node_id in new_node_ids:
+            for node_id in node_ids:
                 deploy_to_node(site.id, int(node_id), nginx_config)
             
             flash('Site updated and redeployment initiated', 'success')
@@ -218,6 +209,15 @@ def edit_site(site_id):
             flash(f'Site updated but redeployment failed: {str(e)}', 'warning')
         
         return redirect(url_for('client.list_sites'))
+    
+    # GET request handling
+    all_nodes = Node.query.filter_by(is_active=True).all()
+    assigned_node_ids = [sn.node_id for sn in SiteNode.query.filter_by(site_id=site_id).all()]
+    
+    return render_template('client/sites/edit.html', 
+                           site=site, 
+                           nodes=all_nodes, 
+                           assigned_node_ids=assigned_node_ids)
 
 @client.route('/sites/<int:site_id>/delete', methods=['POST'])
 @login_required

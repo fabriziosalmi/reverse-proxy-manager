@@ -96,6 +96,13 @@ class Site(db.Model):
     is_blocked = db.Column(db.Boolean, default=False) 
     use_waf = db.Column(db.Boolean, default=False)
     force_https = db.Column(db.Boolean, default=True)  # New column to force HTTP to HTTPS redirect
+    # Cache configuration
+    enable_cache = db.Column(db.Boolean, default=True)
+    cache_time = db.Column(db.Integer, default=3600)  # Cache time in seconds, default 1 hour
+    cache_static_time = db.Column(db.Integer, default=86400)  # Cache time for static assets in seconds, default 1 day
+    custom_cache_rules = db.Column(db.Text, nullable=True)  # Custom cache rules in Nginx format
+    cache_browser_time = db.Column(db.Integer, default=3600)  # Browser cache time in seconds, default 1 hour
+    # End of cache configuration
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     custom_config = db.Column(db.Text, nullable=True)  # Additional Nginx configuration
@@ -117,6 +124,11 @@ class Site(db.Model):
             'is_blocked': self.is_blocked, 
             'use_waf': self.use_waf,
             'force_https': self.force_https,  # New column to force HTTP to HTTPS redirect
+            'enable_cache': self.enable_cache,
+            'cache_time': self.cache_time,
+            'cache_static_time': self.cache_static_time,
+            'custom_cache_rules': self.custom_cache_rules,
+            'cache_browser_time': self.cache_browser_time,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'nodes': [site_node.node_id for site_node in self.site_nodes]

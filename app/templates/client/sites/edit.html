@@ -94,6 +94,47 @@
                     {% endif %}
                 </div>
                 
+                <!-- Cache Configuration -->
+                <div class="card shadow-sm mb-4">
+                    <div class="card-header bg-primary text-white">
+                        <h2 class="h5 mb-0">Cache Configuration</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" role="switch" id="enable_cache" name="enable_cache" {{ 'checked' if site and site.enable_cache else '' }}>
+                            <label class="form-check-label" for="enable_cache">Enable Caching</label>
+                        </div>
+                        
+                        <div id="cacheConfigOptions">
+                            <div class="row g-3">
+                                <div class="col-md-4">
+                                    <label for="cache_time" class="form-label">Content Cache Duration (seconds)</label>
+                                    <input type="number" class="form-control" id="cache_time" name="cache_time" min="0" value="{{ site.cache_time if site else 3600 }}">
+                                    <div class="form-text">Default: 3600 (1 hour)</div>
+                                </div>
+                                
+                                <div class="col-md-4">
+                                    <label for="cache_static_time" class="form-label">Static Assets Cache Duration (seconds)</label>
+                                    <input type="number" class="form-control" id="cache_static_time" name="cache_static_time" min="0" value="{{ site.cache_static_time if site else 86400 }}">
+                                    <div class="form-text">Default: 86400 (1 day)</div>
+                                </div>
+                                
+                                <div class="col-md-4">
+                                    <label for="cache_browser_time" class="form-label">Browser Cache Duration (seconds)</label>
+                                    <input type="number" class="form-control" id="cache_browser_time" name="cache_browser_time" min="0" value="{{ site.cache_browser_time if site else 3600 }}">
+                                    <div class="form-text">Default: 3600 (1 hour)</div>
+                                </div>
+                                
+                                <div class="col-md-12">
+                                    <label for="custom_cache_rules" class="form-label">Custom Cache Rules (Advanced)</label>
+                                    <textarea class="form-control" id="custom_cache_rules" name="custom_cache_rules" rows="3" placeholder="# Enter custom Nginx cache directives here">{{ site.custom_cache_rules if site and site.custom_cache_rules else '' }}</textarea>
+                                    <div class="form-text">Advanced users only. Enter custom Nginx cache directives.</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
                 <!-- Advanced Settings -->
                 <div class="mb-4">
                     <h4 class="fw-semibold mb-3">Advanced Settings</h4>
@@ -129,4 +170,29 @@
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Toggle cache configuration options based on the enable_cache checkbox
+        const enableCacheCheckbox = document.getElementById('enable_cache');
+        const cacheConfigOptions = document.getElementById('cacheConfigOptions');
+        
+        // Function to toggle visibility
+        function toggleCacheOptions() {
+            if (enableCacheCheckbox.checked) {
+                cacheConfigOptions.style.display = 'block';
+            } else {
+                cacheConfigOptions.style.display = 'none';
+            }
+        }
+        
+        // Initial toggle
+        toggleCacheOptions();
+        
+        // Add event listener for changes
+        enableCacheCheckbox.addEventListener('change', toggleCacheOptions);
+    });
+</script>
 {% endblock %}

@@ -48,6 +48,9 @@ server {
     ssl_stapling on;
     ssl_stapling_verify on;
     
+    # Cache configuration
+    {{cache_config}}
+    
     location / {
         proxy_pass {{origin_protocol}}://{{origin_address}}:{{origin_port}};
         proxy_set_header Host $host;
@@ -64,6 +67,25 @@ server {
         proxy_connect_timeout 60s;
         proxy_send_timeout 60s;
         proxy_read_timeout 60s;
+        
+        # Cache headers
+        {{cache_proxy_config}}
+    }
+    
+    # Static files caching
+    location ~* \.(jpg|jpeg|png|gif|ico|css|js|svg|woff|woff2|ttf|eot)$ {
+        proxy_pass {{origin_protocol}}://{{origin_address}}:{{origin_port}};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # Static file caching
+        {{static_cache_config}}
+        
+        # No need to track these requests
+        access_log off;
+        log_not_found off;
     }
     
     # Custom configuration
@@ -108,6 +130,9 @@ server {
     listen 80;
     server_name {{domain}};
     
+    # Cache configuration
+    {{cache_config}}
+    
     location / {
         proxy_pass {{origin_protocol}}://{{origin_address}}:{{origin_port}};
         proxy_set_header Host $host;
@@ -124,6 +149,25 @@ server {
         proxy_connect_timeout 60s;
         proxy_send_timeout 60s;
         proxy_read_timeout 60s;
+        
+        # Cache headers
+        {{cache_proxy_config}}
+    }
+    
+    # Static files caching
+    location ~* \.(jpg|jpeg|png|gif|ico|css|js|svg|woff|woff2|ttf|eot)$ {
+        proxy_pass {{origin_protocol}}://{{origin_address}}:{{origin_port}};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # Static file caching
+        {{static_cache_config}}
+        
+        # No need to track these requests
+        access_log off;
+        log_not_found off;
     }
     
     # Custom configuration
@@ -146,6 +190,64 @@ server {
         config = config.replace('{{custom_config}}', site.custom_config)
     else:
         config = config.replace('{{custom_config}}', '')
+    
+    # Add cache configuration
+    if site.enable_cache:
+        # Define the proxy cache configuration
+        cache_config = f"""
+    # Cache configuration
+    proxy_cache_path /var/cache/nginx/{site.domain}_cache levels=1:2 keys_zone={site.domain}_cache:10m max_size=500m inactive=60m;
+    proxy_cache_key "$scheme$host$request_uri";
+    proxy_cache_valid 200 {site.cache_time}s;
+    proxy_cache_bypass $http_pragma $http_cache_control;
+    proxy_cache_use_stale error timeout invalid_header updating http_500 http_502 http_503 http_504;
+"""
+        # Define cache headers for proxy
+        cache_proxy_config = f"""
+        # Cache control
+        proxy_cache {site.domain}_cache;
+        proxy_cache_valid 200 {site.cache_time}s;
+        
+        # Browser caching headers
+        add_header Cache-Control "public, max-age={site.cache_browser_time}";
+        expires {site.cache_browser_time}s;
+"""
+        # Static files cache directives
+        static_cache_config = f"""
+        # Static file caching
+        proxy_cache {site.domain}_cache;
+        proxy_cache_valid 200 {site.cache_static_time}s;
+        add_header Cache-Control "public, max-age={site.cache_static_time}";
+        expires {site.cache_static_time}s;
+"""
+        # If custom cache rules are provided, append them
+        if site.custom_cache_rules:
+            cache_config += f"\n    # Custom cache rules\n    {site.custom_cache_rules}\n"
+    else:
+        # If caching is disabled
+        cache_config = """
+    # Caching disabled
+    add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate";
+    add_header Pragma "no-cache";
+    expires 0;
+"""
+        cache_proxy_config = """
+        # Cache disabled
+        add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate";
+        add_header Pragma "no-cache";
+        expires 0;
+"""
+        static_cache_config = """
+        # Static file caching disabled
+        add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate";
+        add_header Pragma "no-cache";
+        expires 0;
+"""
+    
+    # Replace cache placeholders
+    config = config.replace('{{cache_config}}', cache_config)
+    config = config.replace('{{cache_proxy_config}}', cache_proxy_config)
+    config = config.replace('{{static_cache_config}}', static_cache_config)
     
     # Add WAF configuration if needed
     if site.use_waf:
