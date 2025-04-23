@@ -1480,7 +1480,7 @@ fi
     @staticmethod
     def ensure_ssl_directories(site_id, node_id):
         """
-        Ensure SSL directories exist on a node for a site to prevent Nginx from failing to reload
+        Ensure SSL directories exist on a node for a site to prevent Nginx from failing
         
         Args:
             site_id: ID of the site
@@ -1636,7 +1636,7 @@ subjectAltName = DNS:{domain}, DNS:www.{domain}
                 if cert_record:
                     # Update existing record
                     cert_record.domain = domain  # Ensure domain is set
-                    cert_record.issuer = domain
+                    cert_record.issuer = f"Self-signed ({domain})"
                     cert_record.subject = domain
                     cert_record.valid_from = now
                     cert_record.valid_until = expiry_date
@@ -1651,7 +1651,7 @@ subjectAltName = DNS:{domain}, DNS:www.{domain}
                         site_id=site_id,
                         node_id=node_id,
                         domain=domain,  # Explicitly set the domain value
-                        issuer=domain,
+                        issuer=f"Self-signed ({domain})",
                         subject=domain,
                         valid_from=now,
                         valid_until=expiry_date,

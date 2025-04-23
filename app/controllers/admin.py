@@ -1224,101 +1224,63 @@ def manage_ssl_certificates(site_id):
             
             if 'error' in result:
                 flash(f"Error checking certificate: {result['error']}", 'error')
-            else:
-                # Store cert info in session for display
-                session['cert_check_result'] = result
-                
-                # Determine appropriate message
-                has_errors = any('error' in r for r in result['results'])
-                valid_certs = any(r.get('certificate', {}).get('status') == 'valid' 
-                                for r in result['results'] if 'certificate' in r)
-                
-                if has_errors:
-                    flash('Certificate check completed with some errors. See details below.', 'warning')
-                elif valid_certs:
-                    flash('Certificate check completed. Valid certificates found.', 'success')
-                else:
-                    flash('Certificate check completed. No valid certificates found.', 'warning')
-                    
-        elif action == 'check_dns':
-            # Check DNS resolution for the domain
-            result = SSLCertificateService.check_domain_dns(site.domain)
-            session['dns_check_result'] = result
             
-            if 'error' in result:
-                flash(f"Error checking DNS: {result['error']}", 'error')
-            elif result.get('dns_status') == 'ok':
-                flash('DNS check completed. Domain is correctly pointing to CDN nodes.', 'success')
-            else:
-                flash('DNS check completed. Domain is not correctly pointing to CDN nodes. See details below.', 'warning')
-        
-        elif action == 'get_recommendations':
-            # Get SSL issuance recommendations
-            result = SSLCertificateService.get_issuance_recommendations(site_id)
-            session['ssl_recommendations'] = result
-            
-            if 'error' in result:
-                flash(f"Error getting recommendations: {result['error']}", 'error')
-            else:
-                flash('SSL issuance recommendations generated. See details below.', 'info')
+            # Store result in session for template rendering
+            from flask import session
+            session['cert_check_result'] = result
             
         elif action == 'request':
-            # Get certificate request parameters
+            # Request new certificate
             email = request.form.get('email')
             challenge_type = request.form.get('challenge_type', 'http')
             cert_type = request.form.get('cert_type', 'standard')
+            dns_provider = request.form.get('dns_provider')
             
-            # Handle DNS provider credentials if using DNS challenge
-            dns_provider = None
+            # Validate email for certificate requests
+            import re
+            if not email or not re.match(r"[^@]+@[^@]+\.[^@]+", email):
+                flash('Please provide a valid email address for certificate notifications', 'error')
+                return redirect(url_for('admin.manage_ssl_certificates', site_id=site_id))
+            
+            # Validate DNS provider for DNS challenges
+            if challenge_type == 'dns' and not dns_provider and dns_provider != 'manual':
+                flash('Please select a DNS provider for DNS validation', 'error')
+                return redirect(url_for('admin.manage_ssl_certificates', site_id=site_id))
+                
+            # Process DNS credentials if provided
             dns_credentials = None
-            
-            if challenge_type == 'dns':
-                dns_provider = request.form.get('dns_provider')
-                
-                if not dns_provider:
-                    flash('DNS provider is required for DNS challenge', 'error')
-                    return redirect(url_for('admin.manage_ssl_certificates', site_id=site_id))
-                
-                # Collect provider-specific credentials
+            if challenge_type == 'dns' and dns_provider:
+                dns_credentials = {}
                 if dns_provider == 'cloudflare':
-                    token = request.form.get('cloudflare_token')
-                    if not token:
-                        flash('Cloudflare API token is required', 'error')
+                    dns_credentials['token'] = request.form.get('cf_token')
+                    if not dns_credentials['token']:
+                        flash('Please provide a Cloudflare API token', 'error')
                         return redirect(url_for('admin.manage_ssl_certificates', site_id=site_id))
-                    dns_credentials = {'token': token}
-                    
                 elif dns_provider == 'route53':
-                    access_key = request.form.get('route53_access_key')
-                    secret_key = request.form.get('route53_secret_key')
-                    if not access_key or not secret_key:
-                        flash('AWS access key and secret key are required', 'error')
+                    dns_credentials['access_key'] = request.form.get('aws_access_key')
+                    dns_credentials['secret_key'] = request.form.get('aws_secret_key')
+                    if not dns_credentials['access_key'] or not dns_credentials['secret_key']:
+                        flash('Please provide both AWS Access Key and Secret Key', 'error')
                         return redirect(url_for('admin.manage_ssl_certificates', site_id=site_id))
-                    dns_credentials = {'access_key': access_key, 'secret_key': secret_key}
-                    
                 elif dns_provider == 'digitalocean':
-                    token = request.form.get('digitalocean_token')
-                    if not token:
-                        flash('DigitalOcean API token is required', 'error')
+                    dns_credentials['token'] = request.form.get('do_token')
+                    if not dns_credentials['token']:
+                        flash('Please provide a DigitalOcean API token', 'error')
                         return redirect(url_for('admin.manage_ssl_certificates', site_id=site_id))
-                    dns_credentials = {'token': token}
-                    
                 elif dns_provider == 'godaddy':
-                    key = request.form.get('godaddy_key')
-                    secret = request.form.get('godaddy_secret')
-                    if not key or not secret:
-                        flash('GoDaddy API key and secret are required', 'error')
+                    dns_credentials['key'] = request.form.get('godaddy_key')
+                    dns_credentials['secret'] = request.form.get('godaddy_secret')
+                    if not dns_credentials['key'] or not dns_credentials['secret']:
+                        flash('Please provide both GoDaddy API Key and Secret', 'error')
                         return redirect(url_for('admin.manage_ssl_certificates', site_id=site_id))
-                    dns_credentials = {'key': key, 'secret': secret}
-                    
                 elif dns_provider == 'namecheap':
-                    username = request.form.get('namecheap_username')
-                    api_key = request.form.get('namecheap_api_key')
-                    if not username or not api_key:
-                        flash('Namecheap username and API key are required', 'error')
+                    dns_credentials['username'] = request.form.get('namecheap_username')
+                    dns_credentials['api_key'] = request.form.get('namecheap_api_key')
+                    if not dns_credentials['username'] or not dns_credentials['api_key']:
+                        flash('Please provide both Namecheap Username and API Key', 'error')
                         return redirect(url_for('admin.manage_ssl_certificates', site_id=site_id))
-                    dns_credentials = {'username': username, 'api_key': api_key}
             
-            # Request the certificate with appropriate parameters
+            # Request certificate
             result = SSLCertificateService.request_certificate(
                 site_id=site_id, 
                 node_id=node_id, 
@@ -1339,25 +1301,28 @@ def manage_ssl_certificates(site_id):
                     flash(f'SSL {cert_type_name} certificate successfully requested and installed using {challenge_type} validation', 'success')
             else:
                 flash(f"Failed to request SSL certificate: {result.get('message', 'Unknown error')}", 'error')
+                
+        elif action == 'generate_self_signed':
+            # Generate self-signed certificate
+            result = SSLCertificateService.generate_self_signed_certificate(site_id, node_id)
+            
+            if result.get('success'):
+                flash('Self-signed certificate generated successfully.', 'success')
+            else:
+                flash(f"Self-signed certificate generation failed: {result.get('message', 'Unknown error')}", 'error')
         
         elif action == 'setup_renewal':
-            # Get renewal days parameter
-            renewal_days = request.form.get('renewal_days', 30)
-            try:
-                renewal_days = int(renewal_days)
-            except ValueError:
-                renewal_days = 30
-            
-            # Setup auto-renewal
-            result = SSLCertificateService.setup_auto_renewal(node_id, renewal_days=renewal_days)
+            # Setup auto renewal
+            renewal_days = int(request.form.get('renewal_days', 30))
+            result = SSLCertificateService.setup_auto_renewal(node_id, renewal_days)
             
             if result.get('success', False):
-                flash(f'Certificate auto-renewal successfully configured to renew {renewal_days} days before expiry', 'success')
+                flash('Certificate auto-renewal configured successfully', 'success')
             else:
-                flash(f"Failed to configure auto-renewal: {result.get('message', 'Unknown error')}", 'error')
+                flash(f"Failed to configure certificate auto-renewal: {result.get('message', 'Unknown error')}", 'error')
         
         elif action == 'revoke':
-            # Revoke a certificate
+            # Revoke certificate
             result = SSLCertificateService.revoke_certificate(site_id, node_id)
             
             if result.get('success', False):
@@ -1397,19 +1362,19 @@ def manage_ssl_certificates(site_id):
     # Check certificate health
     cert_health = None
     if site.protocol == 'https':
-        from app.services.ssl_certificate_service import SSLCertificateService
-        cert_health = SSLCertificateService.certificate_health_check()
+        ssl_certificates = SSLCertificate.query.filter_by(site_id=site_id).all()
     
     return render_template(
-        'admin/sites/ssl_management.html', 
-        site=site, 
-        nodes=nodes, 
+        'admin/sites/ssl_management.html',
+        site=site,
+        nodes=nodes,
         cert_status=cert_status,
         dns_check_result=dns_check_result,
         ssl_recommendations=ssl_recommendations,
         manual_dns_instructions=manual_dns_instructions,
         dns_providers=dns_providers,
-        cert_health=cert_health
+        cert_health=cert_health,
+        ssl_certificates=ssl_certificates if 'ssl_certificates' in locals() else []
     )
 
 @admin.route('/ssl-dashboard')

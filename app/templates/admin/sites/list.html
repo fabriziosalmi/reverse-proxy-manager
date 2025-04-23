@@ -24,6 +24,18 @@
         line-height: 1;
     }
     
+    /* Fix for dropdown appearing behind table elements */
+    .table-actions .dropdown-menu {
+        z-index: 1030;
+        position: absolute;
+    }
+    
+    /* Ensure actions dropdown is fully visible regardless of table height */
+    #sitesTable .dropdown-menu {
+        z-index: 1030; 
+        position: absolute;
+    }
+    
     .bulk-actions-bar {
         padding: 0.75rem;
         background-color: var(--primary-color);

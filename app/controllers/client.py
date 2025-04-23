@@ -326,7 +326,7 @@ def manage_ssl_certificates(site_id):
                 return redirect(url_for('client.manage_ssl_certificates', site_id=site_id))
             
             # Validate DNS provider for DNS challenges
-            if challenge_type == 'dns' and not dns_provider and dns_provider != 'manual-dns':
+            if challenge_type == 'dns' and not dns_provider and dns_provider != 'manual':
                 flash('Please select a DNS provider for DNS validation', 'error')
                 return redirect(url_for('client.manage_ssl_certificates', site_id=site_id))
                 
@@ -336,14 +336,32 @@ def manage_ssl_certificates(site_id):
                 dns_credentials = {}
                 if dns_provider == 'cloudflare':
                     dns_credentials['token'] = request.form.get('cf_token')
+                    if not dns_credentials['token']:
+                        flash('Please provide a Cloudflare API token', 'error')
+                        return redirect(url_for('client.manage_ssl_certificates', site_id=site_id))
                 elif dns_provider == 'route53':
                     dns_credentials['access_key'] = request.form.get('aws_access_key')
                     dns_credentials['secret_key'] = request.form.get('aws_secret_key')
+                    if not dns_credentials['access_key'] or not dns_credentials['secret_key']:
+                        flash('Please provide both AWS Access Key and Secret Key', 'error')
+                        return redirect(url_for('client.manage_ssl_certificates', site_id=site_id))
                 elif dns_provider == 'digitalocean':
                     dns_credentials['token'] = request.form.get('do_token')
+                    if not dns_credentials['token']:
+                        flash('Please provide a DigitalOcean API token', 'error')
+                        return redirect(url_for('client.manage_ssl_certificates', site_id=site_id))
                 elif dns_provider == 'godaddy':
                     dns_credentials['key'] = request.form.get('godaddy_key')
                     dns_credentials['secret'] = request.form.get('godaddy_secret')
+                    if not dns_credentials['key'] or not dns_credentials['secret']:
+                        flash('Please provide both GoDaddy API Key and Secret', 'error')
+                        return redirect(url_for('client.manage_ssl_certificates', site_id=site_id))
+                elif dns_provider == 'namecheap':
+                    dns_credentials['username'] = request.form.get('namecheap_username')
+                    dns_credentials['api_key'] = request.form.get('namecheap_api_key')
+                    if not dns_credentials['username'] or not dns_credentials['api_key']:
+                        flash('Please provide both Namecheap Username and API Key', 'error')
+                        return redirect(url_for('client.manage_ssl_certificates', site_id=site_id))
             
             # Request certificate with appropriate validation method
             result = SSLCertificateService.request_certificate(
