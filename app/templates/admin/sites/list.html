@@ -36,6 +36,23 @@
         position: absolute;
     }
     
+    /* Ensure minimum height for the table body to appear like it has multiple rows */
+    #sitesTable tbody {
+        min-height: 400px;
+    }
+    
+    /* Add minimum height to table container */
+    .table-responsive {
+        min-height: 400px;
+    }
+    
+    /* Add padding at the bottom of the table body to create more space */
+    #sitesTable tbody:after {
+        content: "";
+        display: block;
+        height: 200px; /* Ensures space after the last row */
+    }
+    
     .bulk-actions-bar {
         padding: 0.75rem;
         background-color: var(--primary-color);

@@ -414,6 +414,11 @@ class Site(db.Model):
     waf_rate_limiting_enabled = db.Column(db.Boolean, default=False)  # Enable rate limiting
     waf_rate_limiting_requests = db.Column(db.Integer, default=100)  # Requests per minute
     waf_rate_limiting_burst = db.Column(db.Integer, default=200)  # Burst requests
+    # OWASP ModSecurity CRS settings
+    waf_use_owasp_crs = db.Column(db.Boolean, default=False)  # Use OWASP Core Rule Set
+    waf_owasp_crs_paranoia = db.Column(db.Integer, default=1)  # Paranoia level (1-4)
+    waf_enabled_crs_rules = db.Column(db.Text, nullable=True)  # Enabled CRS rule IDs (comma-separated)
+    waf_disabled_crs_rules = db.Column(db.Text, nullable=True)  # Disabled CRS rule IDs (comma-separated)
     # End of advanced WAF settings
     force_https = db.Column(db.Boolean, default=True)  # New column to force HTTP to HTTPS redirect
     # Cache configuration
@@ -460,6 +465,10 @@ class Site(db.Model):
             'waf_rate_limiting_enabled': self.waf_rate_limiting_enabled,
             'waf_rate_limiting_requests': self.waf_rate_limiting_requests,
             'waf_rate_limiting_burst': self.waf_rate_limiting_burst,
+            'waf_use_owasp_crs': self.waf_use_owasp_crs,
+            'waf_owasp_crs_paranoia': self.waf_owasp_crs_paranoia,
+            'waf_enabled_crs_rules': self.waf_enabled_crs_rules,
+            'waf_disabled_crs_rules': self.waf_disabled_crs_rules,
             'force_https': self.force_https,
             'enable_cache': self.enable_cache,
             'cache_time': self.cache_time,

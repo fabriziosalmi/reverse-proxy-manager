@@ -1747,6 +1747,12 @@ def manage_site_waf(site_id):
         site.waf_rate_limiting_requests = int(request.form.get('waf_rate_limiting_requests', 100))
         site.waf_rate_limiting_burst = int(request.form.get('waf_rate_limiting_burst', 200))
         
+        # OWASP ModSecurity Core Rule Set settings
+        site.waf_use_owasp_crs = 'waf_use_owasp_crs' in request.form
+        site.waf_owasp_crs_paranoia = int(request.form.get('waf_owasp_crs_paranoia', 1))
+        site.waf_enabled_crs_rules = request.form.get('waf_enabled_crs_rules')
+        site.waf_disabled_crs_rules = request.form.get('waf_disabled_crs_rules')
+        
         db.session.commit()
         
         # Get all nodes serving this site and update their configurations
