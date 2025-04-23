@@ -1036,3 +1036,196 @@ http {
                 result["suggestion"] = f"There are duplicate listen directives for {listen_match.group(1)}. Check for conflicts with other server blocks."
         
         return result
+    
+    @staticmethod
+    def test_config_on_node(node_id, nginx_config, domain):
+        """
+        Test a Nginx configuration on a node without applying it
+        
+        Args:
+            node_id: ID of the node to test on
+            nginx_config: Nginx configuration content to test
+            domain: Domain name for the site
+            
+        Returns:
+            tuple: (is_valid, error_message, ssl_details)
+        """
+        node = Node.query.get(node_id)
+        
+        if not node:
+            return False, "Node not found", None
+        
+        try:
+            # Connect to the node
+            ssh_client = paramiko.SSHClient()
+            ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            
+            if node.ssh_key_path:
+                ssh_client.connect(
+                    hostname=node.ip_address,
+                    port=node.ssh_port,
+                    username=node.ssh_user,
+                    key_filename=node.ssh_key_path,
+                    timeout=10
+                )
+            else:
+                ssh_client.connect(
+                    hostname=node.ip_address,
+                    port=node.ssh_port,
+                    username=node.ssh_user,
+                    password=node.ssh_password,
+                    timeout=10
+                )
+            
+            # Detect the Nginx path if not already known
+            nginx_path = node.detected_nginx_path if hasattr(node, 'detected_nginx_path') and node.detected_nginx_path else "nginx"
+            
+            if not node.detected_nginx_path:
+                # Try to detect the Nginx path
+                stdin, stdout, stderr = ssh_client.exec_command("which nginx")
+                detected_path = stdout.read().decode('utf-8').strip()
+                
+                if detected_path:
+                    # Store the detected path
+                    node.detected_nginx_path = detected_path
+                    db.session.commit()
+                    nginx_path = detected_path
+            
+            # Create a temporary file for testing
+            temp_file = f"/tmp/{domain}_nginx_test.conf"
+            sftp = ssh_client.open_sftp()
+            
+            # Write to a temporary file
+            with sftp.file(temp_file, 'w') as f:
+                f.write(nginx_config)
+            
+            # Run a configuration test
+            stdin, stdout, stderr = ssh_client.exec_command(f"sudo {nginx_path} -t -c {temp_file} 2>&1 || echo 'TEST_FAILED'")
+            test_output = stdout.read().decode('utf-8')
+            
+            # Check if the test passed
+            test_passed = "TEST_FAILED" not in test_output
+            
+            # Cleanup temporary file
+            ssh_client.exec_command(f"rm -f {temp_file}")
+            
+            # Check for SSL certificate paths in the configuration
+            ssl_certificate = None
+            ssl_certificate_key = None
+            
+            if "ssl_certificate " in nginx_config:
+                ssl_certificate_match = re.search(r'ssl_certificate\s+([^;]+);', nginx_config)
+                if ssl_certificate_match:
+                    ssl_certificate = ssl_certificate_match.group(1).strip()
+            
+            if "ssl_certificate_key " in nginx_config:
+                ssl_key_match = re.search(r'ssl_certificate_key\s+([^;]+);', nginx_config)
+                if ssl_key_match:
+                    ssl_certificate_key = ssl_key_match.group(1).strip()
+            
+            # Check if certificate exists
+            certificates_needed = False
+            is_https = "listen 443 ssl" in nginx_config
+
+            # For HTTPS sites, verify if certificate files exist and create placeholders if needed
+            if is_https and (ssl_certificate or ssl_certificate_key):
+                certificates_exist = True
+                
+                if ssl_certificate:
+                    # Try to access the certificate file
+                    stdin, stdout, stderr = ssh_client.exec_command(f"test -f {ssl_certificate} && echo 'exists' || echo 'missing'")
+                    cert_exists = stdout.read().decode('utf-8').strip() == 'exists'
+                    
+                    if not cert_exists:
+                        certificates_exist = False
+                        certificates_needed = True
+                        
+                        # Create parent directory for certificate if it doesn't exist
+                        cert_dir = os.path.dirname(ssl_certificate)
+                        ssh_client.exec_command(f"mkdir -p {cert_dir}")
+                
+                if ssl_certificate_key:
+                    # Try to access the key file
+                    stdin, stdout, stderr = ssh_client.exec_command(f"test -f {ssl_certificate_key} && echo 'exists' || echo 'missing'")
+                    key_exists = stdout.read().decode('utf-8').strip() == 'exists'
+                    
+                    if not key_exists:
+                        certificates_exist = False
+                        certificates_needed = True
+                        
+                        # Create parent directory for key if it doesn't exist
+                        key_dir = os.path.dirname(ssl_certificate_key)
+                        ssh_client.exec_command(f"mkdir -p {key_dir}")
+                
+                # Prepare dummy certificates for testing if they don't exist
+                if not certificates_exist and test_passed:
+                    # If the test passed but certificates don't exist, create dummy placeholder files
+                    # This will help catch other configuration issues without being blocked by missing certificates
+                    if ssl_certificate:
+                        cert_dir = os.path.dirname(ssl_certificate)
+                        ssh_client.exec_command(f"mkdir -p {cert_dir}")
+                        
+                        # Create a minimal dummy certificate file for testing only
+                        ssh_client.exec_command(f"sudo touch {ssl_certificate}")
+                        
+                    if ssl_certificate_key:
+                        key_dir = os.path.dirname(ssl_certificate_key)
+                        ssh_client.exec_command(f"mkdir -p {key_dir}")
+                        
+                        # Create a minimal dummy key file for testing only
+                        ssh_client.exec_command(f"sudo touch {ssl_certificate_key}")
+                    
+                    # Try the test again with the dummy files
+                    stdin, stdout, stderr = ssh_client.exec_command(f"sudo {nginx_path} -t -c {temp_file} 2>&1 || echo 'TEST_FAILED'")
+                    retest_output = stdout.read().decode('utf-8')
+                    
+                    # Update test result based on retest
+                    if "TEST_FAILED" not in retest_output:
+                        test_passed = True
+                        test_output = retest_output
+                    
+                    # Clean up temporary dummy files
+                    if ssl_certificate and not cert_exists:
+                        ssh_client.exec_command(f"sudo rm -f {ssl_certificate}")
+                    if ssl_certificate_key and not key_exists:
+                        ssh_client.exec_command(f"sudo rm -f {ssl_certificate_key}")
+            
+            # Extract detailed error information if test failed
+            error_message = test_output
+            
+            # Find specific error types
+            syntax_error = False
+            unknown_directive = False
+            ssl_error = False
+            
+            if "syntax is ok" in test_output.lower():
+                error_message = ""
+            elif "syntax error" in test_output.lower():
+                syntax_error = True
+                error_message = "Syntax error in Nginx configuration"
+                for line in test_output.split('\n'):
+                    if "syntax error" in line.lower() or "unknown directive" in line.lower():
+                        error_message = line.strip()
+                        break
+            elif "ssl_certificate" in test_output.lower() and ("failed" in test_output.lower() or "error" in test_output.lower()):
+                ssl_error = True
+                error_message = "SSL certificate error in Nginx configuration"
+                for line in test_output.split('\n'):
+                    if "ssl_certificate" in line.lower() and ("failed" in line.lower() or "error" in line.lower() or "no such file" in line.lower()):
+                        error_message = line.strip()
+                        break
+            
+            ssh_client.close()
+            
+            # Prepare SSL details for return
+            ssl_details = {
+                "is_https": is_https,
+                "certificates_needed": certificates_needed,
+                "ssl_certificate": ssl_certificate,
+                "ssl_certificate_key": ssl_certificate_key
+            }
+            
+            return test_passed, error_message, ssl_details
+            
+        except Exception as e:
+            return False, f"Error testing configuration: {str(e)}", None

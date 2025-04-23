@@ -626,6 +626,14 @@ def deploy_to_node(site_id, node_id, nginx_config, test_only=False):
             db.session.commit()
             ssh_client.close()
             raise ValueError(f"Failed to create nginx config directory: {error}")
+            
+        # Ensure ACME challenge directory exists for Let's Encrypt
+        stdin, stdout, stderr = ssh_client.exec_command(f"mkdir -p /var/www/letsencrypt/.well-known/acme-challenge")
+        exit_status = stdout.channel.recv_exit_status()
+        
+        if exit_status != 0:
+            error = stderr.read().decode('utf-8')
+            log_activity('warning', f"Failed to create ACME challenge directory: {error}")
         
         # Create the config file
         config_file_path = f"{node.nginx_config_path}/{domain}.conf"
