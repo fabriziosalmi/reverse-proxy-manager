@@ -160,8 +160,7 @@ def discover_nodes(yaml_path=None, activate=True):
         for msg in messages:
             click.echo(f"  - {msg}")
 
-
-@cli.command('create-migration-is-discovered')
+ @cli.command('create-migration-is-discovered')
 def create_migration_is_discovered():
     """Create a migration for adding the is_discovered field to the Node model."""
     with app.app_context():
@@ -213,6 +212,16 @@ def downgrade():
         
         click.echo(f"Created migration: {filepath}")
         click.echo("Run 'flask db upgrade' to apply this migration")
+
+@cli.command('reset-db')
+@click.confirmation_option(prompt='This will erase ALL data in the database. Are you sure?')
+def reset_db():
+    """Reset the database by dropping all tables and recreating them."""
+    click.echo('Dropping all tables...')
+    db.drop_all()
+    click.echo('Creating database tables...')
+    db.create_all()
+    click.echo('Database has been reset successfully.')
 
 if __name__ == '__main__':
     cli()
