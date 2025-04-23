@@ -292,6 +292,20 @@ def view_node(node_id):
     
     # Get real server stats and connection info
     from app.services.nginx_service import get_node_stats
+    from app.services.nginx_validation_service import NginxValidationService
+    
+    # Check if Nginx is installed on the node
+    nginx_missing = False
+    nginx_missing_message = ""
+    
+    # Test Nginx with a simple config to check if it's installed
+    test_config = "server { listen 80; server_name _; location / { return 200; } }"
+    is_valid, error_message = NginxValidationService.test_config_on_node(node_id, test_config, "test")
+    
+    # If Nginx is missing, we'll get a specific error message about it
+    if not is_valid and "Could not find nginx executable on the server" in error_message:
+        nginx_missing = True
+        nginx_missing_message = error_message
     
     try:
         server_stats, connection_stats = get_node_stats(node)
@@ -319,7 +333,9 @@ def view_node(node_id):
                           site_nodes=site_nodes,
                           deployment_logs=deployment_logs,
                           server_stats=server_stats,
-                          connection_stats=connection_stats)
+                          connection_stats=connection_stats,
+                          nginx_missing=nginx_missing,
+                          nginx_missing_message=nginx_missing_message)
 
 @admin.route('/nodes/<int:node_id>/toggle_active', methods=['POST'])
 @login_required
