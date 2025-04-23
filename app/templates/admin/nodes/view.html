@@ -72,12 +72,32 @@
                         <div class="col-md-6 mb-3">
                             <h6 class="text-muted">Memory Usage</h6>
                             <div class="progress mb-1">
-                                <div class="progress-bar bg-info" role="progressbar" style="width: {{ server_stats.memory_usage.split('(')[1].split(')')[0] }};" 
-                                    aria-valuenow="{{ server_stats.memory_usage.split('(')[1].split('%')[0] }}" aria-valuemin="0" aria-valuemax="100">
-                                    {{ server_stats.memory_usage.split('(')[1].split(')')[0] }}
-                                </div>
+                                {% if server_stats.memory_usage is string and '(' in server_stats.memory_usage %}
+                                    <div class="progress-bar bg-info" role="progressbar" style="width: {{ server_stats.memory_usage.split('(')[1].split(')')[0] }};" 
+                                        aria-valuenow="{{ server_stats.memory_usage.split('(')[1].split('%')[0] }}" aria-valuemin="0" aria-valuemax="100">
+                                        {{ server_stats.memory_usage.split('(')[1].split(')')[0] }}
+                                    </div>
+                                {% elif server_stats.memory_usage is iterable and server_stats.memory_usage|length > 1 %}
+                                    <div class="progress-bar bg-info" role="progressbar" style="width: {{ server_stats.memory_usage[1] }};" 
+                                        aria-valuenow="{{ server_stats.memory_usage[1]|replace('%', '') }}" aria-valuemin="0" aria-valuemax="100">
+                                        {{ server_stats.memory_usage[1] }}
+                                    </div>
+                                {% else %}
+                                    <div class="progress-bar bg-info" role="progressbar" style="width: 0%;" 
+                                        aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+                                        0%
+                                    </div>
+                                {% endif %}
                             </div>
-                            <small class="text-muted">{{ server_stats.memory_usage.split(' (')[0] }}</small>
+                            <small class="text-muted">
+                                {% if server_stats.memory_usage is string and ' (' in server_stats.memory_usage %}
+                                    {{ server_stats.memory_usage.split(' (')[0] }}
+                                {% elif server_stats.memory_usage is iterable and server_stats.memory_usage|length > 0 %}
+                                    {{ server_stats.memory_usage[0] }}
+                                {% else %}
+                                    Memory usage information not available
+                                {% endif %}
+                            </small>
                         </div>
                     </div>
 
@@ -85,12 +105,32 @@
                         <div class="col-md-6 mb-3">
                             <h6 class="text-muted">Disk Usage</h6>
                             <div class="progress mb-1">
-                                <div class="progress-bar bg-warning" role="progressbar" style="width: {{ server_stats.disk_usage.split('(')[1].split(')')[0] }};" 
-                                    aria-valuenow="{{ server_stats.disk_usage.split('(')[1].split('%')[0] }}" aria-valuemin="0" aria-valuemax="100">
-                                    {{ server_stats.disk_usage.split('(')[1].split(')')[0] }}
-                                </div>
+                                {% if server_stats.disk_usage is string and '(' in server_stats.disk_usage %}
+                                    <div class="progress-bar bg-warning" role="progressbar" style="width: {{ server_stats.disk_usage.split('(')[1].split(')')[0] }};" 
+                                        aria-valuenow="{{ server_stats.disk_usage.split('(')[1].split('%')[0] }}" aria-valuemin="0" aria-valuemax="100">
+                                        {{ server_stats.disk_usage.split('(')[1].split(')')[0] }}
+                                    </div>
+                                {% elif server_stats.disk_usage is iterable and server_stats.disk_usage|length > 1 %}
+                                    <div class="progress-bar bg-warning" role="progressbar" style="width: {{ server_stats.disk_usage[1] }};" 
+                                        aria-valuenow="{{ server_stats.disk_usage[1]|replace('%', '') }}" aria-valuemin="0" aria-valuemax="100">
+                                        {{ server_stats.disk_usage[1] }}
+                                    </div>
+                                {% else %}
+                                    <div class="progress-bar bg-warning" role="progressbar" style="width: 0%;" 
+                                        aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+                                        0%
+                                    </div>
+                                {% endif %}
                             </div>
-                            <small class="text-muted">{{ server_stats.disk_usage.split(' (')[0] }}</small>
+                            <small class="text-muted">
+                                {% if server_stats.disk_usage is string and ' (' in server_stats.disk_usage %}
+                                    {{ server_stats.disk_usage.split(' (')[0] }}
+                                {% elif server_stats.disk_usage is iterable and server_stats.disk_usage|length > 0 %}
+                                    {{ server_stats.disk_usage[0] }}
+                                {% else %}
+                                    Disk usage information not available
+                                {% endif %}
+                            </small>
                         </div>
                         <div class="col-md-6 mb-3">
                             <h6 class="text-muted">Load Average</h6>
@@ -410,29 +450,71 @@
             
             // Update memory usage
             const memBar = document.querySelector('.progress-bar.bg-info');
-            if (memBar && serverStats.memory_usage.includes('(') && serverStats.memory_usage.includes(')')) {
-                const memPercent = serverStats.memory_usage.split('(')[1].split(')')[0];
+            if (memBar) {
+                let memPercent, memText;
+                
+                if (Array.isArray(serverStats.memory_usage)) {
+                    // Handle array format
+                    if (serverStats.memory_usage.length > 1) {
+                        memPercent = serverStats.memory_usage[1];
+                        memText = serverStats.memory_usage[0];
+                    } else {
+                        memPercent = '0%';
+                        memText = serverStats.memory_usage[0] || 'Memory information not available';
+                    }
+                } else if (typeof serverStats.memory_usage === 'string' && 
+                          serverStats.memory_usage.includes('(') && 
+                          serverStats.memory_usage.includes(')')) {
+                    // Handle string format
+                    memPercent = serverStats.memory_usage.split('(')[1].split(')')[0];
+                    memText = serverStats.memory_usage.split(' (')[0];
+                } else {
+                    memPercent = '0%';
+                    memText = 'Memory information not available';
+                }
+                
                 memBar.style.width = memPercent;
                 memBar.setAttribute('aria-valuenow', memPercent.replace('%', ''));
                 memBar.textContent = memPercent;
                 
-                const memText = document.querySelector('.col-md-6.mb-3:nth-of-type(2) small.text-muted');
-                if (memText) {
-                    memText.textContent = serverStats.memory_usage.split(' (')[0];
+                const memTextElem = document.querySelector('.col-md-6.mb-3:nth-of-type(2) small.text-muted');
+                if (memTextElem) {
+                    memTextElem.textContent = memText;
                 }
             }
             
             // Update disk usage
             const diskBar = document.querySelector('.progress-bar.bg-warning');
-            if (diskBar && serverStats.disk_usage.includes('(') && serverStats.disk_usage.includes(')')) {
-                const diskPercent = serverStats.disk_usage.split('(')[1].split(')')[0];
+            if (diskBar) {
+                let diskPercent, diskText;
+                
+                if (Array.isArray(serverStats.disk_usage)) {
+                    // Handle array format
+                    if (serverStats.disk_usage.length > 1) {
+                        diskPercent = serverStats.disk_usage[1];
+                        diskText = serverStats.disk_usage[0];
+                    } else {
+                        diskPercent = '0%';
+                        diskText = serverStats.disk_usage[0] || 'Disk information not available';
+                    }
+                } else if (typeof serverStats.disk_usage === 'string' && 
+                          serverStats.disk_usage.includes('(') && 
+                          serverStats.disk_usage.includes(')')) {
+                    // Handle string format
+                    diskPercent = serverStats.disk_usage.split('(')[1].split(')')[0];
+                    diskText = serverStats.disk_usage.split(' (')[0];
+                } else {
+                    diskPercent = '0%';
+                    diskText = 'Disk information not available';
+                }
+                
                 diskBar.style.width = diskPercent;
                 diskBar.setAttribute('aria-valuenow', diskPercent.replace('%', ''));
                 diskBar.textContent = diskPercent;
                 
-                const diskText = document.querySelector('.col-md-6.mb-3:nth-of-type(3) small.text-muted');
-                if (diskText) {
-                    diskText.textContent = serverStats.disk_usage.split(' (')[0];
+                const diskTextElem = document.querySelector('.col-md-6.mb-3:nth-of-type(3) small.text-muted');
+                if (diskTextElem) {
+                    diskTextElem.textContent = diskText;
                 }
             }
             
