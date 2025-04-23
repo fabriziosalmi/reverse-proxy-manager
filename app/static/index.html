@@ -9,36 +9,36 @@
         :root {
             /* Light theme variables */
             --primary-color: #0066CC;
-            --primary-dark: #004999;
+            --primary-dark: #0052a3;
             --secondary-color: #6c757d;
             --secondary-dark: #5a6268;
-            --light-bg: #f5f5f5;
+            --accent-color: #2ecc71;
+            --accent-dark: #27ae60;
+            --light-bg: #f8f9fa;
             --white: #ffffff;
             --dark: #333333;
-            --border-radius: 8px;
-            --box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+            --border-radius: 10px;
+            --box-shadow: 0 8px 30px rgba(0, 0, 0, 0.08);
             --transition: all 0.3s ease;
             --card-bg: #ffffff;
-            --feature-border: 4px solid var(--primary-color);
-            --feature-text: var(--secondary-color);
-            --feature-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
-            --footer-bg: var(--primary-color);
-            --footer-text: var(--white);
+            --feature-border: 3px solid var(--primary-color);
+            --feature-text: #555555;
+            --feature-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
         }
         
         [data-bs-theme="dark"] {
-            --primary-color: #0d6efd;
-            --primary-dark: #0a58ca;
-            --light-bg: #212529;
-            --white: #212529;
-            --dark: #f8f9fa;
-            --card-bg: #2c3034;
-            --feature-border: 4px solid var(--primary-color);
-            --feature-text: #adb5bd;
-            --feature-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
-            --footer-bg: #212529;
-            --footer-text: #adb5bd;
-            --box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+            --primary-color: #3498db;
+            --primary-dark: #2980b9;
+            --accent-color: #2ecc71;
+            --accent-dark: #27ae60;
+            --light-bg: #1a1a1a;
+            --white: #242424;
+            --dark: #f5f5f5;
+            --card-bg: #2d2d2d;
+            --feature-border: 3px solid var(--primary-color);
+            --feature-text: #bbbbbb;
+            --feature-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+            --box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
         }
         
         * {
@@ -52,84 +52,116 @@
             line-height: 1.6;
             color: var(--dark);
             background-color: var(--light-bg);
-            min-height: 100vh;
+            height: 100vh;
+            overflow: hidden;
             transition: background-color 0.3s ease, color 0.3s ease;
         }
         
         .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 0;
-            background-color: var(--white);
-            box-shadow: var(--box-shadow);
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            transition: background-color 0.3s ease;
-        }
-        
-        header {
-            background-color: var(--primary-color);
-            color: var(--footer-text);
-            padding: 2rem 1.5rem;
-            text-align: center;
-            position: relative;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            height: 100vh;
             overflow: hidden;
         }
         
-        header::after {
-            content: '';
-            position: absolute;
-            bottom: -50px;
-            left: 0;
-            right: 0;
-            height: 100px;
-            background: var(--white);
-            transform: skewY(-3deg);
-            z-index: 1;
+        .left-panel {
+            background-color: var(--primary-color);
+            padding: 2.5rem;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            position: relative;
+            color: white;
         }
         
-        header h1 {
-            margin: 0;
+        .left-panel-content {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        
+        .logo {
+            margin-bottom: 2rem;
+            display: flex;
+            align-items: center;
+        }
+        
+        .logo i {
             font-size: 2.8rem;
+            margin-right: 1rem;
+        }
+        
+        .logo-text {
+            font-size: 2.2rem;
             font-weight: 700;
             letter-spacing: -0.5px;
-            margin-bottom: 0.5rem;
-            position: relative;
-            z-index: 2;
+            line-height: 1.2;
         }
         
-        header p {
-            font-size: 1.2rem;
+        .tagline {
+            font-size: 1.1rem;
             opacity: 0.9;
             margin-bottom: 2rem;
+            max-width: 90%;
+        }
+        
+        .feature-list {
+            list-style-type: none;
+            margin-bottom: 2.5rem;
+        }
+        
+        .feature-item {
+            display: flex;
+            align-items: flex-start;
+            margin-bottom: 1.2rem;
+        }
+        
+        .feature-item i {
+            font-size: 1.2rem;
+            margin-right: 1rem;
+            margin-top: 0.2rem;
+        }
+        
+        .feature-info h3 {
+            font-size: 1.1rem;
+            margin-bottom: 0.3rem;
+        }
+        
+        .feature-info p {
+            font-size: 0.9rem;
+            opacity: 0.9;
+        }
+        
+        .right-panel {
+            background-color: var(--card-bg);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
             position: relative;
-            z-index: 2;
+            transition: background-color 0.3s ease;
         }
         
         .login-box {
-            max-width: 600px;
-            margin: 3rem auto;
-            background-color: var(--card-bg);
+            width: 85%;
+            max-width: 450px;
+            padding: 3rem;
             border-radius: var(--border-radius);
-            padding: 2.5rem;
             box-shadow: var(--box-shadow);
+            background-color: var(--white);
             text-align: center;
-            position: relative;
-            z-index: 3;
             transition: background-color 0.3s ease, box-shadow 0.3s ease;
         }
         
         .login-box h2 {
             color: var(--primary-color);
-            font-size: 2.2rem;
+            font-size: 1.8rem;
             margin-bottom: 1rem;
         }
         
         .login-box p {
             color: var(--feature-text);
-            font-size: 1.1rem;
-            margin-bottom: 1.5rem;
+            font-size: 1rem;
+            margin-bottom: 2rem;
         }
         
         .btn {
@@ -140,12 +172,13 @@
             text-decoration: none;
             border-radius: 50px;
             font-weight: 600;
-            margin: 10px 5px;
+            margin: 0 5px;
             border: none;
             cursor: pointer;
             transition: var(--transition);
             font-size: 1rem;
             box-shadow: 0 4px 8px rgba(0, 102, 204, 0.2);
+            min-width: 140px;
         }
         
         .btn:hover {
@@ -155,95 +188,33 @@
         }
         
         .btn-secondary {
-            background-color: var(--secondary-color);
-            box-shadow: 0 4px 8px rgba(108, 117, 125, 0.2);
+            background-color: transparent;
+            box-shadow: none;
+            border: 2px solid var(--primary-color);
+            color: var(--primary-color);
         }
         
         .btn-secondary:hover {
-            background-color: var(--secondary-dark);
-            box-shadow: 0 6px 12px rgba(108, 117, 125, 0.3);
+            background-color: var(--primary-color);
+            color: white;
+            box-shadow: 0 6px 12px rgba(0, 102, 204, 0.2);
         }
         
         .auth-buttons {
-            margin-top: 25px;
             display: flex;
             justify-content: center;
             gap: 15px;
         }
         
-        .main-content {
-            flex: 1;
-            padding: 0 20px 40px;
-        }
-        
-        .section-title {
+        .copyright {
+            position: absolute;
+            bottom: 20px;
+            left: 0;
+            right: 0;
             text-align: center;
-            margin: 3rem 0 2rem;
-            color: var(--primary-color);
-            font-size: 2rem;
-            position: relative;
-        }
-        
-        .section-title::after {
-            content: '';
-            display: block;
-            width: 80px;
-            height: 4px;
-            background-color: var(--primary-color);
-            margin: 0.8rem auto 0;
-            border-radius: 2px;
-        }
-        
-        .features {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 25px;
-            margin: 2rem 0;
-        }
-        
-        .feature {
-            background-color: var(--card-bg);
-            padding: 2rem;
-            border-radius: var(--border-radius);
-            box-shadow: var(--box-shadow);
-            transition: var(--transition);
-            border-top: var(--feature-border);
-        }
-        
-        .feature:hover {
-            transform: translateY(-5px);
-            box-shadow: var(--feature-shadow);
-        }
-        
-        .feature-icon {
-            font-size: 2.5rem;
-            color: var(--primary-color);
-            margin-bottom: 1rem;
-        }
-        
-        .feature h3 {
-            color: var(--primary-color);
-            margin-top: 0;
-            margin-bottom: 1rem;
-            font-size: 1.3rem;
-        }
-        
-        .feature p {
+            font-size: 0.8rem;
             color: var(--feature-text);
-            margin-bottom: 0;
-        }
-        
-        footer {
-            text-align: center;
-            padding: 2rem;
-            background-color: var(--footer-bg);
-            color: var(--footer-text);
-            margin-top: auto;
-            transition: background-color 0.3s ease, color 0.3s ease;
-        }
-        
-        footer p {
-            opacity: 0.9;
+            opacity: 0.7;
         }
         
         /* Theme toggle button */
@@ -287,98 +258,124 @@
             display: inline-block;
         }
         
-        @media (max-width: 768px) {
-            header h1 {
-                font-size: 2.2rem;
+        @media (max-width: 992px) {
+            .container {
+                grid-template-columns: 1fr;
+                grid-template-rows: auto 1fr;
+                height: 100vh;
+                overflow-y: auto;
+            }
+            
+            .left-panel {
+                padding: 2rem 1.5rem;
+            }
+            
+            .left-panel-content {
+                text-align: center;
+                margin: 0 auto;
+            }
+            
+            .logo {
+                justify-content: center;
+            }
+            
+            .tagline {
+                max-width: 100%;
+            }
+            
+            .feature-item {
+                text-align: left;
+            }
+            
+            .right-panel {
+                padding: 3rem 1rem;
             }
             
             .login-box {
-                margin: 2rem 1rem;
-                padding: 1.5rem;
+                width: 100%;
+                padding: 2rem;
             }
-            
-            .features {
-                grid-template-columns: 1fr;
-            }
-            
+        }
+        
+        @media (max-width: 576px) {
             .auth-buttons {
                 flex-direction: column;
-                gap: 10px;
             }
             
             .btn {
-                width: 100%;
                 margin: 5px 0;
             }
             
-            .theme-toggle {
-                top: 10px;
-                right: 10px;
-                width: 35px;
-                height: 35px;
+            .feature-list {
+                margin-left: 0;
             }
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <header>
+        <div class="left-panel">
             <button id="themeToggle" class="theme-toggle" aria-label="Toggle theme">
                 <i class="fas fa-sun"></i>
                 <i class="fas fa-moon"></i>
             </button>
-            <h1>Reverse Proxy Manager</h1>
-            <p>Centralized management for your distributed proxy infrastructure</p>
-        </header>
-
-        <div class="main-content">
-            <div class="login-box">
-                <h2>Welcome to Reverse Proxy Manager</h2>
-                <p>A powerful tool for managing your proxy nodes from a single dashboard with enhanced security and performance.</p>
-                <div class="auth-buttons">
-                    <a href="/auth/login" class="btn"><i class="fas fa-sign-in-alt"></i> Login</a>
-                    <a href="/auth/register" class="btn btn-secondary"><i class="fas fa-user-plus"></i> Register</a>
+            
+            <div class="left-panel-content">
+                <div class="logo">
+                    <i class="fas fa-cogs"></i>
+                    <div class="logo-text">Reverse Proxy<br>Manager</div>
                 </div>
-            </div>
-
-            <h2 class="section-title">Key Features</h2>
-            <div class="features">
-                <div class="feature">
-                    <div class="feature-icon"><i class="fas fa-th-large"></i></div>
-                    <h3>Centralized Management</h3>
-                    <p>Manage all your proxy nodes from a single dashboard with a consistent interface and workflow.</p>
-                </div>
-                <div class="feature">
-                    <div class="feature-icon"><i class="fas fa-rocket"></i></div>
-                    <h3>Automated Deployment</h3>
-                    <p>Deploy configurations to multiple nodes with a single click. Rollback changes easily if needed.</p>
-                </div>
-                <div class="feature">
-                    <div class="feature-icon"><i class="fas fa-lock"></i></div>
-                    <h3>SSL Management</h3>
-                    <p>Automated SSL certificate provisioning and renewal for all your sites with easy configuration.</p>
-                </div>
-                <div class="feature">
-                    <div class="feature-icon"><i class="fas fa-shield-alt"></i></div>
-                    <h3>Web Application Firewall</h3>
-                    <p>Protect your sites with built-in WAF features to block common attacks and enhance security.</p>
-                </div>
-                <div class="feature">
-                    <div class="feature-icon"><i class="fas fa-users-cog"></i></div>
-                    <h3>Role-Based Access</h3>
-                    <p>Separate admin and client areas with appropriate permissions for each user type.</p>
-                </div>
-                <div class="feature">
-                    <div class="feature-icon"><i class="fas fa-chart-line"></i></div>
-                    <h3>Real-time Monitoring</h3>
-                    <p>Monitor the status of your nodes and deployments in real-time with detailed insights.</p>
-                </div>
+                
+                <p class="tagline">Centralized management for your distributed proxy infrastructure with enhanced security and performance.</p>
+                
+                <ul class="feature-list">
+                    <li class="feature-item">
+                        <i class="fas fa-th-large"></i>
+                        <div class="feature-info">
+                            <h3>Centralized Management</h3>
+                            <p>Manage all your proxy nodes from a single dashboard with a consistent interface.</p>
+                        </div>
+                    </li>
+                    <li class="feature-item">
+                        <i class="fas fa-lock"></i>
+                        <div class="feature-info">
+                            <h3>SSL Management</h3>
+                            <p>Automated certificate provisioning and renewal for all your sites.</p>
+                        </div>
+                    </li>
+                    <li class="feature-item">
+                        <i class="fas fa-shield-alt"></i>
+                        <div class="feature-info">
+                            <h3>Web Application Firewall</h3>
+                            <p>Protect your sites with built-in WAF features to block common attacks.</p>
+                        </div>
+                    </li>
+                    <li class="feature-item">
+                        <i class="fas fa-chart-line"></i>
+                        <div class="feature-info">
+                            <h3>Real-time Monitoring</h3>
+                            <p>Monitor the status of your nodes and deployments in real-time.</p>
+                        </div>
+                    </li>
+                </ul>
             </div>
         </div>
-
-        <footer>
-            <p>&copy; 2025 Reverse Proxy Manager. All rights reserved.</p>
-        </footer>
+        
+        <div class="right-panel">
+            <div class="login-box">
+                <h2>Welcome</h2>
+                <p>Access your dashboard to manage your proxy infrastructure with enhanced security and performance.</p>
+                
+                <div class="auth-buttons">
+                    <a href="/auth/login" class="btn"><i class="fas fa-sign-in-alt me-2"></i> Login</a>
+                    <a href="/auth/register" class="btn btn-secondary"><i class="fas fa-user-plus me-2"></i> Register</a>
+                </div>
+            </div>
+            
+            <div class="copyright">
+                &copy; 2025 Reverse Proxy Manager. All rights reserved.
+            </div>
+        </div>
     </div>
     
     <!-- Theme toggle script -->
