@@ -543,8 +543,44 @@ def deploy_to_node(site_id, node_id, nginx_config, test_only=False):
         # Remove the temporary local file
         os.unlink(temp_path)
         
+        # Find the nginx executable path - similar to what we do in test_config_on_node
+        nginx_paths = [
+            "nginx",                      # If in PATH
+            "/usr/sbin/nginx",            # Debian/Ubuntu common location
+            "/usr/local/nginx/sbin/nginx", # Manual install common location
+            "/usr/local/sbin/nginx",      # Some package managers
+            "/opt/nginx/sbin/nginx"       # Custom installs
+        ]
+        
+        # Try to find working nginx path
+        nginx_path = None
+        for path in nginx_paths:
+            stdin, stdout, stderr = ssh_client.exec_command(f"which {path} 2>/dev/null || echo 'not found'")
+            result = stdout.read().decode('utf-8').strip()
+            if result != 'not found' and 'nginx' in result:
+                nginx_path = path
+                break
+        
+        if not nginx_path:
+            # As a last resort, try to find it using find command
+            stdin, stdout, stderr = ssh_client.exec_command("find /usr -name nginx -type f -executable 2>/dev/null | head -1")
+            result = stdout.read().decode('utf-8').strip()
+            if result:
+                nginx_path = result
+        
+        # Get the custom reload command or use default with found nginx path
+        if 'systemctl' in node.nginx_reload_command:
+            reload_command = node.nginx_reload_command
+        else:
+            # If it's a custom command that might include nginx directly
+            if nginx_path:
+                # Replace 'nginx' with the full path
+                reload_command = node.nginx_reload_command.replace('nginx', nginx_path)
+            else:
+                reload_command = node.nginx_reload_command
+        
         # Reload Nginx to apply the changes
-        stdin, stdout, stderr = ssh_client.exec_command(node.nginx_reload_command)
+        stdin, stdout, stderr = ssh_client.exec_command(reload_command)
         exit_status = stdout.channel.recv_exit_status()
         
         if exit_status != 0:

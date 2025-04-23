@@ -105,8 +105,36 @@ class NginxValidationService:
             sftp.put(temp_path, remote_temp_path)
             sftp.close()
             
+            # Find the nginx executable path - try various common locations
+            nginx_paths = [
+                "nginx",                      # If in PATH
+                "/usr/sbin/nginx",            # Debian/Ubuntu common location
+                "/usr/local/nginx/sbin/nginx", # Manual install common location
+                "/usr/local/sbin/nginx",      # Some package managers
+                "/opt/nginx/sbin/nginx"       # Custom installs
+            ]
+            
+            # Try to find working nginx path
+            nginx_path = None
+            for path in nginx_paths:
+                stdin, stdout, stderr = ssh_client.exec_command(f"which {path} 2>/dev/null || echo 'not found'")
+                result = stdout.read().decode('utf-8').strip()
+                if result != 'not found' and 'nginx' in result:
+                    nginx_path = path
+                    break
+            
+            if not nginx_path:
+                # As a last resort, try to find it using find command
+                stdin, stdout, stderr = ssh_client.exec_command("find /usr -name nginx -type f -executable 2>/dev/null | head -1")
+                result = stdout.read().decode('utf-8').strip()
+                if result:
+                    nginx_path = result
+            
+            if not nginx_path:
+                return False, "Could not find nginx executable on the server. Please check nginx installation."
+            
             # Test the configuration
-            test_command = f"nginx -t -c {remote_temp_path} 2>&1 || echo 'Test failed'"
+            test_command = f"{nginx_path} -t -c {remote_temp_path} 2>&1 || echo 'Test failed'"
             stdin, stdout, stderr = ssh_client.exec_command(test_command)
             test_output = stdout.read().decode('utf-8')
             
