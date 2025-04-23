@@ -956,6 +956,14 @@ def get_node_stats(node):
         stdin, stdout, stderr = ssh_client.exec_command("cat /proc/loadavg | awk '{print $1\", \"$2\", \"$3}'")
         load_average = stdout.read().decode('utf-8').strip()
         
+        # Get hostname
+        stdin, stdout, stderr = ssh_client.exec_command("hostname -f 2>/dev/null || hostname")
+        hostname = stdout.read().decode('utf-8').strip()
+        
+        # Get OS version
+        stdin, stdout, stderr = ssh_client.exec_command("cat /etc/os-release 2>/dev/null | grep PRETTY_NAME | cut -d '\"' -f 2 || lsb_release -ds 2>/dev/null || cat /etc/redhat-release 2>/dev/null || echo 'Unknown'")
+        os_version = stdout.read().decode('utf-8').strip()
+        
         # Get Nginx connection statistics
         stdin, stdout, stderr = ssh_client.exec_command("curl -s http://localhost/nginx_status 2>/dev/null || echo 'Nginx status not available'")
         nginx_status = stdout.read().decode('utf-8')
@@ -1005,6 +1013,52 @@ def get_node_stats(node):
             bandwidth_usage = f"{round((bytes_in + bytes_out) / 1024 / 1024, 2)} MB/s"
         else:
             bandwidth_usage = "N/A"
+            
+        # Get firewall status - check various firewall services
+        stdin, stdout, stderr = ssh_client.exec_command(
+            "systemctl is-active ufw 2>/dev/null || " +
+            "systemctl is-active firewalld 2>/dev/null || " + 
+            "systemctl is-active iptables 2>/dev/null || echo 'inactive'"
+        )
+        firewall_status = stdout.read().decode('utf-8').strip()
+        
+        # Get open ports - check common service ports and show what's listening
+        stdin, stdout, stderr = ssh_client.exec_command(
+            "ss -tuln | grep LISTEN | awk '{print $5}' | awk -F: '{print $NF}' | sort -n | uniq"
+        )
+        open_ports_output = stdout.read().decode('utf-8').strip().split('\n')
+        open_ports = [port for port in open_ports_output if port and port.isdigit()]
+        
+        # Get DNS servers from resolv.conf
+        stdin, stdout, stderr = ssh_client.exec_command(
+            "cat /etc/resolv.conf | grep '^nameserver' | awk '{print $2}'"
+        )
+        dns_servers_output = stdout.read().decode('utf-8').strip().split('\n')
+        dns_servers = [server for server in dns_servers_output if server]
+        
+        # Get external IP address
+        external_ip = None
+        try:
+            commands = [
+                "curl -s https://ifconfig.me",
+                "curl -s https://api.ipify.org",
+                "curl -s https://ipinfo.io/ip",
+                "wget -qO- https://ipecho.net/plain"
+            ]
+            
+            for cmd in commands:
+                try:
+                    stdin, stdout, stderr = ssh_client.exec_command(cmd, timeout=3)
+                    result = stdout.read().decode('utf-8').strip()
+                    
+                    # Validate that the result looks like an IP address
+                    if result and len(result) < 40 and '.' in result:
+                        external_ip = result
+                        break
+                except:
+                    continue
+        except Exception as e:
+            log_activity('warning', f"Error getting external IP for node {node.name}: {str(e)}")
         
         ssh_client.close()
         
@@ -1014,7 +1068,13 @@ def get_node_stats(node):
             'memory_usage': memory_usage if memory_usage else 'N/A',
             'disk_usage': disk_usage if disk_usage else 'N/A',
             'uptime': uptime if uptime else 'N/A',
-            'load_average': load_average if load_average else 'N/A'
+            'load_average': load_average if load_average else 'N/A',
+            'hostname': hostname if hostname else 'N/A',
+            'os_version': os_version if os_version else 'N/A',
+            'external_ip': external_ip,
+            'firewall_status': firewall_status,
+            'open_ports': open_ports,
+            'dns_servers': dns_servers
         }
         
         connection_stats = {
@@ -1036,7 +1096,13 @@ def get_node_stats(node):
             'disk_usage': 'N/A',
             'uptime': 'N/A',
             'load_average': 'N/A',
-            'error': error_message
+            'error': error_message,
+            'hostname': 'N/A',
+            'os_version': 'N/A',
+            'external_ip': None,
+            'firewall_status': None,
+            'open_ports': None,
+            'dns_servers': None
         }, {
             'total_connections': 0,
             'active_http': 0,
