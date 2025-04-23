@@ -3,192 +3,210 @@
 {% block title %}{{ site.name }} - Italia CDN Proxy Manager{% endblock %}
 
 {% block content %}
-<div class="flex justify-between items-center mb-6">
-    <div>
-        <h1 class="text-3xl font-bold mb-2">{{ site.name }}</h1>
-        <p class="text-gray-600">
-            <span class="px-2 py-1 rounded-full text-xs {% if site.is_active %}bg-green-100 text-green-800{% else %}bg-red-100 text-red-800{% endif %}">
-                {{ 'Active' if site.is_active else 'Inactive' }}
-            </span>
-            <span class="ml-2 text-gray-600">Created on {{ site.created_at.strftime('%Y-%m-%d') }}</span>
-        </p>
-    </div>
-    <div class="flex space-x-2">
-        <a href="{{ url_for('client.edit_site', site_id=site.id) }}" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
-            Edit Site
-        </a>
-        <form method="POST" action="{{ url_for('client.toggle_site_active', site_id=site.id) }}">
-            <button type="submit" class="px-4 py-2 {% if site.is_active %}bg-yellow-600{% else %}bg-green-600{% endif %} text-white rounded-md hover:{% if site.is_active %}bg-yellow-700{% else %}bg-green-700{% endif %} focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
-                {{ 'Deactivate' if site.is_active else 'Activate' }}
-            </button>
-        </form>
-    </div>
-</div>
-
-<!-- Site Information -->
-<div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-    <div class="bg-white p-6 rounded-lg shadow-md">
-        <h2 class="text-xl font-semibold mb-4">Domain Information</h2>
-        <dl>
-            <div class="grid grid-cols-3 py-2 border-b">
-                <dt class="font-medium text-gray-600">Domain:</dt>
-                <dd class="col-span-2">{{ site.domain }}</dd>
-            </div>
-            <div class="grid grid-cols-3 py-2 border-b">
-                <dt class="font-medium text-gray-600">Protocol:</dt>
-                <dd class="col-span-2">{{ site.protocol | upper }}</dd>
-            </div>
-            <div class="grid grid-cols-3 py-2 border-b">
-                <dt class="font-medium text-gray-600">Origin Server:</dt>
-                <dd class="col-span-2">{{ site.origin_address }}:{{ site.origin_port }}</dd>
-            </div>
-            <div class="grid grid-cols-3 py-2 border-b">
-                <dt class="font-medium text-gray-600">WAF Protection:</dt>
-                <dd class="col-span-2">
-                    <span class="px-2 py-0.5 rounded-full text-xs {% if site.use_waf %}bg-green-100 text-green-800{% else %}bg-gray-100 text-gray-800{% endif %}">
-                        {{ 'Enabled' if site.use_waf else 'Disabled' }}
-                    </span>
-                </dd>
-            </div>
-            <div class="grid grid-cols-3 py-2">
-                <dt class="font-medium text-gray-600">Last Updated:</dt>
-                <dd class="col-span-2">{{ site.updated_at.strftime('%Y-%m-%d %H:%M:%S') }}</dd>
-            </div>
-        </dl>
-    </div>
-    
-    <div class="bg-white p-6 rounded-lg shadow-md">
-        <h2 class="text-xl font-semibold mb-4">Deployment Status</h2>
-        <div class="overflow-y-auto max-h-64">
-            <table class="w-full text-left border-collapse">
-                <thead>
-                    <tr class="bg-gray-100">
-                        <th class="px-4 py-2 border">Node</th>
-                        <th class="px-4 py-2 border">Status</th>
-                        <th class="px-4 py-2 border">Last Deployed</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for site_node in site_nodes %}
-                    <tr>
-                        <td class="px-4 py-2 border">{{ site_node.node.name }}</td>
-                        <td class="px-4 py-2 border">
-                            <span class="px-2 py-1 rounded-full text-xs 
-                            {% if site_node.status == 'deployed' %}bg-green-100 text-green-800
-                            {% elif site_node.status == 'pending' %}bg-yellow-100 text-yellow-800
-                            {% else %}bg-red-100 text-red-800{% endif %}">
-                                {{ site_node.status }}
-                            </span>
-                        </td>
-                        <td class="px-4 py-2 border">
-                            {% if site_node.deployed_at %}
-                                {{ site_node.deployed_at.strftime('%Y-%m-%d %H:%M:%S') }}
-                            {% else %}
-                                Never
-                            {% endif %}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+<div class="container py-4">
+    <div class="row mb-4">
+        <div class="col-md-8">
+            <h1 class="display-5 fw-bold mb-2">{{ site.name }}</h1>
+            <p class="text-muted">
+                <span class="badge rounded-pill {% if site.is_active %}bg-success{% else %}bg-danger{% endif %}">
+                    {{ 'Active' if site.is_active else 'Inactive' }}
+                </span>
+                <span class="ms-2">Created on {{ site.created_at.strftime('%Y-%m-%d') }}</span>
+            </p>
+        </div>
+        <div class="col-md-4 text-md-end d-flex align-items-center justify-content-md-end">
+            <a href="{{ url_for('client.edit_site', site_id=site.id) }}" class="btn btn-primary me-2">
+                Edit Site
+            </a>
+            <form method="POST" action="{{ url_for('client.toggle_site_active', site_id=site.id) }}">
+                <button type="submit" class="btn {% if site.is_active %}btn-warning{% else %}btn-success{% endif %}">
+                    {{ 'Deactivate' if site.is_active else 'Activate' }}
+                </button>
+            </form>
         </div>
     </div>
-</div>
 
-<!-- SSL Certificates -->
-<div class="bg-white p-6 rounded-lg shadow-md mb-6">
-    <h2 class="text-xl font-semibold mb-4">SSL Certificates</h2>
-    
-    {% if ssl_certificates %}
-    <div class="overflow-x-auto">
-        <table class="w-full text-left border-collapse">
-            <thead>
-                <tr class="bg-gray-100">
-                    <th class="px-4 py-2 border">Domain</th>
-                    <th class="px-4 py-2 border">Issuer</th>
-                    <th class="px-4 py-2 border">Status</th>
-                    <th class="px-4 py-2 border">Created</th>
-                    <th class="px-4 py-2 border">Expires</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for cert in ssl_certificates %}
-                <tr class="{% if cert.status == 'expired' %}bg-red-50{% endif %}">
-                    <td class="px-4 py-2 border">{{ cert.domain }}</td>
-                    <td class="px-4 py-2 border">{{ cert.issuer }}</td>
-                    <td class="px-4 py-2 border">
-                        <span class="px-2 py-1 rounded-full text-xs 
-                        {% if cert.status == 'active' %}bg-green-100 text-green-800
-                        {% elif cert.status == 'pending' %}bg-yellow-100 text-yellow-800
-                        {% else %}bg-red-100 text-red-800{% endif %}">
-                            {{ cert.status }}
-                        </span>
-                    </td>
-                    <td class="px-4 py-2 border">{{ cert.created_at.strftime('%Y-%m-%d') }}</td>
-                    <td class="px-4 py-2 border">
-                        {% if cert.expires_at %}
-                            {{ cert.expires_at.strftime('%Y-%m-%d') }}
-                        {% else %}
-                            N/A
-                        {% endif %}
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+    <!-- Site Information -->
+    <div class="row mb-4">
+        <div class="col-md-6 mb-4 mb-md-0">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Domain Information</h5>
+                </div>
+                <div class="card-body">
+                    <dl class="row">
+                        <dt class="col-sm-4 text-muted">Domain:</dt>
+                        <dd class="col-sm-8">{{ site.domain }}</dd>
+                        
+                        <dt class="col-sm-4 text-muted">Protocol:</dt>
+                        <dd class="col-sm-8">{{ site.protocol | upper }}</dd>
+                        
+                        <dt class="col-sm-4 text-muted">Origin Server:</dt>
+                        <dd class="col-sm-8">{{ site.origin_address }}:{{ site.origin_port }}</dd>
+                        
+                        <dt class="col-sm-4 text-muted">WAF Protection:</dt>
+                        <dd class="col-sm-8">
+                            <span class="badge rounded-pill {% if site.use_waf %}bg-success{% else %}bg-secondary{% endif %}">
+                                {{ 'Enabled' if site.use_waf else 'Disabled' }}
+                            </span>
+                        </dd>
+                        
+                        <dt class="col-sm-4 text-muted">Last Updated:</dt>
+                        <dd class="col-sm-8">{{ site.updated_at.strftime('%Y-%m-%d %H:%M:%S') }}</dd>
+                    </dl>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-6">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Deployment Status</h5>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive" style="max-height: 250px; overflow-y: auto;">
+                        <table class="table table-bordered table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Node</th>
+                                    <th>Status</th>
+                                    <th>Last Deployed</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for site_node in site_nodes %}
+                                <tr>
+                                    <td>{{ site_node.node.name }}</td>
+                                    <td>
+                                        <span class="badge rounded-pill 
+                                        {% if site_node.status == 'deployed' %}bg-success
+                                        {% elif site_node.status == 'pending' %}bg-warning
+                                        {% else %}bg-danger{% endif %}">
+                                            {{ site_node.status }}
+                                        </span>
+                                    </td>
+                                    <td>
+                                        {% if site_node.deployed_at %}
+                                            {{ site_node.deployed_at.strftime('%Y-%m-%d %H:%M:%S') }}
+                                        {% else %}
+                                            Never
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
-    {% else %}
-    <p class="text-gray-600">No SSL certificates have been issued for this site yet.</p>
-    <p class="text-sm text-gray-500 mt-2">SSL certificates will be automatically requested when the site is deployed with HTTPS.</p>
+
+    <!-- SSL Certificates -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="card-title mb-0">SSL Certificates</h5>
+        </div>
+        <div class="card-body">
+            {% if ssl_certificates %}
+            <div class="table-responsive">
+                <table class="table table-bordered table-hover">
+                    <thead>
+                        <tr>
+                            <th>Domain</th>
+                            <th>Issuer</th>
+                            <th>Status</th>
+                            <th>Created</th>
+                            <th>Expires</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for cert in ssl_certificates %}
+                        <tr class="{% if cert.status == 'expired' %}table-danger{% endif %}">
+                            <td>{{ cert.domain }}</td>
+                            <td>{{ cert.issuer }}</td>
+                            <td>
+                                <span class="badge rounded-pill 
+                                {% if cert.status == 'active' %}bg-success
+                                {% elif cert.status == 'pending' %}bg-warning
+                                {% else %}bg-danger{% endif %}">
+                                    {{ cert.status }}
+                                </span>
+                            </td>
+                            <td>{{ cert.created_at.strftime('%Y-%m-%d') }}</td>
+                            <td>
+                                {% if cert.expires_at %}
+                                    {{ cert.expires_at.strftime('%Y-%m-%d') }}
+                                {% else %}
+                                    N/A
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <p class="text-muted">No SSL certificates have been issued for this site yet.</p>
+            <p class="small text-muted mt-2">SSL certificates will be automatically requested when the site is deployed with HTTPS.</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Recent Deployment Logs -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="card-title mb-0">Recent Deployment Logs</h5>
+        </div>
+        <div class="card-body">
+            {% if deployment_logs %}
+            <div class="table-responsive">
+                <table class="table table-bordered table-hover">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Node</th>
+                            <th>Action</th>
+                            <th>Status</th>
+                            <th>Message</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for log in deployment_logs %}
+                        <tr class="{% if log.status == 'error' %}table-danger{% endif %}">
+                            <td>{{ log.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                            <td>{{ log.node.name }}</td>
+                            <td>{{ log.action }}</td>
+                            <td>
+                                <span class="badge rounded-pill 
+                                {% if log.status == 'success' %}bg-success
+                                {% elif log.status == 'error' %}bg-danger
+                                {% else %}bg-warning{% endif %}">
+                                    {{ log.status }}
+                                </span>
+                            </td>
+                            <td>{{ log.message }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <p class="text-muted">No deployment logs found for this site.</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Custom Configuration -->
+    {% if site.custom_config %}
+    <div class="card">
+        <div class="card-header">
+            <h5 class="card-title mb-0">Custom Nginx Configuration</h5>
+        </div>
+        <div class="card-body">
+            <pre class="bg-light p-3 rounded overflow-auto"><code>{{ site.custom_config }}</code></pre>
+        </div>
+    </div>
     {% endif %}
 </div>
-
-<!-- Recent Deployment Logs -->
-<div class="bg-white p-6 rounded-lg shadow-md mb-6">
-    <h2 class="text-xl font-semibold mb-4">Recent Deployment Logs</h2>
-    
-    {% if deployment_logs %}
-    <div class="overflow-x-auto">
-        <table class="w-full text-left border-collapse">
-            <thead>
-                <tr class="bg-gray-100">
-                    <th class="px-4 py-2 border">Time</th>
-                    <th class="px-4 py-2 border">Node</th>
-                    <th class="px-4 py-2 border">Action</th>
-                    <th class="px-4 py-2 border">Status</th>
-                    <th class="px-4 py-2 border">Message</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for log in deployment_logs %}
-                <tr class="{% if log.status == 'error' %}bg-red-50{% endif %}">
-                    <td class="px-4 py-2 border">{{ log.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
-                    <td class="px-4 py-2 border">{{ log.node.name }}</td>
-                    <td class="px-4 py-2 border">{{ log.action }}</td>
-                    <td class="px-4 py-2 border">
-                        <span class="px-2 py-1 rounded-full text-xs 
-                        {% if log.status == 'success' %}bg-green-100 text-green-800
-                        {% elif log.status == 'error' %}bg-red-100 text-red-800
-                        {% else %}bg-yellow-100 text-yellow-800{% endif %}">
-                            {{ log.status }}
-                        </span>
-                    </td>
-                    <td class="px-4 py-2 border">{{ log.message }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-    {% else %}
-    <p class="text-gray-600">No deployment logs found for this site.</p>
-    {% endif %}
-</div>
-
-<!-- Custom Configuration -->
-{% if site.custom_config %}
-<div class="bg-white p-6 rounded-lg shadow-md">
-    <h2 class="text-xl font-semibold mb-4">Custom Nginx Configuration</h2>
-    <pre class="bg-gray-100 p-4 rounded-md overflow-x-auto"><code>{{ site.custom_config }}</code></pre>
-</div>
-{% endif %}
 {% endblock %}
