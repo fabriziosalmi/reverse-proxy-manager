@@ -1020,3 +1020,400 @@ class SSLCertificateService:
                 "credentials": []
             }
         ]
+    
+    @staticmethod
+    def generate_self_signed_certificate(site_id, node_id, validity_days=365):
+        """
+        Generate a self-signed certificate for a site on a node
+        
+        Args:
+            site_id: ID of the site
+            node_id: ID of the node
+            validity_days: Number of days the certificate should be valid
+            
+        Returns:
+            dict: Certificate generation result
+        """
+        site = Site.query.get(site_id)
+        node = Node.query.get(node_id)
+        
+        if not site or not node:
+            return {"success": False, "message": "Site or node not found"}
+        
+        try:
+            # Connect to the node
+            ssh_client = paramiko.SSHClient()
+            ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            
+            if node.ssh_key_path:
+                ssh_client.connect(
+                    hostname=node.ip_address,
+                    port=node.ssh_port,
+                    username=node.ssh_user,
+                    key_filename=node.ssh_key_path
+                )
+            else:
+                ssh_client.connect(
+                    hostname=node.ip_address,
+                    port=node.ssh_port,
+                    username=node.ssh_user,
+                    password=node.ssh_password
+                )
+            
+            domain = site.domain
+            cert_dir = f"/etc/ssl/self-signed/{domain}"
+            cert_path = f"{cert_dir}/fullchain.pem"
+            key_path = f"{cert_dir}/privkey.pem"
+            
+            # Create directory for certificates
+            stdin, stdout, stderr = ssh_client.exec_command(f"mkdir -p {cert_dir}")
+            exit_status = stdout.channel.recv_exit_status()
+            
+            if exit_status != 0:
+                ssh_client.close()
+                return {
+                    "success": False,
+                    "message": f"Failed to create certificate directory: {stderr.read().decode('utf-8')}"
+                }
+            
+            # Generate self-signed certificate with proper Subject Alternative Names (SANs)
+            # We include both the domain and www.domain to match Let's Encrypt's behavior
+            
+            # Create a config file for OpenSSL with SAN extensions
+            config_file = f"{cert_dir}/openssl.cnf"
+            
+            # Prepare SAN entries
+            san_domains = [domain]
+            if not domain.startswith('www.'):
+                san_domains.append(f"www.{domain}")
+            
+            san_entries = ",".join([f"DNS:{d}" for d in san_domains])
+            
+            # Generate config file content
+            config_content = f"""[req]
+distinguished_name = req_distinguished_name
+req_extensions = v3_req
+prompt = no
+
+[req_distinguished_name]
+CN = {domain}
+
+[v3_req]
+keyUsage = keyEncipherment, dataEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName = {san_entries}
+"""
+
+            # Write the config file
+            sftp = ssh_client.open_sftp()
+            with sftp.file(config_file, 'w') as f:
+                f.write(config_content)
+            sftp.close()
+            
+            # Generate private key and certificate with SANs
+            gen_cert_cmd = f"""
+openssl req -x509 -nodes -days {validity_days} -newkey rsa:2048 \
+-keyout {key_path} -out {cert_path} \
+-config {config_file} -extensions v3_req
+"""
+            
+            stdin, stdout, stderr = ssh_client.exec_command(gen_cert_cmd)
+            exit_status = stdout.channel.recv_exit_status()
+            
+            if exit_status != 0:
+                error = stderr.read().decode('utf-8')
+                ssh_client.close()
+                return {
+                    "success": False,
+                    "message": f"Failed to generate self-signed certificate: {error}"
+                }
+            
+            # Set proper permissions
+            stdin, stdout, stderr = ssh_client.exec_command(f"chmod 644 {cert_path} && chmod 600 {key_path}")
+            
+            # Create symbolic links in the expected Let's Encrypt location to avoid Nginx config changes
+            # First ensure the directory exists
+            le_dir = f"/etc/letsencrypt/live/{domain}"
+            stdin, stdout, stderr = ssh_client.exec_command(f"mkdir -p {le_dir}")
+            
+            # Create the symlinks if they don't exist
+            stdin, stdout, stderr = ssh_client.exec_command(f"""
+if [ ! -f {le_dir}/fullchain.pem ]; then
+    ln -sf {cert_path} {le_dir}/fullchain.pem
+fi
+if [ ! -f {le_dir}/privkey.pem ]; then
+    ln -sf {key_path} {le_dir}/privkey.pem
+fi
+if [ ! -f {le_dir}/chain.pem ]; then
+    ln -sf {cert_path} {le_dir}/chain.pem
+fi
+if [ ! -f {le_dir}/cert.pem ]; then
+    ln -sf {cert_path} {le_dir}/cert.pem
+fi
+""")
+            
+            # Reload Nginx to apply the new certificate
+            stdin, stdout, stderr = ssh_client.exec_command(node.nginx_reload_command)
+            exit_status = stdout.channel.recv_exit_status()
+            
+            if exit_status != 0:
+                error = stderr.read().decode('utf-8')
+                ssh_client.close()
+                return {
+                    "success": False,
+                    "message": f"Failed to reload Nginx: {error}"
+                }
+            
+            # Create certificate record in database
+            now = datetime.now()
+            expiry_date = now + timedelta(days=validity_days)
+            
+            cert_record = SSLCertificate.query.filter_by(
+                site_id=site_id, 
+                node_id=node_id
+            ).first()
+            
+            if cert_record:
+                # Update existing record
+                cert_record.issuer = domain
+                cert_record.subject = domain
+                cert_record.valid_from = now
+                cert_record.valid_until = expiry_date
+                cert_record.days_remaining = validity_days
+                cert_record.status = "valid"
+                cert_record.is_wildcard = False
+                cert_record.is_self_signed = True
+                cert_record.updated_at = now
+            else:
+                # Create new record
+                cert_record = SSLCertificate(
+                    site_id=site_id,
+                    node_id=node_id,
+                    issuer=domain,
+                    subject=domain,
+                    valid_from=now,
+                    valid_until=expiry_date,
+                    days_remaining=validity_days,
+                    status="valid",
+                    is_wildcard=False,
+                    is_self_signed=True,
+                    created_at=now,
+                    updated_at=now
+                )
+                db.session.add(cert_record)
+            
+            db.session.commit()
+            
+            ssh_client.close()
+            
+            log_activity('info', f"Generated self-signed certificate for {domain} on node {node.name}")
+            
+            return {
+                "success": True,
+                "message": f"Successfully generated self-signed certificate for {domain}",
+                "certificate_path": cert_path,
+                "key_path": key_path,
+                "domain": domain,
+                "valid_until": expiry_date.strftime('%Y-%m-%d'),
+                "domains": san_domains,
+                "is_self_signed": True
+            }
+            
+        except Exception as e:
+            log_activity('error', f"Error generating self-signed certificate for {site.domain} on node {node.name}: {str(e)}")
+            return {
+                "success": False,
+                "message": f"Failed to generate self-signed certificate: {str(e)}"
+            }
+    
+    @staticmethod
+    def replace_self_signed_with_real_certificate(site_id, node_id):
+        """
+        Replace a self-signed certificate with a real Let's Encrypt certificate
+        
+        Args:
+            site_id: ID of the site
+            node_id: ID of the node
+            
+        Returns:
+            dict: Replacement result
+        """
+        site = Site.query.get(site_id)
+        node = Node.query.get(node_id)
+        
+        if not site or not node:
+            return {"success": False, "message": "Site or node not found"}
+        
+        domain = site.domain
+        
+        # Check if a self-signed certificate exists first
+        cert_record = SSLCertificate.query.filter_by(
+            site_id=site_id, 
+            node_id=node_id,
+            is_self_signed=True
+        ).first()
+        
+        if not cert_record:
+            return {"success": False, "message": "No self-signed certificate found to replace"}
+        
+        try:
+            # Connect to the node
+            ssh_client = paramiko.SSHClient()
+            ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            
+            if node.ssh_key_path:
+                ssh_client.connect(
+                    hostname=node.ip_address,
+                    port=node.ssh_port,
+                    username=node.ssh_user,
+                    key_filename=node.ssh_key_path
+                )
+            else:
+                ssh_client.connect(
+                    hostname=node.ip_address,
+                    port=node.ssh_port,
+                    username=node.ssh_user,
+                    password=node.ssh_password
+                )
+            
+            # Check if real Let's Encrypt certificates exist
+            le_cert_path = f"/etc/letsencrypt/live/{domain}/fullchain.pem"
+            le_key_path = f"/etc/letsencrypt/live/{domain}/privkey.pem"
+            
+            stdin, stdout, stderr = ssh_client.exec_command(f"test -L {le_cert_path} && echo 'symlink' || echo 'not symlink'")
+            is_symlink = stdout.read().decode('utf-8').strip() == 'symlink'
+            
+            stdin, stdout, stderr = ssh_client.exec_command(f"[ -f {le_cert_path} -a ! -L {le_cert_path} ] && echo 'real' || echo 'not real'")
+            is_real_cert = stdout.read().decode('utf-8').strip() == 'real'
+            
+            if not is_real_cert:
+                ssh_client.close()
+                return {
+                    "success": False,
+                    "message": "No real Let's Encrypt certificate found. Request a certificate first."
+                }
+            
+            # If the current certificate is a symlink, remove it
+            if is_symlink:
+                stdin, stdout, stderr = ssh_client.exec_command(f"rm -f {le_cert_path} {le_key_path}")
+                exit_status = stdout.channel.recv_exit_status()
+                
+                if exit_status != 0:
+                    error = stderr.read().decode('utf-8')
+                    ssh_client.close()
+                    return {
+                        "success": False,
+                        "message": f"Failed to remove symlink to self-signed certificate: {error}"
+                    }
+            
+            # Update the certificate record
+            cert_record.is_self_signed = False
+            db.session.commit()
+            
+            # Reload Nginx to use the new certificate
+            stdin, stdout, stderr = ssh_client.exec_command(node.nginx_reload_command)
+            exit_status = stdout.channel.recv_exit_status()
+            
+            if exit_status != 0:
+                error = stderr.read().decode('utf-8')
+                ssh_client.close()
+                return {
+                    "success": False,
+                    "message": f"Failed to reload Nginx: {error}"
+                }
+            
+            ssh_client.close()
+            
+            log_activity('info', f"Replaced self-signed certificate with real certificate for {domain} on node {node.name}")
+            
+            return {
+                "success": True,
+                "message": f"Successfully replaced self-signed certificate with real Let's Encrypt certificate for {domain}"
+            }
+            
+        except Exception as e:
+            log_activity('error', f"Error replacing self-signed certificate for {site.domain} on node {node.name}: {str(e)}")
+            return {
+                "success": False,
+                "message": f"Failed to replace self-signed certificate: {str(e)}"
+            }
+    
+    @staticmethod
+    def auto_replace_self_signed_certificates():
+        """
+        Check for self-signed certificates that can be replaced with real Let's Encrypt certificates
+        
+        Returns:
+            dict: Results of automatic replacement
+        """
+        # Get all self-signed certificates from database
+        self_signed_certs = SSLCertificate.query.filter_by(is_self_signed=True).all()
+        
+        replaced_count = 0
+        failed_replacements = []
+        
+        for cert in self_signed_certs:
+            site = Site.query.get(cert.site_id)
+            node = Node.query.get(cert.node_id)
+            
+            if not site or not node:
+                continue
+            
+            # Check if real Let's Encrypt certificate exists
+            try:
+                ssh_client = paramiko.SSHClient()
+                ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                
+                if node.ssh_key_path:
+                    ssh_client.connect(
+                        hostname=node.ip_address,
+                        port=node.ssh_port,
+                        username=node.ssh_user,
+                        key_filename=node.ssh_key_path,
+                        timeout=5
+                    )
+                else:
+                    ssh_client.connect(
+                        hostname=node.ip_address,
+                        port=node.ssh_port,
+                        username=node.ssh_user,
+                        password=node.ssh_password,
+                        timeout=5
+                    )
+                
+                le_cert_path = f"/etc/letsencrypt/live/{site.domain}/fullchain.pem"
+                
+                # Check if real certificate exists (not a symlink)
+                stdin, stdout, stderr = ssh_client.exec_command(f"[ -f {le_cert_path} -a ! -L {le_cert_path} ] && echo 'real' || echo 'not real'")
+                is_real_cert = stdout.read().decode('utf-8').strip() == 'real'
+                
+                ssh_client.close()
+                
+                if is_real_cert:
+                    # Replace self-signed with real certificate
+                    result = SSLCertificateService.replace_self_signed_with_real_certificate(cert.site_id, cert.node_id)
+                    
+                    if result.get("success", False):
+                        replaced_count += 1
+                    else:
+                        failed_replacements.append({
+                            "site_id": cert.site_id,
+                            "node_id": cert.node_id,
+                            "domain": site.domain,
+                            "error": result.get("message", "Unknown error")
+                        })
+            
+            except Exception as e:
+                failed_replacements.append({
+                    "site_id": cert.site_id,
+                    "node_id": cert.node_id,
+                    "domain": site.domain,
+                    "error": str(e)
+                })
+        
+        return {
+            "self_signed_count": len(self_signed_certs),
+            "replaced_count": replaced_count,
+            "failed_count": len(failed_replacements),
+            "failed_replacements": failed_replacements
+        }
