@@ -33,7 +33,7 @@ def generate_nginx_config(site):
     if not os.path.exists(template_path):
         # Create basic template
         if site.protocol == 'https':
-            template = """
+            template = r"""
 server {
     listen 443 ssl http2;
     server_name {{domain}};
@@ -483,7 +483,7 @@ def generate_blocked_site_config(site):
     """
     # For HTTP sites
     if site.protocol == 'http':
-        template = """
+        template = r"""
 server {
     listen 80;
     server_name {{domain}};
