@@ -89,11 +89,13 @@ class Site(db.Model):
     name = db.Column(db.String(64), nullable=False)
     domain = db.Column(db.String(255), unique=True, nullable=False)
     protocol = db.Column(db.String(10), nullable=False, default='https')  # http or https
+    origin_protocol = db.Column(db.String(10), nullable=False, default='http')  # http or https for origin
     origin_address = db.Column(db.String(255), nullable=False)  # Backend server address
     origin_port = db.Column(db.Integer, nullable=False)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)  # Allow null for discovered sites
     is_active = db.Column(db.Boolean, default=True)
     is_blocked = db.Column(db.Boolean, default=False) 
+    is_discovered = db.Column(db.Boolean, default=False)  # Whether this site was discovered from node
     use_waf = db.Column(db.Boolean, default=False)
     force_https = db.Column(db.Boolean, default=True)  # New column to force HTTP to HTTPS redirect
     # Cache configuration
@@ -110,6 +112,7 @@ class Site(db.Model):
     # Relationships
     site_nodes = db.relationship('SiteNode', backref='site', lazy='dynamic')
     ssl_certificates = db.relationship('SSLCertificate', backref='site', lazy='dynamic')
+    config_versions = db.relationship('ConfigVersion', backref='site', lazy='dynamic')
     
     def to_dict(self):
         return {
@@ -117,11 +120,13 @@ class Site(db.Model):
             'name': self.name,
             'domain': self.domain,
             'protocol': self.protocol,
+            'origin_protocol': self.origin_protocol,
             'origin_address': self.origin_address,
             'origin_port': self.origin_port,
             'user_id': self.user_id,
             'is_active': self.is_active,
             'is_blocked': self.is_blocked, 
+            'is_discovered': self.is_discovered,
             'use_waf': self.use_waf,
             'force_https': self.force_https,  # New column to force HTTP to HTTPS redirect
             'enable_cache': self.enable_cache,
@@ -141,10 +146,11 @@ class SiteNode(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     site_id = db.Column(db.Integer, db.ForeignKey('sites.id'), nullable=False)
     node_id = db.Column(db.Integer, db.ForeignKey('nodes.id'), nullable=False)
-    status = db.Column(db.String(20), default='pending')  # pending, deployed, error
+    status = db.Column(db.String(20), default='pending')  # pending, deployed, error, discovered
     config_path = db.Column(db.String(256), nullable=True)  # Path to the config file on the node
     error_message = db.Column(db.Text, nullable=True)
     deployed_at = db.Column(db.DateTime, nullable=True)
+    discovered_at = db.Column(db.DateTime, nullable=True)  # When was this config discovered
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Composite unique constraint
@@ -159,6 +165,7 @@ class SiteNode(db.Model):
             'config_path': self.config_path,
             'error_message': self.error_message,
             'deployed_at': self.deployed_at.isoformat() if self.deployed_at else None,
+            'discovered_at': self.discovered_at.isoformat() if self.discovered_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
 
@@ -199,7 +206,8 @@ class DeploymentLog(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     site_id = db.Column(db.Integer, db.ForeignKey('sites.id'), nullable=False)
     node_id = db.Column(db.Integer, db.ForeignKey('nodes.id'), nullable=False)
-    action = db.Column(db.String(64), nullable=False)  # deploy, update, remove, ssl_renew
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)  # Who performed the action
+    action = db.Column(db.String(64), nullable=False)  # deploy, update, remove, ssl_renew, discovery, rollback
     status = db.Column(db.String(20), nullable=False)  # success, error
     message = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -207,12 +215,15 @@ class DeploymentLog(db.Model):
     # Relationships
     site = db.relationship('Site', backref=db.backref('deployment_logs', lazy='dynamic'))
     node = db.relationship('Node', backref=db.backref('deployment_logs', lazy='dynamic'))
+    user = db.relationship('User', backref=db.backref('deployment_logs', lazy='dynamic'))
     
     def to_dict(self):
         return {
             'id': self.id,
             'site_id': self.site_id,
             'node_id': self.node_id,
+            'user_id': self.user_id,
+            'user': self.user.username if self.user else None,
             'action': self.action,
             'status': self.status,
             'message': self.message,
@@ -248,5 +259,28 @@ class SystemLog(db.Model):
             'resource_id': self.resource_id,
             'details': self.details,
             'ip_address': self.ip_address,
+            'created_at': self.created_at.isoformat() if self.created_at else None
+        }
+
+
+class ConfigVersion(db.Model):
+    """Model for tracking configuration versions for sites"""
+    __tablename__ = 'config_versions'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    site_id = db.Column(db.Integer, db.ForeignKey('sites.id'), nullable=False)
+    commit_hash = db.Column(db.String(64), nullable=False)  # Git commit hash
+    message = db.Column(db.Text, nullable=True)             # Commit message
+    author = db.Column(db.String(64), nullable=False)       # Who made the change
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'site_id': self.site_id,
+            'commit_hash': self.commit_hash,
+            'short_hash': self.commit_hash[:8] if self.commit_hash else None,
+            'message': self.message,
+            'author': self.author,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }

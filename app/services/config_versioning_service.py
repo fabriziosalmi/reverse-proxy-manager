@@ -1,0 +1,268 @@
+import os
+import git
+import shutil
+import tempfile
+from datetime import datetime
+from flask import current_app
+from app.models.models import db, Site, Node, SiteNode, DeploymentLog, ConfigVersion
+from app.services.logger_service import log_activity
+from app.services.nginx_service import generate_nginx_config, deploy_to_node
+
+def get_git_repo():
+    """
+    Get or initialize Git repository for configuration versioning
+    
+    Returns:
+        git.Repo: Git repository object
+    """
+    repo_path = current_app.config.get('NGINX_CONFIG_GIT_REPO', 
+                                        os.path.join(current_app.root_path, '..', 'nginx_configs'))
+    
+    # Create repo if it doesn't exist
+    if not os.path.exists(os.path.join(repo_path, '.git')):
+        os.makedirs(repo_path, exist_ok=True)
+        repo = git.Repo.init(repo_path)
+        
+        # Add .gitignore file
+        with open(os.path.join(repo_path, '.gitignore'), 'w') as f:
+            f.write("*.tmp\n")
+            f.write("*.bak\n")
+        
+        # Initial commit
+        repo.git.add('.gitignore')
+        if not repo.head.is_valid() or len(repo.index.diff("HEAD")) > 0:
+            repo.git.commit('-m', 'Initial commit')
+    else:
+        repo = git.Repo(repo_path)
+    
+    return repo
+
+def save_config_version(site, config_content, message=None, author=None):
+    """
+    Save a new version of a site configuration
+    
+    Args:
+        site: Site object
+        config_content: Nginx configuration content
+        message: Optional commit message
+        author: Optional author name for the commit
+        
+    Returns:
+        ConfigVersion: Created config version object
+    """
+    # Get Git repository
+    repo = get_git_repo()
+    repo_path = repo.working_dir
+    
+    # Create site directory if it doesn't exist
+    site_dir = os.path.join(repo_path, 'sites')
+    os.makedirs(site_dir, exist_ok=True)
+    
+    # Write config file
+    file_path = os.path.join(site_dir, f"{site.domain}.conf")
+    with open(file_path, 'w') as f:
+        f.write(config_content)
+    
+    # Add to Git
+    repo.git.add(file_path)
+    
+    # Commit message
+    if not message:
+        message = f"Updated configuration for {site.domain}"
+    
+    # Add author info if provided
+    if author:
+        author_info = f"{author} <{author}@italiacdn-proxy.local>"
+        repo.git.commit('-m', message, '--author', author_info)
+    else:
+        repo.git.commit('-m', message)
+    
+    # Get commit details
+    commit = repo.head.commit
+    commit_hash = commit.hexsha
+    commit_date = datetime.fromtimestamp(commit.committed_date)
+    commit_message = commit.message
+    
+    # Save version to database
+    config_version = ConfigVersion(
+        site_id=site.id,
+        commit_hash=commit_hash,
+        message=commit_message,
+        author=author or 'system',
+        created_at=commit_date
+    )
+    db.session.add(config_version)
+    db.session.commit()
+    
+    log_activity('info', f"Saved new configuration version for {site.domain}: {commit_hash[:8]}")
+    
+    return config_version
+
+def get_config_versions(site):
+    """
+    Get all configuration versions for a site
+    
+    Args:
+        site: Site object
+        
+    Returns:
+        list: List of version dictionaries with commit info
+    """
+    # Get Git repository
+    repo = get_git_repo()
+    
+    # Get file path
+    file_path = os.path.join(repo.working_dir, 'sites', f"{site.domain}.conf")
+    if not os.path.exists(file_path):
+        return []
+    
+    # Get commits for this file
+    versions = []
+    
+    try:
+        # Use git log to get commit history for the file
+        for commit in repo.iter_commits(paths=file_path):
+            versions.append({
+                'commit_hash': commit.hexsha,
+                'short_hash': commit.hexsha[:8],
+                'author': commit.author.name,
+                'date': datetime.fromtimestamp(commit.committed_date),
+                'message': commit.message
+            })
+    except git.exc.GitCommandError:
+        # File might not be in git yet
+        pass
+    
+    return versions
+
+def get_config_content(site, commit_hash=None):
+    """
+    Get configuration content for a specific version
+    
+    Args:
+        site: Site object
+        commit_hash: Optional commit hash to retrieve (defaults to latest)
+        
+    Returns:
+        str: Configuration content
+    """
+    # Get Git repository
+    repo = get_git_repo()
+    
+    # Get file path
+    file_path = os.path.join(repo.working_dir, 'sites', f"{site.domain}.conf")
+    if not os.path.exists(file_path) and not commit_hash:
+        # Generate new config
+        return generate_nginx_config(site)
+    
+    if commit_hash:
+        # Get specific version
+        try:
+            # Use git show to get file content at specific commit
+            content = repo.git.show(f"{commit_hash}:{os.path.relpath(file_path, repo.working_dir)}")
+            return content
+        except git.exc.GitCommandError as e:
+            log_activity('error', f"Error retrieving config version {commit_hash} for {site.domain}: {str(e)}")
+            return None
+    else:
+        # Get latest version
+        with open(file_path, 'r') as f:
+            return f.read()
+
+def rollback_config(site, commit_hash, deploy=False, user_id=None):
+    """
+    Rollback site configuration to a specific version
+    
+    Args:
+        site: Site object
+        commit_hash: Commit hash to rollback to
+        deploy: Whether to deploy the changes to nodes
+        user_id: Optional user ID performing the rollback
+        
+    Returns:
+        bool: Success or failure
+    """
+    # Get config content for the version
+    config_content = get_config_content(site, commit_hash)
+    if not config_content:
+        return False
+    
+    try:
+        # Save as new version (creates a new commit with the old content)
+        author = f"User {user_id}" if user_id else "System"
+        message = f"Rollback to version {commit_hash[:8]}"
+        
+        config_version = save_config_version(site, config_content, message, author)
+        
+        # Deploy to nodes if requested
+        if deploy:
+            site_nodes = SiteNode.query.filter_by(site_id=site.id).all()
+            for site_node in site_nodes:
+                try:
+                    deploy_to_node(site.id, site_node.node_id, config_content)
+                    
+                    # Log the rollback deployment
+                    log = DeploymentLog(
+                        site_id=site.id,
+                        node_id=site_node.node_id,
+                        action='rollback',
+                        status='success',
+                        message=f"Rolled back to version {commit_hash[:8]}",
+                        user_id=user_id
+                    )
+                    db.session.add(log)
+                except Exception as e:
+                    log_activity('error', f"Error deploying rollback for {site.domain} to node {site_node.node_id}: {str(e)}")
+                    
+                    # Log the error
+                    log = DeploymentLog(
+                        site_id=site.id,
+                        node_id=site_node.node_id,
+                        action='rollback',
+                        status='error',
+                        message=f"Failed to deploy rollback: {str(e)}",
+                        user_id=user_id
+                    )
+                    db.session.add(log)
+        
+        db.session.commit()
+        return True
+        
+    except Exception as e:
+        db.session.rollback()
+        log_activity('error', f"Error rolling back configuration for {site.domain}: {str(e)}")
+        return False
+
+def compare_configs(site, commit_hash1, commit_hash2=None):
+    """
+    Compare two configuration versions
+    
+    Args:
+        site: Site object
+        commit_hash1: First commit hash
+        commit_hash2: Second commit hash (defaults to current version)
+        
+    Returns:
+        str: Diff output
+    """
+    # Get Git repository
+    repo = get_git_repo()
+    
+    # Get file path
+    file_path = os.path.relpath(
+        os.path.join(repo.working_dir, 'sites', f"{site.domain}.conf"),
+        repo.working_dir
+    )
+    
+    try:
+        if commit_hash2:
+            # Compare two specific versions
+            diff = repo.git.diff(commit_hash1, commit_hash2, '--', file_path)
+        else:
+            # Compare with current version
+            diff = repo.git.diff(commit_hash1, '--', file_path)
+        
+        return diff
+    except git.exc.GitCommandError as e:
+        log_activity('error', f"Error comparing configs for {site.domain}: {str(e)}")
+        return None
