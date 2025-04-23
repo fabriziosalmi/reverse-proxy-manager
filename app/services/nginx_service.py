@@ -887,6 +887,13 @@ def deploy_to_node(site_id, node_id, nginx_config, test_only=False):
             raise ValueError(f"Failed to connect to node: {connection_error}")
         
         # Ensure the nginx config directory exists
+        if not node.nginx_config_path:
+            # Set a default path if none is specified
+            default_path = "/etc/nginx/conf.d"
+            log_activity('warning', f"No nginx_config_path specified for node {node.name}. Using default: {default_path}")
+            node.nginx_config_path = default_path
+            db.session.commit()
+            
         stdin, stdout, stderr = ssh_client.exec_command(f"mkdir -p {node.nginx_config_path}")
         exit_status = stdout.channel.recv_exit_status()
         
