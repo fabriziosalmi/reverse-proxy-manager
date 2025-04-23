@@ -471,35 +471,6 @@ class SSLCertificateService:
         
         # For wildcard certificates, ensure domain is properly formatted
         if cert_type == 'wildcard':
-        node = Node.query.get(node_id)
-        
-        if not site or not node:
-            return {"success": False, "message": "Site or node not found"}
-            
-        domain = site.domain
-        if not domain:
-            return {"success": False, "message": "Site has no domain configured"}
-        
-        # Validate email format
-        if not re.match(r'^[^@]+@[^@]+\.[^@]+$', email):
-            return {"success": False, "message": "Invalid email address format"}
-        
-        # For wildcard certificates, DNS validation is required
-        if cert_type == 'wildcard' and challenge_type == 'http':
-            return {
-                "success": False, 
-                "message": "Wildcard certificates require DNS validation"
-            }
-        
-        # Validate DNS provider for DNS validation
-        if challenge_type in ['dns', 'manual-dns'] and not dns_provider and challenge_type != 'manual-dns':
-            return {
-                "success": False,
-                "message": "DNS provider is required for DNS validation"
-            }
-        
-        # For wildcard certificates, ensure domain is properly formatted
-        if cert_type == 'wildcard':
             # Extract the base domain (e.g., example.com from sub.example.com)
             domain_parts = domain.split('.')
             if len(domain_parts) > 2:
@@ -521,6 +492,7 @@ class SSLCertificateService:
             ssh_client = paramiko.SSHClient()
             ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             
+            # Enhanced connection error handling
             connection_attempts = 0
             max_attempts = 3
             connection_error = None
@@ -549,6 +521,7 @@ class SSLCertificateService:
                 except Exception as e:
                     connection_error = str(e)
                     connection_attempts += 1
+                    log_activity('warning', f"Connection attempt {connection_attempts} to node {node.name} failed: {str(e)}")
                     time.sleep(2)  # Short delay before retry
             
             if connection_error:

@@ -102,7 +102,7 @@ def save_config_version(site, config_content, message=None, author=None):
         
         # Check if there are actual changes
         if not repo.is_dirty():
-            log_activity('info', f"No changes detected for {site.domain, skipping version creation}")
+            log_activity('info', f"No changes detected for {site.domain}, skipping version creation")
             return None
         
         # Commit message
