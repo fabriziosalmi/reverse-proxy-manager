@@ -833,3 +833,159 @@ def get_node_stats(node):
             'requests_per_second': 0,
             'bandwidth_usage': 'N/A'
         }
+
+def get_nginx_details(node):
+    """
+    Get detailed Nginx information from a node via SSH
+    
+    Args:
+        node: Node object to retrieve details from
+        
+    Returns:
+        dict: A dictionary containing Nginx server details
+    """
+    try:
+        # Connect to the node via SSH
+        ssh_client = paramiko.SSHClient()
+        ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        
+        # Connect using key or password
+        if node.ssh_key_path:
+            ssh_client.connect(
+                hostname=node.ip_address,
+                port=node.ssh_port,
+                username=node.ssh_user,
+                key_filename=node.ssh_key_path,
+                timeout=10
+            )
+        else:
+            ssh_client.connect(
+                hostname=node.ip_address,
+                port=node.ssh_port,
+                username=node.ssh_user,
+                password=node.ssh_password,
+                timeout=10
+            )
+        
+        # Get Nginx version
+        stdin, stdout, stderr = ssh_client.exec_command("nginx -v 2>&1 || echo 'Nginx not installed'")
+        nginx_version_output = stdout.read().decode('utf-8').strip() + stderr.read().decode('utf-8').strip()
+        
+        # Parse nginx version
+        if "nginx version" in nginx_version_output.lower():
+            # Extract version from output like "nginx version: nginx/1.18.0 (Ubuntu)"
+            nginx_version = nginx_version_output.split(':', 1)[1].strip() if ':' in nginx_version_output else nginx_version_output
+        else:
+            nginx_version = "Not installed or not detected"
+        
+        # Get Nginx modules and compiled options
+        stdin, stdout, stderr = ssh_client.exec_command("nginx -V 2>&1 || echo 'Nginx details not available'")
+        nginx_modules_output = stdout.read().decode('utf-8').strip() + stderr.read().decode('utf-8').strip()
+        
+        # Parse modules and compiled options
+        compile_options = []
+        modules = []
+        
+        if "configure arguments" in nginx_modules_output.lower():
+            # Extract compile options
+            options_part = nginx_modules_output.split('configure arguments:', 1)[1].strip() if 'configure arguments:' in nginx_modules_output else ""
+            
+            # Parse options into a structured format
+            if options_part:
+                raw_options = options_part.split('--')
+                for opt in raw_options:
+                    if opt.strip():
+                        compile_options.append(f"--{opt.strip()}")
+                        
+                        # Identify modules
+                        if 'with-' in opt or 'without-' in opt:
+                            if 'with-' in opt:
+                                module_name = opt.replace('with-', '').split('=')[0].strip()
+                                modules.append({'name': module_name, 'enabled': True})
+                            elif 'without-' in opt:
+                                module_name = opt.replace('without-', '').split('=')[0].strip()
+                                modules.append({'name': module_name, 'enabled': False})
+        
+        # Get Nginx configuration test status
+        stdin, stdout, stderr = ssh_client.exec_command("nginx -t 2>&1 || echo 'Configuration test failed'")
+        config_test_output = stdout.read().decode('utf-8').strip() + stderr.read().decode('utf-8').strip()
+        
+        # Determine if config is valid
+        config_valid = "syntax is ok" in config_test_output.lower() and "test is successful" in config_test_output.lower()
+        
+        # Get Nginx service status
+        stdin, stdout, stderr = ssh_client.exec_command("systemctl status nginx 2>&1 || service nginx status 2>&1 || echo 'Service status not available'")
+        service_status_output = stdout.read().decode('utf-8').strip()
+        
+        # Extract service status
+        service_running = False
+        if "active (running)" in service_status_output.lower():
+            service_running = True
+        elif "is running" in service_status_output.lower():
+            service_running = True
+            
+        # Get Nginx binary path
+        nginx_path = node.detected_nginx_path or "Not detected"
+            
+        # Get total number of Nginx configuration files
+        stdin, stdout, stderr = ssh_client.exec_command(f"find {node.nginx_config_path} -name '*.conf' | wc -l")
+        total_configs = stdout.read().decode('utf-8').strip()
+        
+        try:
+            total_configs = int(total_configs)
+        except ValueError:
+            total_configs = 0
+            
+        # Get Nginx-specific system settings
+        stdin, stdout, stderr = ssh_client.exec_command("cat /proc/sys/net/core/somaxconn 2>/dev/null || echo 'Not available'")
+        somaxconn = stdout.read().decode('utf-8').strip()
+        
+        stdin, stdout, stderr = ssh_client.exec_command("cat /proc/sys/fs/file-max 2>/dev/null || echo 'Not available'")
+        file_max = stdout.read().decode('utf-8').strip()
+        
+        # Check if Nginx has SSL support
+        has_ssl = any("ssl" in opt.lower() for opt in compile_options)
+        
+        # Check if HTTP/2 is supported
+        has_http2 = any("http_v2" in opt.lower() for opt in compile_options)
+        
+        ssh_client.close()
+        
+        # Return Nginx details
+        return {
+            'version': nginx_version,
+            'binary_path': nginx_path,
+            'config_path': node.nginx_config_path,
+            'total_configs': total_configs,
+            'config_valid': config_valid,
+            'service_running': service_running,
+            'modules': modules,
+            'compile_options': compile_options,
+            'has_ssl': has_ssl,
+            'has_http2': has_http2,
+            'system_settings': {
+                'somaxconn': somaxconn,
+                'file_max': file_max
+            }
+        }
+        
+    except Exception as e:
+        # If there's an error, return default values with error information
+        error_message = str(e)
+        return {
+            'version': 'Error detecting version',
+            'binary_path': 'Unknown',
+            'config_path': node.nginx_config_path,
+            'total_configs': 0,
+            'config_valid': False,
+            'service_running': False,
+            'modules': [],
+            'compile_options': [],
+            'has_ssl': False,
+            'has_http2': False,
+            'system_settings': {
+                'somaxconn': 'N/A',
+                'file_max': 'N/A'
+            },
+            'error': error_message
+        }
