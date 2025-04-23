@@ -21,7 +21,7 @@
 
 - name: cdn-node-2
   ip_address: 100.99.139.9
-  ssh_user: ubuntu
+  ssh_user: root
   ssh_port: 22
   ssh_key_path: /Users/fab/.ssh/id_rsa
   
