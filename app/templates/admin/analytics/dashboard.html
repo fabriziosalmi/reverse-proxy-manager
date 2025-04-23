@@ -1,56 +1,89 @@
 {% extends 'admin/base.html' %}
 
-{% block title %}Analytics Management{% endblock %}
+{% block title %}Analytics Dashboard - Italia CDN Proxy{% endblock %}
+
+{% block head_extra %}
+<link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/dataTables.bootstrap5.min.css">
+<style>
+    /* Custom styles for analytics page */
+    .card-header {
+        background-color: var(--bs-primary-bg-subtle);
+        border-bottom: 1px solid var(--bs-border-color-translucent);
+    }
+    .card-footer {
+        background-color: var(--bs-tertiary-bg);
+        border-top: 1px solid var(--bs-border-color-translucent);
+    }
+    .text-xs {
+        font-size: 0.75rem;
+    }
+    .chart-container {
+        position: relative;
+        height: 300px; /* Adjust as needed */
+        width: 100%;
+    }
+    #worldMap {
+        height: 400px;
+    }
+    .dataTables_wrapper .row:first-child { /* Spacing for DataTable controls */
+        padding-top: 0.5rem;
+        padding-bottom: 0.5rem;
+    }
+</style>
+{% endblock %}
 
 {% block content %}
-<div class="container-fluid">
-    <h1 class="h3 mb-4 text-gray-800">System Analytics</h1>
+<div class="container-xxl py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1 class="h3 mb-0 text-gray-800">System Analytics</h1>
+    </div>
     
     <!-- Date Range Selector -->
-    <div class="card shadow mb-4">
+    <div class="card shadow-sm mb-4">
         <div class="card-header py-3">
-            <h6 class="m-0 font-weight-bold text-primary">Analytics Period</h6>
+            <h6 class="m-0 fw-bold text-primary"><i class="fas fa-calendar-alt me-2"></i>Analytics Period</h6>
         </div>
         <div class="card-body">
-            <form method="get" action="{{ url_for('admin.analytics_dashboard') }}" class="form-inline">
-                <div class="form-group mb-2 mr-sm-2">
-                    <label for="startDate" class="sr-only">Start Date</label>
-                    <input type="date" class="form-control" id="startDate" name="start_date" 
+            <form method="get" action="{{ url_for('admin.analytics_dashboard') }}" class="row g-3 align-items-center">
+                <div class="col-md-auto">
+                    <label for="startDate" class="visually-hidden">Start Date</label>
+                    <input type="date" class="form-control form-control-sm" id="startDate" name="start_date" 
                            value="{{ start_date.strftime('%Y-%m-%d') if start_date else '' }}">
                 </div>
-                <div class="form-group mb-2 mr-sm-2">
-                    <label for="endDate" class="sr-only">End Date</label>
-                    <input type="date" class="form-control" id="endDate" name="end_date"
+                <div class="col-md-auto">
+                    <label for="endDate" class="visually-hidden">End Date</label>
+                    <input type="date" class="form-control form-control-sm" id="endDate" name="end_date"
                            value="{{ end_date.strftime('%Y-%m-%d') if end_date else '' }}">
                 </div>
-                <button type="submit" class="btn btn-primary mb-2">Apply Filter</button>
-                
-                <div class="btn-group ml-3 mb-2">
-                    <a href="{{ url_for('admin.analytics_dashboard', period='day') }}" class="btn btn-outline-secondary">Today</a>
-                    <a href="{{ url_for('admin.analytics_dashboard', period='week') }}" class="btn btn-outline-secondary">Week</a>
-                    <a href="{{ url_for('admin.analytics_dashboard', period='month') }}" class="btn btn-outline-secondary">Month</a>
-                    <a href="{{ url_for('admin.analytics_dashboard', period='year') }}" class="btn btn-outline-secondary">Year</a>
+                <div class="col-md-auto">
+                    <button type="submit" class="btn btn-sm btn-primary"><i class="fas fa-filter me-1"></i>Apply Filter</button>
+                </div>
+                <div class="col-md-auto ms-md-auto">
+                    <div class="btn-group btn-group-sm">
+                        <a href="{{ url_for('admin.analytics_dashboard', period='day') }}" class="btn btn-outline-secondary {% if request.args.get('period') == 'day' %}active{% endif %}">Today</a>
+                        <a href="{{ url_for('admin.analytics_dashboard', period='week') }}" class="btn btn-outline-secondary {% if request.args.get('period') == 'week' %}active{% endif %}">Week</a>
+                        <a href="{{ url_for('admin.analytics_dashboard', period='month') }}" class="btn btn-outline-secondary {% if request.args.get('period') == 'month' %}active{% endif %}">Month</a>
+                        <a href="{{ url_for('admin.analytics_dashboard', period='year') }}" class="btn btn-outline-secondary {% if request.args.get('period') == 'year' %}active{% endif %}">Year</a>
+                    </div>
                 </div>
             </form>
         </div>
     </div>
     
     <!-- System Overview -->
-    <div class="row">
+    <div class="row g-4 mb-4">
         <!-- Total Bandwidth -->
-        <div class="col-xl-3 col-md-6 mb-4">
-            <div class="card border-left-primary shadow h-100 py-2">
-                <div class="card-body">
-                    <div class="row no-gutters align-items-center">
-                        <div class="col mr-2">
-                            <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
-                                Total Bandwidth
-                            </div>
-                            <div class="h5 mb-0 font-weight-bold text-gray-800">{{ total_bandwidth }}</div>
+        <div class="col-xl-3 col-md-6">
+            <div class="card shadow-sm h-100">
+                <div class="card-body d-flex align-items-center">
+                    <div class="flex-grow-1 me-3">
+                        <div class="text-xs fw-bold text-primary text-uppercase mb-1">
+                            Total Bandwidth
                         </div>
-                        <div class="col-auto">
-                            <i class="fas fa-server fa-2x text-gray-300"></i>
-                        </div>
+                        <div class="h5 mb-0 fw-bold text-gray-800">{{ total_bandwidth }}</div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-hdd fa-2x text-gray-300"></i>
                     </div>
                 </div>
                 <div class="card-footer small text-muted">
@@ -60,19 +93,17 @@
         </div>
 
         <!-- Total Requests -->
-        <div class="col-xl-3 col-md-6 mb-4">
-            <div class="card border-left-success shadow h-100 py-2">
-                <div class="card-body">
-                    <div class="row no-gutters align-items-center">
-                        <div class="col mr-2">
-                            <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
-                                Total Requests
-                            </div>
-                            <div class="h5 mb-0 font-weight-bold text-gray-800">{{ total_requests }}</div>
+        <div class="col-xl-3 col-md-6">
+            <div class="card shadow-sm h-100">
+                <div class="card-body d-flex align-items-center">
+                    <div class="flex-grow-1 me-3">
+                        <div class="text-xs fw-bold text-success text-uppercase mb-1">
+                            Total Requests
                         </div>
-                        <div class="col-auto">
-                            <i class="fas fa-exchange-alt fa-2x text-gray-300"></i>
-                        </div>
+                        <div class="h5 mb-0 fw-bold text-gray-800">{{ total_requests }}</div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-exchange-alt fa-2x text-gray-300"></i>
                     </div>
                 </div>
                 <div class="card-footer small text-muted">
@@ -82,19 +113,17 @@
         </div>
 
         <!-- Active Sites -->
-        <div class="col-xl-3 col-md-6 mb-4">
-            <div class="card border-left-info shadow h-100 py-2">
-                <div class="card-body">
-                    <div class="row no-gutters align-items-center">
-                        <div class="col mr-2">
-                            <div class="text-xs font-weight-bold text-info text-uppercase mb-1">
-                                Active Sites
-                            </div>
-                            <div class="h5 mb-0 font-weight-bold text-gray-800">{{ active_sites }}</div>
+        <div class="col-xl-3 col-md-6">
+            <div class="card shadow-sm h-100">
+                <div class="card-body d-flex align-items-center">
+                    <div class="flex-grow-1 me-3">
+                        <div class="text-xs fw-bold text-info text-uppercase mb-1">
+                            Active Sites
                         </div>
-                        <div class="col-auto">
-                            <i class="fas fa-sitemap fa-2x text-gray-300"></i>
-                        </div>
+                        <div class="h5 mb-0 fw-bold text-gray-800">{{ active_sites }}</div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-sitemap fa-2x text-gray-300"></i>
                     </div>
                 </div>
                 <div class="card-footer small text-muted">
@@ -104,30 +133,24 @@
         </div>
 
         <!-- Error Rate -->
-        <div class="col-xl-3 col-md-6 mb-4">
-            <div class="card border-left-warning shadow h-100 py-2">
-                <div class="card-body">
-                    <div class="row no-gutters align-items-center">
-                        <div class="col mr-2">
-                            <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">
-                                Error Rate
-                            </div>
-                            <div class="row no-gutters align-items-center">
-                                <div class="col-auto">
-                                    <div class="h5 mb-0 mr-3 font-weight-bold text-gray-800">{{ error_rate }}%</div>
-                                </div>
-                                <div class="col">
-                                    <div class="progress progress-sm mr-2">
-                                        <div class="progress-bar bg-warning" role="progressbar" 
-                                             style="width: {{ error_rate }}%" aria-valuenow="{{ error_rate }}" 
-                                             aria-valuemin="0" aria-valuemax="100"></div>
-                                    </div>
-                                </div>
+        <div class="col-xl-3 col-md-6">
+            <div class="card shadow-sm h-100">
+                <div class="card-body d-flex align-items-center">
+                    <div class="flex-grow-1 me-3">
+                        <div class="text-xs fw-bold text-warning text-uppercase mb-1">
+                            Error Rate
+                        </div>
+                        <div class="d-flex align-items-center">
+                            <div class="h5 mb-0 me-2 fw-bold text-gray-800">{{ error_rate }}%</div>
+                            <div class="progress progress-sm flex-grow-1">
+                                <div class="progress-bar bg-warning" role="progressbar" 
+                                     style="width: {{ error_rate }}%" aria-valuenow="{{ error_rate }}" 
+                                     aria-valuemin="0" aria-valuemax="100"></div>
                             </div>
                         </div>
-                        <div class="col-auto">
-                            <i class="fas fa-exclamation-triangle fa-2x text-gray-300"></i>
-                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-exclamation-triangle fa-2x text-gray-300"></i>
                     </div>
                 </div>
                 <div class="card-footer small text-muted">
@@ -138,40 +161,44 @@
     </div>
 
     <!-- Traffic Overview -->
-    <div class="row">
+    <div class="row g-4 mb-4">
         <!-- Bandwidth Over Time Chart -->
         <div class="col-xl-8 col-lg-7">
-            <div class="card shadow mb-4">
+            <div class="card shadow-sm h-100">
                 <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
-                    <h6 class="m-0 font-weight-bold text-primary">System Traffic Overview</h6>
+                    <h6 class="m-0 fw-bold text-primary"><i class="fas fa-chart-line me-2"></i>System Traffic Overview</h6>
                     <div class="dropdown no-arrow">
-                        <a class="dropdown-toggle" href="#" role="button" id="trafficDropdownMenuLink"
-                            data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-                            <i class="fas fa-ellipsis-v fa-sm fa-fw text-gray-400"></i>
-                        </a>
-                        <div class="dropdown-menu dropdown-menu-right shadow animated--fade-in"
+                        <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" id="trafficDropdownMenuLink"
+                            data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="fas fa-ellipsis-v fa-sm fa-fw"></i>
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end shadow animated--fade-in"
                              aria-labelledby="trafficDropdownMenuLink">
-                            <div class="dropdown-header">View Options:</div>
-                            <a class="dropdown-item" href="#" data-chart-view="bandwidth">Bandwidth</a>
-                            <a class="dropdown-item" href="#" data-chart-view="requests">Requests</a>
-                            <a class="dropdown-item" href="#" data-chart-view="combined">Combined View</a>
-                        </div>
+                            <li><h6 class="dropdown-header">View Options:</h6></li>
+                            <li><a class="dropdown-item" href="#" data-chart-view="bandwidth">Bandwidth</a></li>
+                            <li><a class="dropdown-item" href="#" data-chart-view="requests">Requests</a></li>
+                            <li><a class="dropdown-item" href="#" data-chart-view="combined">Combined View</a></li>
+                        </ul>
                     </div>
                 </div>
                 <div class="card-body">
-                    <canvas id="trafficChart" style="min-height: 300px;"></canvas>
+                    <div class="chart-container">
+                        <canvas id="trafficChart"></canvas>
+                    </div>
                 </div>
             </div>
         </div>
 
         <!-- Request Distribution -->
         <div class="col-xl-4 col-lg-5">
-            <div class="card shadow mb-4">
+            <div class="card shadow-sm h-100">
                 <div class="card-header py-3">
-                    <h6 class="m-0 font-weight-bold text-primary">Request Status Distribution</h6>
+                    <h6 class="m-0 fw-bold text-primary"><i class="fas fa-chart-pie me-2"></i>Request Status Distribution</h6>
                 </div>
-                <div class="card-body">
-                    <canvas id="statusDistributionChart" style="min-height: 300px;"></canvas>
+                <div class="card-body d-flex align-items-center justify-content-center">
+                    <div class="chart-container" style="height: 250px;">
+                        <canvas id="statusDistributionChart"></canvas>
+                    </div>
                 </div>
                 <div class="card-footer small text-muted">
                     Based on requests during selected period
@@ -181,15 +208,15 @@
     </div>
 
     <!-- Site Performance -->
-    <div class="row">
+    <div class="row g-4 mb-4">
         <div class="col-lg-12">
-            <div class="card shadow mb-4">
+            <div class="card shadow-sm">
                 <div class="card-header py-3">
-                    <h6 class="m-0 font-weight-bold text-primary">Site Performance</h6>
+                    <h6 class="m-0 fw-bold text-primary"><i class="fas fa-tasks me-2"></i>Site Performance</h6>
                 </div>
                 <div class="card-body">
                     <div class="table-responsive">
-                        <table class="table table-bordered" id="sitesTable" width="100%" cellspacing="0">
+                        <table class="table table-bordered table-hover table-sm" id="sitesTable" width="100%" cellspacing="0">
                             <thead>
                                 <tr>
                                     <th>Site</th>
@@ -210,30 +237,30 @@
                                     <td>{{ site.bandwidth }}</td>
                                     <td>{{ site.requests }}</td>
                                     <td>
-                                        <div class="progress progress-sm">
+                                        <div class="progress progress-sm" title="{{ site.cache_hit_rate }}%">
                                             <div class="progress-bar bg-success" role="progressbar" 
                                                  style="width: {{ site.cache_hit_rate }}%" 
                                                  aria-valuenow="{{ site.cache_hit_rate }}" 
                                                  aria-valuemin="0" aria-valuemax="100">
-                                                {{ site.cache_hit_rate }}%
                                             </div>
                                         </div>
+                                        <span class="visually-hidden">{{ site.cache_hit_rate }}%</span>
                                     </td>
                                     <td>{{ site.avg_response_time }} ms</td>
                                     <td>
-                                        <div class="progress progress-sm">
+                                        <div class="progress progress-sm" title="{{ site.error_rate }}%">
                                             <div class="progress-bar bg-danger" role="progressbar" 
                                                  style="width: {{ site.error_rate }}%" 
                                                  aria-valuenow="{{ site.error_rate }}" 
                                                  aria-valuemin="0" aria-valuemax="100">
-                                                {{ site.error_rate }}%
                                             </div>
                                         </div>
+                                        <span class="visually-hidden">{{ site.error_rate }}%</span>
                                     </td>
                                     <td>
                                         <a href="{{ url_for('admin.site_analytics', site_id=site.id) }}" 
-                                           class="btn btn-sm btn-primary">
-                                            <i class="fas fa-chart-line fa-sm"></i> Details
+                                           class="btn btn-sm btn-outline-primary" title="View Details">
+                                            <i class="fas fa-chart-line fa-sm"></i>
                                         </a>
                                     </td>
                                 </tr>
@@ -247,15 +274,17 @@
     </div>
 
     <!-- System Performance and Errors -->
-    <div class="row">
+    <div class="row g-4 mb-4">
         <!-- Node Performance -->
         <div class="col-lg-6">
-            <div class="card shadow mb-4">
+            <div class="card shadow-sm h-100">
                 <div class="card-header py-3">
-                    <h6 class="m-0 font-weight-bold text-primary">Node Performance</h6>
+                    <h6 class="m-0 fw-bold text-primary"><i class="fas fa-server me-2"></i>Node Performance</h6>
                 </div>
                 <div class="card-body">
-                    <canvas id="nodePerformanceChart" style="min-height: 300px;"></canvas>
+                    <div class="chart-container">
+                        <canvas id="nodePerformanceChart"></canvas>
+                    </div>
                 </div>
                 <div class="card-footer small text-muted">
                     Performance metrics across all CDN nodes
@@ -265,13 +294,13 @@
 
         <!-- Top Error Pages -->
         <div class="col-lg-6">
-            <div class="card shadow mb-4">
+            <div class="card shadow-sm h-100">
                 <div class="card-header py-3">
-                    <h6 class="m-0 font-weight-bold text-primary">Top Error Pages</h6>
+                    <h6 class="m-0 fw-bold text-primary"><i class="fas fa-bug me-2"></i>Top Error Pages</h6>
                 </div>
                 <div class="card-body">
                     <div class="table-responsive">
-                        <table class="table table-bordered" id="errorsTable" width="100%" cellspacing="0">
+                        <table class="table table-bordered table-hover table-sm" id="errorsTable" width="100%" cellspacing="0">
                             <thead>
                                 <tr>
                                     <th>URL</th>
@@ -283,9 +312,9 @@
                             <tbody>
                                 {% for error in top_errors %}
                                 <tr>
-                                    <td>{{ error.url }}</td>
+                                    <td class="text-truncate" style="max-width: 200px;" title="{{ error.url }}">{{ error.url }}</td>
                                     <td>
-                                        <span class="badge badge-{% if error.status >= 500 %}danger{% else %}warning{% endif %}">
+                                        <span class="badge bg-{{ 'danger' if error.status >= 500 else 'warning' }}">
                                             {{ error.status }}
                                         </span>
                                     </td>
@@ -302,17 +331,17 @@
     </div>
 
     <!-- Geographic Distribution -->
-    <div class="row">
+    <div class="row g-4 mb-4">
         <div class="col-lg-12">
-            <div class="card shadow mb-4">
+            <div class="card shadow-sm">
                 <div class="card-header py-3">
-                    <h6 class="m-0 font-weight-bold text-primary">Geographic Traffic Distribution</h6>
+                    <h6 class="m-0 fw-bold text-primary"><i class="fas fa-globe-americas me-2"></i>Geographic Traffic Distribution</h6>
                 </div>
                 <div class="card-body">
-                    <div id="worldMap" style="height: 400px;"></div>
+                    <div id="worldMap"></div>
                 </div>
                 <div class="card-footer small text-muted">
-                    Traffic distribution by country
+                    Traffic distribution by country (based on requests)
                 </div>
             </div>
         </div>
@@ -321,214 +350,272 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@3.7.0"></script>
-<script src="https://cdn.jsdelivr.net/npm/jsvectormap"></script>
-<script src="https://cdn.jsdelivr.net/npm/jsvectormap/dist/maps/world.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/dataTables.bootstrap4@1.10.24/js/dataTables.bootstrap4.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsvectormap@1.5.3/dist/js/jsvectormap.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsvectormap@1.5.3/dist/maps/world.js"></script>
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.6/js/dataTables.bootstrap5.min.js"></script>
 
 <script>
+    // Chart.js Global Defaults
+    Chart.defaults.font.family = "Nunito, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif";
+    Chart.defaults.font.size = 12;
+    Chart.defaults.color = '#858796';
+    Chart.defaults.maintainAspectRatio = false;
+    Chart.defaults.responsive = true;
+    Chart.defaults.plugins.tooltip.backgroundColor = "rgb(255,255,255)";
+    Chart.defaults.plugins.tooltip.bodyColor = "#858796";
+    Chart.defaults.plugins.tooltip.borderColor = '#dddfeb';
+    Chart.defaults.plugins.tooltip.borderWidth = 1;
+    Chart.defaults.plugins.tooltip.padding = 15;
+    Chart.defaults.plugins.tooltip.displayColors = false;
+    Chart.defaults.plugins.tooltip.caretPadding = 10;
+    Chart.defaults.plugins.legend.display = true;
+    Chart.defaults.plugins.legend.position = 'bottom';
+    Chart.defaults.plugins.legend.labels.padding = 20;
+
     // Traffic chart
-    const trafficCtx = document.getElementById('trafficChart').getContext('2d');
-    const trafficChart = new Chart(trafficCtx, {
-        type: 'line',
-        data: {
-            labels: {{ dates|tojson }},
-            datasets: [
-                {
-                    label: 'Bandwidth (GB)',
-                    data: {{ bandwidth_data|tojson }},
-                    fill: false,
-                    borderColor: 'rgba(78, 115, 223, 1)',
-                    backgroundColor: 'rgba(78, 115, 223, 0.05)',
-                    pointBackgroundColor: 'rgba(78, 115, 223, 1)',
-                    tension: 0.3,
-                    yAxisID: 'y'
-                },
-                {
-                    label: 'Requests (thousands)',
-                    data: {{ requests_data|tojson }},
-                    fill: false,
-                    borderColor: 'rgba(28, 200, 138, 1)',
-                    backgroundColor: 'rgba(28, 200, 138, 0.05)',
-                    pointBackgroundColor: 'rgba(28, 200, 138, 1)',
-                    tension: 0.3,
-                    yAxisID: 'y1',
-                    hidden: true
-                }
-            ]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            layout: {
-                padding: {
-                    left: 10,
-                    right: 25,
-                    top: 25,
-                    bottom: 0
-                }
-            },
-            scales: {
-                y: {
-                    type: 'linear',
-                    display: true,
-                    position: 'left',
-                    beginAtZero: true,
-                    title: {
-                        display: true,
-                        text: 'Bandwidth (GB)'
-                    }
-                },
-                y1: {
-                    type: 'linear',
-                    display: true,
-                    position: 'right',
-                    beginAtZero: true,
-                    grid: {
-                        drawOnChartArea: false
+    const trafficCtx = document.getElementById('trafficChart')?.getContext('2d');
+    let trafficChart;
+    if (trafficCtx) {
+        trafficChart = new Chart(trafficCtx, {
+            type: 'line',
+            data: {
+                labels: {{ dates|tojson }},
+                datasets: [
+                    {
+                        label: 'Bandwidth (GB)',
+                        data: {{ bandwidth_data|tojson }},
+                        fill: true, // Changed to true for area chart feel
+                        borderColor: 'rgba(78, 115, 223, 1)',
+                        backgroundColor: 'rgba(78, 115, 223, 0.1)', // Light fill
+                        pointBackgroundColor: 'rgba(78, 115, 223, 1)',
+                        pointBorderColor: '#fff',
+                        pointHoverRadius: 5,
+                        pointHoverBackgroundColor: 'rgba(78, 115, 223, 1)',
+                        pointHoverBorderColor: '#fff',
+                        tension: 0.3,
+                        yAxisID: 'y'
                     },
-                    title: {
-                        display: true,
-                        text: 'Requests (thousands)'
+                    {
+                        label: 'Requests (thousands)',
+                        data: {{ requests_data|tojson }},
+                        fill: true, // Changed to true for area chart feel
+                        borderColor: 'rgba(28, 200, 138, 1)',
+                        backgroundColor: 'rgba(28, 200, 138, 0.1)', // Light fill
+                        pointBackgroundColor: 'rgba(28, 200, 138, 1)',
+                        pointBorderColor: '#fff',
+                        pointHoverRadius: 5,
+                        pointHoverBackgroundColor: 'rgba(28, 200, 138, 1)',
+                        pointHoverBorderColor: '#fff',
+                        tension: 0.3,
+                        yAxisID: 'y1',
+                        hidden: true
                     }
-                }
+                ]
+            },
+            options: {
+                layout: {
+                    padding: { left: 10, right: 25, top: 25, bottom: 0 }
+                },
+                scales: {
+                    x: {
+                        grid: { display: false, drawBorder: false },
+                        ticks: { maxTicksLimit: 7, padding: 10 }
+                    },
+                    y: {
+                        type: 'linear',
+                        display: true,
+                        position: 'left',
+                        beginAtZero: true,
+                        title: { display: true, text: 'Bandwidth (GB)' },
+                        grid: { color: "rgb(234, 236, 244)", drawBorder: false },
+                        ticks: { padding: 10 }
+                    },
+                    y1: {
+                        type: 'linear',
+                        display: true,
+                        position: 'right',
+                        beginAtZero: true,
+                        grid: { drawOnChartArea: false }, // Only show grid for primary axis
+                        title: { display: true, text: 'Requests (thousands)' },
+                        ticks: { padding: 10 }
+                    }
+                },
+                plugins: {
+                    tooltip: { mode: 'index', intersect: false },
+                    legend: { position: 'top' } // Moved legend to top for better space usage
+                },
+                interaction: { mode: 'nearest', axis: 'x', intersect: false }
             }
-        }
-    });
+        });
+    }
 
     // Status distribution chart
-    const statusCtx = document.getElementById('statusDistributionChart').getContext('2d');
-    const statusDistributionChart = new Chart(statusCtx, {
-        type: 'doughnut',
-        data: {
-            labels: ['2xx Success', '3xx Redirection', '4xx Client Error', '5xx Server Error'],
-            datasets: [{
-                data: {{ status_distribution|tojson }},
-                backgroundColor: [
-                    'rgba(28, 200, 138, 0.8)',
-                    'rgba(54, 185, 204, 0.8)',
-                    'rgba(246, 194, 62, 0.8)',
-                    'rgba(231, 74, 59, 0.8)'
-                ],
-                hoverBackgroundColor: [
-                    'rgba(28, 200, 138, 1)',
-                    'rgba(54, 185, 204, 1)',
-                    'rgba(246, 194, 62, 1)',
-                    'rgba(231, 74, 59, 1)'
-                ],
-                hoverBorderColor: "rgba(234, 236, 244, 1)"
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: {
-                    position: 'bottom'
-                }
+    const statusCtx = document.getElementById('statusDistributionChart')?.getContext('2d');
+    let statusDistributionChart;
+    if (statusCtx) {
+        statusDistributionChart = new Chart(statusCtx, {
+            type: 'doughnut',
+            data: {
+                labels: ['2xx Success', '3xx Redirection', '4xx Client Error', '5xx Server Error'],
+                datasets: [{
+                    data: {{ status_distribution|tojson }},
+                    backgroundColor: [
+                        'rgba(28, 200, 138, 0.8)', // Success
+                        'rgba(54, 185, 204, 0.8)', // Info
+                        'rgba(246, 194, 62, 0.8)', // Warning
+                        'rgba(231, 74, 59, 0.8)'  // Danger
+                    ],
+                    hoverBackgroundColor: [
+                        'rgba(28, 200, 138, 1)',
+                        'rgba(54, 185, 204, 1)',
+                        'rgba(246, 194, 62, 1)',
+                        'rgba(231, 74, 59, 1)'
+                    ],
+                    hoverBorderColor: "rgba(234, 236, 244, 1)",
+                    borderWidth: 1 // Added border
+                }]
             },
-            cutout: '70%'
-        }
-    });
+            options: {
+                cutout: '70%',
+                plugins: {
+                    legend: { position: 'right' } // Moved legend for better fit
+                }
+            }
+        });
+    }
 
     // Node performance chart
-    const nodeCtx = document.getElementById('nodePerformanceChart').getContext('2d');
-    const nodePerformanceChart = new Chart(nodeCtx, {
-        type: 'bar',
-        data: {
-            labels: {{ node_names|tojson }},
-            datasets: [
-                {
-                    label: 'Avg. Response Time (ms)',
-                    data: {{ node_response_times|tojson }},
-                    backgroundColor: 'rgba(78, 115, 223, 0.8)'
+    const nodeCtx = document.getElementById('nodePerformanceChart')?.getContext('2d');
+    let nodePerformanceChart;
+    if (nodeCtx) {
+        nodePerformanceChart = new Chart(nodeCtx, {
+            type: 'bar',
+            data: {
+                labels: {{ node_names|tojson }},
+                datasets: [
+                    {
+                        label: 'Avg. Response Time (ms)',
+                        data: {{ node_response_times|tojson }},
+                        backgroundColor: 'rgba(78, 115, 223, 0.8)', // Primary
+                        borderColor: 'rgba(78, 115, 223, 1)',
+                        borderWidth: 1
+                    },
+                    {
+                        label: 'Error Rate (%)',
+                        data: {{ node_error_rates|tojson }},
+                        backgroundColor: 'rgba(231, 74, 59, 0.8)', // Danger
+                        borderColor: 'rgba(231, 74, 59, 1)',
+                        borderWidth: 1
+                    }
+                ]
+            },
+            options: {
+                scales: {
+                    x: { grid: { display: false } },
+                    y: { beginAtZero: true, grid: { color: "rgb(234, 236, 244)" } }
                 },
-                {
-                    label: 'Error Rate (%)',
-                    data: {{ node_error_rates|tojson }},
-                    backgroundColor: 'rgba(231, 74, 59, 0.8)'
-                }
-            ]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: {
-                y: {
-                    beginAtZero: true
+                plugins: {
+                    legend: { position: 'top' }
                 }
             }
-        }
-    });
+        });
+    }
 
     // Geographic distribution map
-    const map = new jsVectorMap({
-        selector: '#worldMap',
-        map: 'world',
-        zoomButtons: true,
-        zoomOnScroll: true,
-        markerStyle: {
-            initial: {
-                r: 5,
-                fill: '#4e73df',
-                stroke: '#fff',
-                strokeWidth: 2
-            }
-        },
-        regionStyle: {
-            initial: {
-                fill: '#e9ecef',
-                stroke: '#fff',
-                strokeWidth: 0.5
+    const mapElement = document.getElementById('worldMap');
+    let map;
+    if (mapElement) {
+        map = new jsVectorMap({
+            selector: '#worldMap',
+            map: 'world',
+            zoomButtons: true,
+            zoomOnScroll: true,
+            regionStyle: {
+                initial: { fill: '#e9ecef', stroke: '#fff', strokeWidth: 0.5 },
+                hover: { fill: '#b3c0ee', fillOpacity: 0.8, cursor: 'pointer' }
             },
-            hover: {
-                fill: '#b3c0ee'
+            series: {
+                regions: [{
+                    values: {{ geo_distribution|tojson }},
+                    scale: ['#c3cdf4', '#4e73df'], // Lighter blue to darker blue scale
+                    normalizeFunction: 'polynomial',
+                    legend: {
+                        vertical: true,
+                        title: 'Requests'
+                    }
+                }]
+            },
+            onRegionTooltipShow: function(event, tooltip, code) {
+                const requests = {{ geo_distribution|tojson }}[code] || 0;
+                tooltip.text(
+                    `${tooltip.text()} - ${requests.toLocaleString()} requests`,
+                    true // Set to true to overwrite the default tooltip content
+                );
             }
-        },
-        series: {
-            regions: [{
-                values: {{ geo_distribution|tojson }},
-                scale: ['#c3cdf4', '#4e73df'],
-                normalizeFunction: 'polynomial'
-            }]
-        },
-        onRegionTipShow: function(e, el, code) {
-            if ({{ geo_distribution|tojson }}[code]) {
-                el.html(el.html() + ': ' + {{ geo_distribution|tojson }}[code] + ' requests');
-            } else {
-                el.html(el.html() + ': No data');
-            }
-        }
-    });
+        });
+    }
 
     // Initialize DataTables
     $(document).ready(function() {
         $('#sitesTable').DataTable({
-            order: [[2, 'desc']]
+            order: [[2, 'desc']], // Default sort by Bandwidth
+            pageLength: 10, // Show 10 entries per page
+            lengthMenu: [ [10, 25, 50, -1], [10, 25, 50, "All"] ] // Page length options
         });
         
         $('#errorsTable').DataTable({
-            order: [[2, 'desc']]
+            order: [[2, 'desc']], // Default sort by Count
+            pageLength: 10,
+            lengthMenu: [ [10, 25, 50, -1], [10, 25, 50, "All"] ]
         });
         
         // Chart view switching
         $('[data-chart-view]').on('click', function(e) {
             e.preventDefault();
+            if (!trafficChart) return;
+            
             const view = $(this).data('chart-view');
+            const datasets = trafficChart.data.datasets;
             
             if (view === 'bandwidth') {
-                trafficChart.data.datasets[0].hidden = false;
-                trafficChart.data.datasets[1].hidden = true;
+                datasets[0].hidden = false;
+                datasets[1].hidden = true;
+                trafficChart.options.scales.y.display = true;
+                trafficChart.options.scales.y1.display = false;
             } else if (view === 'requests') {
-                trafficChart.data.datasets[0].hidden = true;
-                trafficChart.data.datasets[1].hidden = false;
+                datasets[0].hidden = true;
+                datasets[1].hidden = false;
+                trafficChart.options.scales.y.display = false;
+                trafficChart.options.scales.y1.display = true;
             } else if (view === 'combined') {
-                trafficChart.data.datasets[0].hidden = false;
-                trafficChart.data.datasets[1].hidden = false;
+                datasets[0].hidden = false;
+                datasets[1].hidden = false;
+                trafficChart.options.scales.y.display = true;
+                trafficChart.options.scales.y1.display = true;
             }
+            
+            // Update active state for dropdown items (optional)
+            $(this).closest('.dropdown-menu').find('.dropdown-item').removeClass('active');
+            $(this).addClass('active');
             
             trafficChart.update();
         });
+
+        // Set initial active state for chart view dropdown
+        const initialView = 'bandwidth'; // Or determine from state if needed
+        $(`[data-chart-view="${initialView}"]`).addClass('active');
+        // Trigger initial setup based on default view
+        if (trafficChart) {
+             const datasets = trafficChart.data.datasets;
+             if (initialView === 'bandwidth') {
+                 datasets[1].hidden = true;
+                 trafficChart.options.scales.y1.display = false;
+             } // Add other cases if default isn't bandwidth
+             trafficChart.update();
+        }
     });
 </script>
 {% endblock %}
