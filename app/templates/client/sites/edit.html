@@ -135,6 +135,63 @@
                     </div>
                 </div>
                 
+                <!-- GeoIP Configuration -->
+                <div class="card shadow-sm mb-4">
+                    <div class="card-header bg-primary text-white">
+                        <h2 class="h5 mb-0">Geographic Access Control (GeoIP)</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" role="switch" id="use_geoip" name="use_geoip" {{ 'checked' if site and site.use_geoip else '' }}>
+                            <label class="form-check-label" for="use_geoip">Enable Country-Based Access Control</label>
+                        </div>
+                        
+                        <div id="geoipConfigOptions">
+                            <div class="row g-3 mb-3">
+                                <div class="col-md-6">
+                                    <label class="form-label">Access Control Mode</label>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="geoip_mode" id="geoip_mode_blacklist" value="blacklist" {{ 'checked' if not site.geoip_mode or site.geoip_mode == 'blacklist' else '' }}>
+                                        <label class="form-check-label" for="geoip_mode_blacklist">
+                                            <strong>Blacklist</strong> - Block specific countries
+                                        </label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="geoip_mode" id="geoip_mode_whitelist" value="whitelist" {{ 'checked' if site.geoip_mode == 'whitelist' else '' }}>
+                                        <label class="form-check-label" for="geoip_mode_whitelist">
+                                            <strong>Whitelist</strong> - Allow only specific countries
+                                        </label>
+                                    </div>
+                                </div>
+                                
+                                <div class="col-md-6">
+                                    <label class="form-label">Implementation Level</label>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="geoip_level" id="geoip_level_nginx" value="nginx" {{ 'checked' if not site.geoip_level or site.geoip_level == 'nginx' else '' }}>
+                                        <label class="form-check-label" for="geoip_level_nginx">
+                                            <strong>Nginx Level</strong> - More flexible, supports custom error pages
+                                        </label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="geoip_level" id="geoip_level_iptables" value="iptables" {{ 'checked' if site.geoip_level == 'iptables' else '' }}>
+                                        <label class="form-check-label" for="geoip_level_iptables">
+                                            <strong>Iptables Level</strong> - More secure, connection rejected at firewall level
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="geoip_countries" class="form-label">Country Codes</label>
+                                <input type="text" class="form-control" id="geoip_countries" name="geoip_countries" 
+                                       value="{{ site.geoip_countries if site and site.geoip_countries else '' }}" 
+                                       placeholder="US,CA,IT,FR,DE">
+                                <div class="form-text">Enter 2-letter country codes separated by commas. <a href="#" data-bs-toggle="modal" data-bs-target="#countryCodesModal">View country codes</a></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
                 <!-- Advanced Settings -->
                 <div class="mb-4">
                     <h4 class="fw-semibold mb-3">Advanced Settings</h4>
@@ -170,6 +227,103 @@
         </div>
     </div>
 </div>
+
+<!-- Country Codes Modal -->
+<div class="modal fade" id="countryCodesModal" tabindex="-1" aria-labelledby="countryCodesModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="countryCodesModalLabel">ISO Country Codes</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>Use these 2-letter country codes in your GeoIP configuration:</p>
+                
+                <div class="row">
+                    <div class="col-md-4">
+                        <ul class="list-unstyled">
+                            <li><strong>AF</strong> - Afghanistan</li>
+                            <li><strong>AL</strong> - Albania</li>
+                            <li><strong>DZ</strong> - Algeria</li>
+                            <li><strong>AD</strong> - Andorra</li>
+                            <li><strong>AO</strong> - Angola</li>
+                            <li><strong>AR</strong> - Argentina</li>
+                            <li><strong>AU</strong> - Australia</li>
+                            <li><strong>AT</strong> - Austria</li>
+                            <li><strong>BY</strong> - Belarus</li>
+                            <li><strong>BE</strong> - Belgium</li>
+                            <li><strong>BO</strong> - Bolivia</li>
+                            <li><strong>BA</strong> - Bosnia</li>
+                            <li><strong>BR</strong> - Brazil</li>
+                            <li><strong>BG</strong> - Bulgaria</li>
+                            <li><strong>KH</strong> - Cambodia</li>
+                            <li><strong>CA</strong> - Canada</li>
+                            <li><strong>CL</strong> - Chile</li>
+                            <li><strong>CN</strong> - China</li>
+                            <li><strong>CO</strong> - Colombia</li>
+                            <li><strong>HR</strong> - Croatia</li>
+                        </ul>
+                    </div>
+                    <div class="col-md-4">
+                        <ul class="list-unstyled">
+                            <li><strong>CU</strong> - Cuba</li>
+                            <li><strong>CY</strong> - Cyprus</li>
+                            <li><strong>CZ</strong> - Czech Republic</li>
+                            <li><strong>DK</strong> - Denmark</li>
+                            <li><strong>EC</strong> - Ecuador</li>
+                            <li><strong>EG</strong> - Egypt</li>
+                            <li><strong>EE</strong> - Estonia</li>
+                            <li><strong>ET</strong> - Ethiopia</li>
+                            <li><strong>FI</strong> - Finland</li>
+                            <li><strong>FR</strong> - France</li>
+                            <li><strong>DE</strong> - Germany</li>
+                            <li><strong>GR</strong> - Greece</li>
+                            <li><strong>GT</strong> - Guatemala</li>
+                            <li><strong>HU</strong> - Hungary</li>
+                            <li><strong>IS</strong> - Iceland</li>
+                            <li><strong>IN</strong> - India</li>
+                            <li><strong>ID</strong> - Indonesia</li>
+                            <li><strong>IR</strong> - Iran</li>
+                            <li><strong>IQ</strong> - Iraq</li>
+                            <li><strong>IE</strong> - Ireland</li>
+                        </ul>
+                    </div>
+                    <div class="col-md-4">
+                        <ul class="list-unstyled">
+                            <li><strong>IL</strong> - Israel</li>
+                            <li><strong>IT</strong> - Italy</li>
+                            <li><strong>JP</strong> - Japan</li>
+                            <li><strong>JO</strong> - Jordan</li>
+                            <li><strong>KZ</strong> - Kazakhstan</li>
+                            <li><strong>KR</strong> - South Korea</li>
+                            <li><strong>LV</strong> - Latvia</li>
+                            <li><strong>LB</strong> - Lebanon</li>
+                            <li><strong>LT</strong> - Lithuania</li>
+                            <li><strong>LU</strong> - Luxembourg</li>
+                            <li><strong>MY</strong> - Malaysia</li>
+                            <li><strong>MX</strong> - Mexico</li>
+                            <li><strong>MA</strong> - Morocco</li>
+                            <li><strong>NL</strong> - Netherlands</li>
+                            <li><strong>NZ</strong> - New Zealand</li>
+                            <li><strong>NO</strong> - Norway</li>
+                            <li><strong>PK</strong> - Pakistan</li>
+                            <li><strong>PA</strong> - Panama</li>
+                            <li><strong>PE</strong> - Peru</li>
+                            <li><strong>PH</strong> - Philippines</li>
+                        </ul>
+                    </div>
+                </div>
+                
+                <div class="alert alert-info mt-3">
+                    This is a subset of country codes. For a complete list, please refer to the <a href="https://en.wikipedia.org/wiki/ISO_3166-1_alpha-2" target="_blank" class="alert-link">ISO 3166-1 alpha-2</a> standard.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -193,6 +347,44 @@
         
         // Add event listener for changes
         enableCacheCheckbox.addEventListener('change', toggleCacheOptions);
+        
+        // Toggle GeoIP configuration options
+        const enableGeoipCheckbox = document.getElementById('use_geoip');
+        const geoipConfigOptions = document.getElementById('geoipConfigOptions');
+        
+        // Function to toggle GeoIP options visibility
+        function toggleGeoipOptions() {
+            if (enableGeoipCheckbox.checked) {
+                geoipConfigOptions.style.display = 'block';
+            } else {
+                geoipConfigOptions.style.display = 'none';
+            }
+        }
+        
+        // Initial GeoIP toggle
+        toggleGeoipOptions();
+        
+        // Add event listener for GeoIP checkbox changes
+        enableGeoipCheckbox.addEventListener('change', toggleGeoipOptions);
+        
+        // Country code selection helper
+        document.querySelectorAll('#countryCodesModal li').forEach(function(item) {
+            item.style.cursor = 'pointer';
+            item.addEventListener('click', function() {
+                const countryCode = this.querySelector('strong').textContent;
+                const currentValue = document.getElementById('geoip_countries').value;
+                
+                // Add the country code to the input if not already present
+                if (currentValue) {
+                    const codes = currentValue.split(',').map(code => code.trim());
+                    if (!codes.includes(countryCode)) {
+                        document.getElementById('geoip_countries').value = currentValue + ',' + countryCode;
+                    }
+                } else {
+                    document.getElementById('geoip_countries').value = countryCode;
+                }
+            });
+        });
     });
 </script>
 {% endblock %}

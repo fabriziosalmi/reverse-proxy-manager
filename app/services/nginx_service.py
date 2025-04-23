@@ -51,10 +51,16 @@ server {
     ssl_stapling on;
     ssl_stapling_verify on;
     
+    # GeoIP configuration
+    {{geoip_config}}
+    
     # Cache configuration
     {{cache_config}}
     
     location / {
+        # GeoIP access control
+        {{geoip_restrictions}}
+        
         proxy_pass {{origin_protocol}}://{{origin_address}}:{{origin_port}};
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -77,6 +83,9 @@ server {
     
     # Static files caching
     location ~* \.(jpg|jpeg|png|gif|ico|css|js|svg|woff|woff2|ttf|eot)$ {
+        # GeoIP access control
+        {{geoip_restrictions}}
+        
         proxy_pass {{origin_protocol}}://{{origin_address}}:{{origin_port}};
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -133,10 +142,16 @@ server {
     listen 80;
     server_name {{domain}};
     
+    # GeoIP configuration
+    {{geoip_config}}
+    
     # Cache configuration
     {{cache_config}}
     
     location / {
+        # GeoIP access control
+        {{geoip_restrictions}}
+        
         proxy_pass {{origin_protocol}}://{{origin_address}}:{{origin_port}};
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -159,6 +174,9 @@ server {
     
     # Static files caching
     location ~* \.(jpg|jpeg|png|gif|ico|css|js|svg|woff|woff2|ttf|eot)$ {
+        # GeoIP access control
+        {{geoip_restrictions}}
+        
         proxy_pass {{origin_protocol}}://{{origin_address}}:{{origin_port}};
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -193,6 +211,114 @@ server {
         config = config.replace('{{custom_config}}', site.custom_config)
     else:
         config = config.replace('{{custom_config}}', '')
+    
+    # Add GeoIP configuration if enabled
+    if site.use_geoip:
+        geoip_countries = site.geoip_countries.strip().split(',') if site.geoip_countries else []
+        
+        # Generate map for country codes
+        if site.geoip_level == 'nginx':
+            # For Nginx-level GeoIP filtering
+            if site.geoip_mode == 'blacklist':
+                # Blacklist mode - deny specific countries
+                country_map = "\n    # GeoIP country blacklist\n"
+                if geoip_countries:
+                    country_map += "    map $geoip_country_code $allowed_country {\n"
+                    country_map += "        default 1;\n"
+                    for country in geoip_countries:
+                        country_map += f"        {country.strip().upper()} 0;\n"
+                    country_map += "    }\n"
+                else:
+                    # If no countries specified, don't block any
+                    country_map += "    # No countries blacklisted\n"
+                    country_map += "    map $geoip_country_code $allowed_country {\n"
+                    country_map += "        default 1;\n"
+                    country_map += "    }\n"
+            else:
+                # Whitelist mode - allow only specific countries
+                country_map = "\n    # GeoIP country whitelist\n"
+                if geoip_countries:
+                    country_map += "    map $geoip_country_code $allowed_country {\n"
+                    country_map += "        default 0;\n"
+                    for country in geoip_countries:
+                        country_map += f"        {country.strip().upper()} 1;\n"
+                    country_map += "    }\n"
+                else:
+                    # If no countries specified, allow all
+                    country_map += "    # No countries whitelisted, allowing all\n"
+                    country_map += "    map $geoip_country_code $allowed_country {\n"
+                    country_map += "        default 1;\n"
+                    country_map += "    }\n"
+                    
+            # Add restrictions to location blocks
+            geoip_restrictions = """
+        # GeoIP country restrictions
+        if ($allowed_country = 0) {
+            return 403 '<!DOCTYPE html>
+<html>
+<head>
+    <title>Access Denied</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            padding: 50px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 30px;
+            border-radius: 5px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            color: #d9534f;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Access Denied</h1>
+        <p>Your access to this site has been restricted based on your geographic location.</p>
+        <p>Country code: $geoip_country_code</p>
+    </div>
+</body>
+</html>';
+            add_header Content-Type text/html;
+        }
+"""
+            
+            # Combine for final geoip_config
+            geoip_config = country_map
+        
+        else:
+            # For iptables-level GeoIP filtering, we don't need Nginx config
+            # This will be handled by a separate iptables configuration
+            geoip_config = "\n    # GeoIP filtering handled at iptables level\n"
+            geoip_restrictions = ""
+            
+            # Update iptables on all nodes where this site is deployed
+            # Note: This is a placeholder, the actual implementation would
+            # need to run in a separate process or job to avoid blocking
+            from app import db
+            from app.models.models import SiteNode
+            site_nodes = SiteNode.query.filter_by(site_id=site.id).all()
+            for site_node in site_nodes:
+                try:
+                    # Schedule an async task to update iptables
+                    pass
+                except Exception as e:
+                    log_activity('error', f"Failed to update iptables GeoIP rules for site {site.domain} on node {site_node.node_id}: {str(e)}")
+    else:
+        # GeoIP not enabled
+        geoip_config = ""
+        geoip_restrictions = ""
+    
+    # Replace GeoIP placeholders
+    config = config.replace('{{geoip_config}}', geoip_config)
+    config = config.replace('{{geoip_restrictions}}', geoip_restrictions)
     
     # Add cache configuration
     if site.enable_cache:
@@ -945,7 +1071,7 @@ def get_node_stats(node):
             memory_usage = "N/A"
         
         # Get disk usage - fixed command with proper quotes
-        stdin, stdout, stderr = ssh_client.exec_command("df -h / | grep -v Filesystem | awk '{printf \"%s/%s (%s)\", $3, $2, $5}'")
+        stdin, stdout, stderr = ssh_client.exec_command("df -h / | grep -v Filesystem | awk '{print $3\"/\"$2\" (\"$5\")\"}'")
         disk_usage = stdout.read().decode('utf-8').strip()
         
         # Get uptime

@@ -179,6 +179,12 @@ class Node(db.Model):
                 install_commands = [
                     "sudo apt update -y",
                     "sudo apt install -y nginx",
+                    # Install GeoIP modules and databases
+                    "sudo apt install -y nginx-module-geoip geoip-database libgeoip-dev",
+                    # Download and prepare latest GeoIP databases
+                    "sudo mkdir -p /usr/share/GeoIP",
+                    "cd /tmp && sudo wget -q https://dl.miyuru.lk/geoip/maxmind/country/maxmind4.dat.gz && sudo gunzip -f maxmind4.dat.gz && sudo mv maxmind4.dat /usr/share/GeoIP/GeoIP.dat",
+                    "cd /tmp && sudo wget -q https://dl.miyuru.lk/geoip/maxmind/country/maxmind6.dat.gz && sudo gunzip -f maxmind6.dat.gz && sudo mv maxmind6.dat /usr/share/GeoIP/GeoIPv6.dat",
                     "sudo systemctl enable nginx",
                     "sudo systemctl start nginx",
                     "sudo mkdir -p /var/www/letsencrypt",  # Create directory for ACME challenges
@@ -190,6 +196,12 @@ class Node(db.Model):
                     "sudo yum -y update",
                     "sudo yum -y install epel-release",
                     "sudo yum -y install nginx",
+                    # Install GeoIP modules and databases
+                    "sudo yum -y install nginx-module-geoip GeoIP GeoIP-devel",
+                    # Download and prepare latest GeoIP databases
+                    "sudo mkdir -p /usr/share/GeoIP",
+                    "cd /tmp && sudo wget -q https://dl.miyuru.lk/geoip/maxmind/country/maxmind4.dat.gz && sudo gunzip -f maxmind4.dat.gz && sudo mv maxmind4.dat /usr/share/GeoIP/GeoIP.dat",
+                    "cd /tmp && sudo wget -q https://dl.miyuru.lk/geoip/maxmind/country/maxmind6.dat.gz && sudo gunzip -f maxmind6.dat.gz && sudo mv maxmind6.dat /usr/share/GeoIP/GeoIPv6.dat",
                     "sudo systemctl enable nginx",
                     "sudo systemctl start nginx",
                     "sudo mkdir -p /var/www/letsencrypt",
@@ -201,6 +213,12 @@ class Node(db.Model):
                 install_commands = [
                     "sudo apk update",
                     "sudo apk add nginx",
+                    # Install GeoIP modules and databases
+                    "sudo apk add nginx-mod-http-geoip geoip",
+                    # Download and prepare latest GeoIP databases
+                    "sudo mkdir -p /usr/share/GeoIP",
+                    "cd /tmp && sudo wget -q https://dl.miyuru.lk/geoip/maxmind/country/maxmind4.dat.gz && sudo gunzip -f maxmind4.dat.gz && sudo mv maxmind4.dat /usr/share/GeoIP/GeoIP.dat",
+                    "cd /tmp && sudo wget -q https://dl.miyuru.lk/geoip/maxmind/country/maxmind6.dat.gz && sudo gunzip -f maxmind6.dat.gz && sudo mv maxmind6.dat /usr/share/GeoIP/GeoIPv6.dat",
                     "sudo rc-update add nginx default",
                     "sudo service nginx start",
                     "sudo mkdir -p /var/www/letsencrypt",
@@ -230,13 +248,74 @@ class Node(db.Model):
             # Create Nginx config directory if it doesn't exist
             stdin, stdout, stderr = ssh_client.exec_command(f"sudo mkdir -p {self.nginx_config_path}")
             
+            # Configure GeoIP module in nginx.conf if not already configured
+            stdin, stdout, stderr = ssh_client.exec_command("grep -q 'load_module.*ngx_http_geoip_module.so' /etc/nginx/nginx.conf || echo 'not_found'")
+            if stdout.read().decode('utf-8').strip() == 'not_found':
+                # Find the path to the GeoIP module on different systems
+                stdin, stdout, stderr = ssh_client.exec_command("find /usr/lib -name '*ngx_http_geoip_module.so' | head -1")
+                module_path = stdout.read().decode('utf-8').strip()
+                
+                if not module_path:
+                    stdin, stdout, stderr = ssh_client.exec_command("find /usr/share -name '*ngx_http_geoip_module.so' | head -1")
+                    module_path = stdout.read().decode('utf-8').strip()
+                
+                if module_path:
+                    # Add the load_module directive to nginx.conf
+                    stdin, stdout, stderr = ssh_client.exec_command(f"sudo sed -i '1i load_module {module_path};' /etc/nginx/nginx.conf")
+                    
+                    # Verify if the module was added correctly
+                    stdin, stdout, stderr = ssh_client.exec_command("grep -q 'load_module.*ngx_http_geoip_module.so' /etc/nginx/nginx.conf && echo 'added' || echo 'failed'")
+                    if stdout.read().decode('utf-8').strip() != 'added':
+                        all_output.append("Warning: Could not add GeoIP module automatically to nginx.conf")
+                else:
+                    all_output.append("Warning: Could not find GeoIP module path")
+            
+            # Add GeoIP configuration to http section if not already present
+            geoip_config = """
+    # GeoIP configuration
+    geoip_country /usr/share/GeoIP/GeoIP.dat;
+    geoip_city /usr/share/GeoIP/GeoIPCity.dat;
+"""
+            stdin, stdout, stderr = ssh_client.exec_command("grep -q 'geoip_country' /etc/nginx/nginx.conf || echo 'not_found'")
+            if stdout.read().decode('utf-8').strip() == 'not_found':
+                # Add GeoIP config to the http section
+                stdin, stdout, stderr = ssh_client.exec_command(f"sudo sed -i '/http {{/a\{geoip_config}' /etc/nginx/nginx.conf")
+                all_output.append("Added GeoIP configuration to nginx.conf")
+            
+            # Create a test GeoIP config to verify it works
+            test_geoip_config = """
+server {
+    listen 80;
+    server_name geoip-test.local;
+    
+    location /geoip-test {
+        default_type text/plain;
+        return 200 "Country: $geoip_country_code / $geoip_country_name\\nIP: $remote_addr";
+    }
+}
+"""
+            stdin, stdout, stderr = ssh_client.exec_command(f"echo '{test_geoip_config}' | sudo tee {self.nginx_config_path}/geoip-test.conf > /dev/null")
+            
+            # Test if Nginx config is valid with GeoIP
+            stdin, stdout, stderr = ssh_client.exec_command("sudo nginx -t")
+            test_output = stdout.read().decode('utf-8').strip() + stderr.read().decode('utf-8').strip()
+            
+            # If Nginx test failed, remove the test file to prevent issues
+            if "failed" in test_output or "error" in test_output.lower():
+                ssh_client.exec_command(f"sudo rm -f {self.nginx_config_path}/geoip-test.conf")
+                all_output.append(f"Warning: GeoIP test config failed: {test_output}")
+            else:
+                all_output.append("GeoIP configuration test successful")
+                # Reload Nginx to apply changes
+                ssh_client.exec_command("sudo systemctl reload nginx || sudo service nginx reload")
+            
             # Close the SSH connection
             ssh_client.close()
             
             if "nginx version" in version_output.lower():
                 # Installation was successful
                 installation_output = "\n".join(all_output)
-                success_message = f"Nginx installed successfully on {self.name} ({self.ip_address})"
+                success_message = f"Nginx installed successfully on {self.name} ({self.ip_address}) with GeoIP support"
                 
                 # Log the successful installation
                 log_details = {
@@ -334,6 +413,12 @@ class Site(db.Model):
     custom_cache_rules = db.Column(db.Text, nullable=True)  # Custom cache rules in Nginx format
     cache_browser_time = db.Column(db.Integer, default=3600)  # Browser cache time in seconds, default 1 hour
     # End of cache configuration
+    # GeoIP configuration
+    use_geoip = db.Column(db.Boolean, default=False)  # Whether to use GeoIP filtering
+    geoip_mode = db.Column(db.String(10), default='blacklist')  # 'blacklist' or 'whitelist'
+    geoip_countries = db.Column(db.Text, nullable=True)  # Comma-separated list of country codes
+    geoip_level = db.Column(db.String(10), default='nginx')  # 'nginx' or 'iptables'
+    # End of GeoIP configuration
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     custom_config = db.Column(db.Text, nullable=True)  # Additional Nginx configuration
@@ -357,12 +442,16 @@ class Site(db.Model):
             'is_blocked': self.is_blocked, 
             'is_discovered': self.is_discovered,
             'use_waf': self.use_waf,
-            'force_https': self.force_https,  # New column to force HTTP to HTTPS redirect
+            'force_https': self.force_https,
             'enable_cache': self.enable_cache,
             'cache_time': self.cache_time,
             'cache_static_time': self.cache_static_time,
             'custom_cache_rules': self.custom_cache_rules,
             'cache_browser_time': self.cache_browser_time,
+            'use_geoip': self.use_geoip,
+            'geoip_mode': self.geoip_mode,
+            'geoip_countries': self.geoip_countries,
+            'geoip_level': self.geoip_level,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'nodes': [site_node.node_id for site_node in self.site_nodes]

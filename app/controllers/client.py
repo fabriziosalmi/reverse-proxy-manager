@@ -162,6 +162,12 @@ def edit_site(site_id):
         cache_browser_time = int(request.form.get('cache_browser_time', 3600))
         custom_cache_rules = request.form.get('custom_cache_rules')
         
+        # GeoIP configuration
+        use_geoip = 'use_geoip' in request.form
+        geoip_mode = request.form.get('geoip_mode', 'blacklist')
+        geoip_level = request.form.get('geoip_level', 'nginx')
+        geoip_countries = request.form.get('geoip_countries', '').strip()
+        
         # Update site in database
         site.name = name
         site.protocol = protocol
@@ -176,6 +182,12 @@ def edit_site(site_id):
         site.cache_static_time = cache_static_time
         site.cache_browser_time = cache_browser_time
         site.custom_cache_rules = custom_cache_rules
+        
+        # Update GeoIP configuration
+        site.use_geoip = use_geoip
+        site.geoip_mode = geoip_mode
+        site.geoip_level = geoip_level
+        site.geoip_countries = geoip_countries
         
         db.session.commit()
         
