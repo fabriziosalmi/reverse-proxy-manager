@@ -148,6 +148,18 @@ def delete_user(user_id):
         flash('Cannot delete user with active sites. Please delete or reassign sites first.', 'error')
         return redirect(url_for('admin.list_users'))
     
+    # Import logger service
+    from app.services.logger_service import log_activity
+    
+    # Log the user deletion
+    log_activity(
+        category='admin',
+        action='delete',
+        resource_type='user',
+        resource_id=user_id,
+        details=f'Deleted user: {user.username} (ID: {user.id})'
+    )
+    
     db.session.delete(user)
     db.session.commit()
     flash('User deleted successfully', 'success')
