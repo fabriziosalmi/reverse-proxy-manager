@@ -200,7 +200,9 @@ class Node(db.Model):
                     'output': installation_output,
                     'nginx_version': version_output
                 }
-                log_activity('info', f"Nginx installed on node {self.name}", log_details)
+                # Convert log_details to a string to store in the database
+                details_str = f"Nginx installed successfully. Version: {version_output}. Command output stored in system logs."
+                log_activity('info', f"Nginx installed on node {self.name}", 'node', self.id, details_str, user_id)
                 
                 # Create a system log entry
                 system_log = SystemLog(
@@ -225,7 +227,9 @@ class Node(db.Model):
                     'user_id': user_id,
                     'output': "\n".join(all_output)
                 }
-                log_activity('error', f"Failed to install Nginx on node {self.name}", log_details)
+                # Convert log_details to a string for the database
+                error_details = f"Commands executed, but Nginx not found. Installation failed on {self.name}."
+                log_activity('error', f"Failed to install Nginx on node {self.name}", 'node', self.id, error_details, user_id)
                 
                 # Create a system log entry for the failure
                 system_log = SystemLog(
@@ -245,7 +249,7 @@ class Node(db.Model):
             error_msg = f"Failed to install Nginx: {str(e)}"
             
             # Log the exception
-            log_activity('error', f"Exception during Nginx installation on node {self.name}: {str(e)}")
+            log_activity('error', f"Exception during Nginx installation on node {self.name}", 'node', self.id, f"Error: {str(e)}", user_id)
             
             # Create a system log entry for the error
             system_log = SystemLog(
