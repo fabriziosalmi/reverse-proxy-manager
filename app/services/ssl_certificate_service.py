@@ -3,6 +3,8 @@ import paramiko
 import tempfile
 import time
 import json
+import socket
+import dns.resolver
 from datetime import datetime, timedelta
 from app.models.models import db, Site, Node, SiteNode, DeploymentLog, SSLCertificate
 from app.services.logger_service import log_activity
@@ -40,7 +42,7 @@ dns_namecheap_username = {username}'''
     }
     
     # SSL challenge types
-    CHALLENGE_TYPES = ['http', 'dns']
+    CHALLENGE_TYPES = ['http', 'dns', 'manual-dns']
 
     # Certificate types
     CERT_TYPES = ['standard', 'wildcard']
@@ -93,9 +95,13 @@ dns_namecheap_username = {username}'''
                     "error": str(e)
                 })
         
+        # Add DNS resolution info
+        dns_info = SSLCertificateService.check_domain_dns(site.domain)
+        
         return {
             "site_id": site_id,
             "domain": site.domain,
+            "dns_info": dns_info,
             "results": results
         }
     
@@ -196,6 +202,178 @@ dns_namecheap_username = {username}'''
             raise Exception(f"Error checking certificate: {str(e)}")
     
     @staticmethod
+    def check_domain_dns(domain):
+        """
+        Check DNS resolution for a domain to help with SSL certificate setup
+        
+        Args:
+            domain: Domain name to check
+            
+        Returns:
+            dict: DNS resolution info
+        """
+        try:
+            # Get A record
+            a_records = []
+            try:
+                answers = dns.resolver.resolve(domain, 'A')
+                for rdata in answers:
+                    a_records.append(str(rdata))
+            except Exception as e:
+                a_records = [f"Error: {str(e)}"]
+            
+            # Get AAAA record (IPv6)
+            aaaa_records = []
+            try:
+                answers = dns.resolver.resolve(domain, 'AAAA')
+                for rdata in answers:
+                    aaaa_records.append(str(rdata))
+            except Exception:
+                aaaa_records = []  # No IPv6 records is common
+                
+            # Get CNAME record
+            cname_records = []
+            try:
+                answers = dns.resolver.resolve(domain, 'CNAME')
+                for rdata in answers:
+                    cname_records.append(str(rdata))
+            except Exception:
+                cname_records = []  # No CNAME is common
+                
+            # Get CAA records (Certificate Authority Authorization)
+            caa_records = []
+            try:
+                # Try with base domain
+                base_domain = '.'.join(domain.split('.')[-2:])
+                answers = dns.resolver.resolve(base_domain, 'CAA')
+                for rdata in answers:
+                    property_tag = rdata.property.decode('utf-8')
+                    value = rdata.value.decode('utf-8')
+                    caa_records.append(f"{property_tag}: {value}")
+            except Exception:
+                caa_records = []  # No CAA records is common
+                
+            # Get node names from application database
+            nodes = Node.query.filter_by(is_active=True).all()
+            node_ips = [node.ip_address for node in nodes]
+            
+            # Check if domain resolves to any of our CDN nodes
+            matching_nodes = []
+            for ip in a_records:
+                if ip in node_ips:
+                    node = Node.query.filter_by(ip_address=ip).first()
+                    if node:
+                        matching_nodes.append({
+                            "node_id": node.id,
+                            "node_name": node.name,
+                            "ip_address": node.ip_address
+                        })
+            
+            # Is domain resolving correctly?
+            domain_resolution_correct = len(matching_nodes) > 0
+            
+            return {
+                "a_records": a_records,
+                "aaaa_records": aaaa_records,
+                "cname_records": cname_records,
+                "caa_records": caa_records,
+                "pointing_to_cdn": domain_resolution_correct,
+                "matching_nodes": matching_nodes,
+                "dns_status": "ok" if domain_resolution_correct else "warning"
+            }
+        except Exception as e:
+            return {
+                "error": str(e),
+                "dns_status": "error"
+            }
+    
+    @staticmethod
+    def get_issuance_recommendations(site_id):
+        """
+        Provide recommendations for SSL certificate issuance methods based on domain/DNS configuration
+        
+        Args:
+            site_id: ID of the site
+            
+        Returns:
+            dict: Recommendations for SSL issuance
+        """
+        site = Site.query.get(site_id)
+        if not site:
+            return {"error": "Site not found"}
+        
+        if site.protocol != 'https':
+            return {"error": "Site is not configured for HTTPS"}
+        
+        # Check DNS resolution
+        dns_info = SSLCertificateService.check_domain_dns(site.domain)
+        
+        recommendations = {
+            "domain": site.domain,
+            "methods": [],
+            "preferred_method": None,
+            "notes": []
+        }
+        
+        # HTTP-01 Challenge Validation
+        http_method = {
+            "type": "http",
+            "name": "HTTP Challenge",
+            "description": "Certbot places a token file in the /.well-known/acme-challenge/ directory which Let's Encrypt validates",
+            "requirements": [
+                "Domain must resolve to server IP",
+                "Port 80 must be open and accessible from the internet",
+                "No wildcard certificates"
+            ],
+            "suitable": dns_info.get("pointing_to_cdn", False)
+        }
+        recommendations["methods"].append(http_method)
+        
+        # DNS-01 Challenge with API
+        dns_method = {
+            "type": "dns",
+            "name": "DNS API Challenge",
+            "description": "Automatically creates TXT records with your DNS provider via API",
+            "requirements": [
+                "Supported DNS provider with API access",
+                "API credentials for your DNS provider",
+                "Supports wildcard certificates"
+            ],
+            "suitable": True,  # Always an option if credentials provided
+            "providers": list(SSLCertificateService.DNS_PROVIDERS.keys())
+        }
+        recommendations["methods"].append(dns_method)
+        
+        # Manual DNS Challenge
+        manual_dns_method = {
+            "type": "manual-dns",
+            "name": "Manual DNS Challenge",
+            "description": "Manually create TXT records with your DNS provider",
+            "requirements": [
+                "Access to modify your domain's DNS settings",
+                "Supports wildcard certificates",
+                "More effort but works with any DNS provider"
+            ],
+            "suitable": True  # Always an option
+        }
+        recommendations["methods"].append(manual_dns_method)
+        
+        # Determine preferred method
+        if dns_info.get("pointing_to_cdn", False):
+            recommendations["preferred_method"] = "http"
+            recommendations["notes"].append("HTTP validation is recommended since your domain is correctly pointed to the CDN.")
+        else:
+            recommendations["preferred_method"] = "dns"
+            recommendations["notes"].append("DNS validation is recommended since your domain does not currently resolve to your CDN node.")
+            recommendations["notes"].append("Consider using a DNS provider's API for automation or manual DNS validation.")
+        
+        # Check for wildcard certificate needs
+        if site.domain.count('.') > 1:
+            recommendations["notes"].append("For a wildcard certificate to cover all subdomains, you must use DNS validation.")
+        
+        return recommendations
+    
+    @staticmethod
     def request_certificate(site_id, node_id, email=None, challenge_type='http', 
                            dns_provider=None, dns_credentials=None, cert_type='standard'):
         """
@@ -205,7 +383,7 @@ dns_namecheap_username = {username}'''
             site_id: ID of the site
             node_id: ID of the node to request the certificate on
             email: Email address for Let's Encrypt registration
-            challenge_type: Type of challenge to use (http or dns)
+            challenge_type: Type of challenge to use (http, dns, manual-dns)
             dns_provider: DNS provider for DNS challenge
             dns_credentials: Credentials for DNS provider
             cert_type: Type of certificate (standard or wildcard)
@@ -238,7 +416,7 @@ dns_namecheap_username = {username}'''
                 return {"error": "DNS credentials are required for DNS challenge"}
         
         # For wildcard certificates, force DNS challenge
-        if cert_type == 'wildcard' and challenge_type != 'dns':
+        if cert_type == 'wildcard' and challenge_type not in ['dns', 'manual-dns']:
             return {"error": "Wildcard certificates require DNS challenge authentication"}
             
         try:
@@ -280,8 +458,9 @@ dns_namecheap_username = {username}'''
                         "message": "Certbot not found and could not be installed automatically. Please install certbot manually."
                     }
             
-            # If using DNS challenge, install required plugin and set up credentials
-            if challenge_type == 'dns':
+            # If using DNS challenge with provider API, install required plugin
+            credentials_file = None
+            if challenge_type == 'dns' and dns_provider:
                 # Install the DNS plugin
                 plugin_package = SSLCertificateService.DNS_PROVIDERS[dns_provider]['plugin']
                 ssh_client.exec_command(f"apt-get update && apt-get install -y {plugin_package}")
@@ -343,11 +522,23 @@ dns_namecheap_username = {username}'''
             if challenge_type == 'http':
                 # Ensure the /var/www/letsencrypt directory exists for ACME challenges
                 ssh_client.exec_command("mkdir -p /var/www/letsencrypt/.well-known/acme-challenge")
-                
                 certbot_cmd = f"certbot certonly --webroot -w /var/www/letsencrypt --agree-tos {email_arg} {domains_arg} --non-interactive"
-            else:  # DNS challenge
+            elif challenge_type == 'dns':  # Automated DNS challenge
                 dns_plugin = dns_provider.replace('-', '_')
                 certbot_cmd = f"certbot certonly --dns-{dns_plugin} --dns-{dns_plugin}-credentials {credentials_file} --agree-tos {email_arg} {domains_arg} --non-interactive"
+            elif challenge_type == 'manual-dns':  # Manual DNS challenge
+                # For manual DNS, we need to capture the output to show instructions to the user
+                certbot_cmd = f"certbot certonly --manual --preferred-challenges dns --agree-tos {email_arg} {domains_arg} --manual-public-ip-logging-ok"
+                
+                # This will prompt for manual input, so we need special handling
+                ssh_client.close()
+                return {
+                    "success": True,
+                    "message": "Please use the manual token setup on the node directly",
+                    "instructions": "Connect to the node and run the following command:\n" + certbot_cmd,
+                    "node_ip": node.ip_address,
+                    "challenge_type": "manual-dns"
+                }
             
             # Run certbot
             stdin, stdout, stderr = ssh_client.exec_command(certbot_cmd)
@@ -611,7 +802,7 @@ fi
                 "success": False,
                 "message": f"Error configuring auto-renewal: {str(e)}"
             }
-            
+    
     @staticmethod
     def get_supported_dns_providers():
         """
@@ -621,7 +812,7 @@ fi
             list: List of supported DNS providers
         """
         return list(SSLCertificateService.DNS_PROVIDERS.keys())
-        
+    
     @staticmethod
     def revoke_certificate(site_id, node_id, domain=None):
         """

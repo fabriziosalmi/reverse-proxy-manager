@@ -1113,7 +1113,7 @@ def manage_ssl_certificates(site_id):
         action = request.form.get('action')
         node_id = request.form.get('node_id')
         
-        if not node_id:
+        if not node_id and action not in ['check_dns', 'get_recommendations']:
             flash('Please select a node', 'error')
             return redirect(url_for('admin.manage_ssl_certificates', site_id=site_id))
         
@@ -1140,6 +1140,28 @@ def manage_ssl_certificates(site_id):
                     flash('Certificate check completed. Valid certificates found.', 'success')
                 else:
                     flash('Certificate check completed. No valid certificates found.', 'warning')
+                    
+        elif action == 'check_dns':
+            # Check DNS resolution for the domain
+            result = SSLCertificateService.check_domain_dns(site.domain)
+            session['dns_check_result'] = result
+            
+            if 'error' in result:
+                flash(f"Error checking DNS: {result['error']}", 'error')
+            elif result.get('dns_status') == 'ok':
+                flash('DNS check completed. Domain is correctly pointing to CDN nodes.', 'success')
+            else:
+                flash('DNS check completed. Domain is not correctly pointing to CDN nodes. See details below.', 'warning')
+        
+        elif action == 'get_recommendations':
+            # Get SSL issuance recommendations
+            result = SSLCertificateService.get_issuance_recommendations(site_id)
+            session['ssl_recommendations'] = result
+            
+            if 'error' in result:
+                flash(f"Error getting recommendations: {result['error']}", 'error')
+            else:
+                flash('SSL issuance recommendations generated. See details below.', 'info')
             
         elif action == 'request':
             # Get certificate request parameters
@@ -1209,8 +1231,13 @@ def manage_ssl_certificates(site_id):
             )
             
             if result.get('success', False):
-                cert_type_name = "wildcard" if cert_type == 'wildcard' else "standard"
-                flash(f'SSL {cert_type_name} certificate successfully requested and installed using {challenge_type} validation', 'success')
+                if challenge_type == 'manual-dns':
+                    # Special handling for manual DNS challenge
+                    session['manual_dns_instructions'] = result
+                    flash(f'Follow the manual DNS challenge instructions. You will need to create DNS TXT records.', 'info')
+                else:
+                    cert_type_name = "wildcard" if cert_type == 'wildcard' else "standard"
+                    flash(f'SSL {cert_type_name} certificate successfully requested and installed using {challenge_type} validation', 'success')
             else:
                 flash(f"Failed to request SSL certificate: {result.get('message', 'Unknown error')}", 'error')
         
@@ -1221,7 +1248,7 @@ def manage_ssl_certificates(site_id):
                 renewal_days = int(renewal_days)
             except ValueError:
                 renewal_days = 30
-                
+            
             # Setup auto-renewal
             result = SSLCertificateService.setup_auto_renewal(node_id, renewal_days=renewal_days)
             
@@ -1243,8 +1270,18 @@ def manage_ssl_certificates(site_id):
     
     # Get certificate status from session if available
     cert_check_result = session.pop('cert_check_result', None)
+    dns_check_result = session.pop('dns_check_result', None)
+    ssl_recommendations = session.pop('ssl_recommendations', None)
+    manual_dns_instructions = session.pop('manual_dns_instructions', None)
     
-    # If HTTPS site, check certificate status on all nodes
+    # If HTTPS site and no other data is available, automatically do a DNS check
+    if site.protocol == 'https' and not dns_check_result and not cert_check_result and not ssl_recommendations:
+        from app.services.ssl_certificate_service import SSLCertificateService
+        dns_check_result = SSLCertificateService.check_domain_dns(site.domain)
+        # Also get recommendations
+        ssl_recommendations = SSLCertificateService.get_issuance_recommendations(site_id)
+    
+    # If cert status isn't available, check it for HTTPS sites
     cert_status = None
     if site.protocol == 'https' and not cert_check_result:
         from app.services.ssl_certificate_service import SSLCertificateService
@@ -1264,12 +1301,17 @@ def manage_ssl_certificates(site_id):
         from app.services.ssl_certificate_service import SSLCertificateService
         cert_health = SSLCertificateService.certificate_health_check()
     
-    return render_template('admin/sites/ssl_management.html', 
-                          site=site, 
-                          nodes=nodes,
-                          cert_status=cert_status,
-                          dns_providers=dns_providers,
-                          cert_health=cert_health)
+    return render_template(
+        'admin/sites/ssl_management.html', 
+        site=site, 
+        nodes=nodes, 
+        cert_status=cert_status,
+        dns_check_result=dns_check_result,
+        ssl_recommendations=ssl_recommendations,
+        manual_dns_instructions=manual_dns_instructions,
+        dns_providers=dns_providers,
+        cert_health=cert_health
+    )
 
 @admin.route('/templates')
 @login_required

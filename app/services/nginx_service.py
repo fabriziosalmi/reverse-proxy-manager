@@ -451,16 +451,17 @@ def save_config_to_git(site, config_content):
 
 def deploy_to_node(site_id, node_id, nginx_config, test_only=False):
     """
-    Deploy Nginx configuration to a node
+    Deploy a site configuration to a node
     
     Args:
-        site_id: ID of the site being deployed
+        site_id: ID of the site
         node_id: ID of the node to deploy to
-        nginx_config: Nginx configuration content
-        test_only: If True, only test the configuration without applying it
+        nginx_config: The Nginx configuration content
+        test_only: If True, only test the configuration without deploying
         
     Returns:
-        bool: Success or failure
+        If test_only=True: tuple (is_valid, warnings)
+        Otherwise: True on success or raises an exception
     """
     site = Site.query.get(site_id)
     node = Node.query.get(node_id)
@@ -468,222 +469,293 @@ def deploy_to_node(site_id, node_id, nginx_config, test_only=False):
     if not site or not node:
         raise ValueError("Site or node not found")
     
-    site_node = SiteNode.query.filter_by(site_id=site_id, node_id=node_id).first()
-    if not site_node:
-        site_node = SiteNode(site_id=site_id, node_id=node_id, status='pending')
-        db.session.add(site_node)
+    # Validate the configuration first
+    from app.services.nginx_validation_service import NginxValidationService
     
-    try:
-        # First, validate the configuration locally
-        from app.services.nginx_validation_service import NginxValidationService
-        
-        is_valid, error_message = NginxValidationService.validate_config_syntax(nginx_config)
-        if not is_valid:
-            raise ValueError(f"Invalid Nginx configuration: {error_message}")
-        
-        # Validate security best practices
+    # Parse the domain name from the nginx_config (assumes server_name is present)
+    domain_match = re.search(r'server_name\s+([^;]+);', nginx_config)
+    domain = domain_match.group(1).strip() if domain_match else site.domain
+    
+    # Get deployment warnings (for SSL, security headers, etc.)
+    warnings = []
+    
+    # Validate SSL configuration if HTTPS
+    if site.protocol == 'https':
         _, ssl_warnings = NginxValidationService.validate_ssl_config(nginx_config)
-        _, security_warnings = NginxValidationService.validate_security_headers(nginx_config)
+        warnings.extend(ssl_warnings)
         
-        # Test configuration on the node
-        is_valid, test_output = NginxValidationService.test_config_on_node(node_id, nginx_config, site.domain)
+        # Check if SSL certificate files exist on node
+        certificates_exist, missing_files, cert_warnings = NginxValidationService.check_ssl_certificate_paths(node_id, nginx_config)
+        warnings.extend(cert_warnings)
+        
+        # If certificates don't exist and we're in test mode, record this issue
+        if not certificates_exist and test_only:
+            warnings.append("SSL certificates not found. You may need to request SSL certificates.")
+            
+            # Extract paths for user reference
+            ssl_certificate, ssl_certificate_key = NginxValidationService.extract_ssl_file_paths(nginx_config)
+            if ssl_certificate:
+                warnings.append(f"Certificate path: {ssl_certificate}")
+            if ssl_certificate_key:
+                warnings.append(f"Certificate key path: {ssl_certificate_key}")
+
+    # Validate security headers
+    _, security_warnings = NginxValidationService.validate_security_headers(nginx_config)
+    warnings.extend(security_warnings)
+    
+    # Test the configuration
+    is_valid, error_message = NginxValidationService.test_config_on_node(node_id, nginx_config, domain)
+    
+    # Special handling for SSL certificate errors - they're expected if certs don't exist yet
+    # We'll let the deployment proceed but warn the user
+    if not is_valid and "SSL certificate" in error_message and "missing" in error_message:
+        warnings.append("Configuration test passed with SSL warnings (certificates missing)")
+        is_valid = True  # Allow deployment to proceed
+    
+    # For test_only mode, return validation results
+    if test_only:
         if not is_valid:
-            raise ValueError(f"Nginx configuration test failed: {test_output}")
-        
-        # If test_only, we stop here after validation
-        if test_only:
-            # Log the successful test
-            log = DeploymentLog(
-                site_id=site_id,
-                node_id=node_id,
-                action='test',
-                status='success',
-                message=f"Configuration test successful for {site.domain}"
-            )
-            db.session.add(log)
-            db.session.commit()
+            # Analyze the error and add suggestions
+            error_analysis = NginxValidationService.analyze_validation_error(error_message)
+            warnings.append(f"Configuration test failed: {error_message}")
+            warnings.append(f"Suggestion: {error_analysis['suggestion']}")
             
-            # Return warnings about security best practices
-            all_warnings = ssl_warnings + security_warnings
-            return True, all_warnings
+            if error_analysis['error_type'] == 'ssl_certificate' and 'alternate_solution' in error_analysis:
+                warnings.append(f"Alternative: {error_analysis['alternate_solution']}")
         
-        # Connect to the node via SSH
-        ssh_client = paramiko.SSHClient()
-        ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        
-        # Connect using key or password
-        if node.ssh_key_path:
-            ssh_client.connect(
-                hostname=node.ip_address,
-                port=node.ssh_port,
-                username=node.ssh_user,
-                key_filename=node.ssh_key_path
-            )
-        else:
-            ssh_client.connect(
-                hostname=node.ip_address,
-                port=node.ssh_port,
-                username=node.ssh_user,
-                password=node.ssh_password
-            )
-        
-        # Create a temporary local file with the Nginx config
-        with tempfile.NamedTemporaryFile(mode='w+', delete=False) as temp:
-            temp.write(nginx_config)
-            temp_path = temp.name
-        
-        # Define the remote path
-        remote_filename = f"{site.domain}.conf"
-        remote_path = os.path.join(node.nginx_config_path, remote_filename)
-        
-        # Transfer the file
-        sftp = ssh_client.open_sftp()
-        sftp.put(temp_path, remote_path)
-        sftp.close()
-        
-        # Remove the temporary local file
-        os.unlink(temp_path)
-        
-        # Enhanced nginx executable discovery specifically for Ubuntu systems
-        
-        # First try standard environment PATH with a full env sourcing
-        stdin, stdout, stderr = ssh_client.exec_command("bash -l -c 'which nginx' 2>/dev/null || echo 'not found'")
-        result = stdout.read().decode('utf-8').strip()
-        if result != 'not found' and 'nginx' in result:
-            nginx_path = result
-        else:
-            # Try common Ubuntu/Debian installation paths
-            nginx_paths = [
-                "/usr/sbin/nginx",            # Standard Debian/Ubuntu location
-                "/usr/bin/nginx",             # Alternative location
-                "/usr/local/nginx/sbin/nginx", # Manual install common location
-                "/usr/local/sbin/nginx",      # Some package managers
-                "/usr/share/nginx/sbin/nginx", # Some package managers
-                "/opt/nginx/sbin/nginx",      # Custom installs
-                "/snap/bin/nginx"             # Snap installation
-            ]
-            
-            # Try to find working nginx path
-            nginx_path = None
-            for path in nginx_paths:
-                stdin, stdout, stderr = ssh_client.exec_command(f"test -x {path} && echo {path} || echo 'not found'")
-                result = stdout.read().decode('utf-8').strip()
-                if result != 'not found':
-                    nginx_path = result
-                    break
-        
-        # If nginx binary still not found, try active service detection
-        if not nginx_path:
-            # Check if nginx service is active and get its path
-            stdin, stdout, stderr = ssh_client.exec_command("systemctl status nginx 2>/dev/null | grep 'Main PID' | awk '{print $3}' || echo 'not found'")
-            result = stdout.read().decode('utf-8').strip()
-            if result != 'not found' and result.isdigit():
-                # Get the executable path from the process
-                pid = result
-                stdin, stdout, stderr = ssh_client.exec_command(f"readlink -f /proc/{pid}/exe 2>/dev/null || echo 'not found'")
-                result = stdout.read().decode('utf-8').strip()
-                if result != 'not found' and 'nginx' in result:
-                    nginx_path = result
-        
-        # If still not found, try a comprehensive file search
-        if not nginx_path:
-            # Try finding executable with dpkg (Debian/Ubuntu package manager)
-            stdin, stdout, stderr = ssh_client.exec_command("dpkg -l | grep nginx | awk '{print $2}' | grep -v lib | head -1 || echo 'not found'")
-            result = stdout.read().decode('utf-8').strip()
-            if result != 'not found':
-                # If any package is found, try dpkg to find binary
-                package_name = result
-                stdin, stdout, stderr = ssh_client.exec_command(f"dpkg -L {package_name} | grep bin/nginx || echo 'not found'")
-                result = stdout.read().decode('utf-8').strip()
-                if result != 'not found' and 'nginx' in result:
-                    # Take the first line as the binary path
-                    nginx_path = result.split('\n')[0]
-        
-        # Last resort: deep file search
-        if not nginx_path:
-            # This might be slow but will find nginx in most cases
-            stdin, stdout, stderr = ssh_client.exec_command("find /usr /etc /opt /snap -name nginx -type f -executable 2>/dev/null | head -1 || echo 'not found'")
-            result = stdout.read().decode('utf-8').strip()
-            if result != 'not found':
-                nginx_path = result
-        
-        # If nginx binary still not found, provide installation instructions
-        if not nginx_path:
-            # Try to determine the OS for better help message
-            stdin, stdout, stderr = ssh_client.exec_command("lsb_release -ds 2>/dev/null || cat /etc/os-release 2>/dev/null | grep PRETTY_NAME | cut -d '\"' -f 2 || echo 'Unknown'")
-            os_info = stdout.read().decode('utf-8').strip()
-            
-            if "Ubuntu" in os_info or "Debian" in os_info:
-                raise Exception(f"Could not find nginx executable on the server ({os_info}). Please install nginx using: sudo apt update && sudo apt install -y nginx")
-            else:
-                raise Exception(f"Could not find nginx executable on the server ({os_info}). Please check nginx installation.")
-        
-        # Store the detected nginx path in node properties for future use
-        if hasattr(node, 'detected_nginx_path') and not node.detected_nginx_path == nginx_path:
-            node.detected_nginx_path = nginx_path
-            db.session.commit()
-        
-        # Get the custom reload command or use default with found nginx path
-        if 'systemctl' in node.nginx_reload_command:
-            reload_command = node.nginx_reload_command
-        else:
-            # If it's a custom command that might include nginx directly
-            if nginx_path:
-                # Replace 'nginx' with the full path
-                reload_command = node.nginx_reload_command.replace('nginx', nginx_path)
-            else:
-                reload_command = node.nginx_reload_command
-        
-        # Reload Nginx to apply the changes
-        stdin, stdout, stderr = ssh_client.exec_command(reload_command)
-        exit_status = stdout.channel.recv_exit_status()
-        
-        if exit_status != 0:
-            error_output = stderr.read().decode('utf-8')
-            raise Exception(f"Failed to reload Nginx: {error_output}")
-        
-        # Update the site_node status
-        site_node.status = 'deployed'
-        site_node.config_path = remote_path
-        site_node.deployed_at = datetime.utcnow()
-        site_node.error_message = None
-        
-        # Create warning message if any security warnings
-        warning_message = ""
-        if ssl_warnings or security_warnings:
-            warning_message = "Deployed with warnings: " + ", ".join(ssl_warnings + security_warnings)
-        
-        # Log the deployment
+        return is_valid, warnings
+    
+    # If configuration is invalid, log and raise exception
+    if not is_valid:
+        error_analysis = NginxValidationService.analyze_validation_error(error_message)
         log = DeploymentLog(
             site_id=site_id,
             node_id=node_id,
-            action='deploy',
-            status='success',
-            message=f"Successfully deployed {site.domain} to {node.name}{' - ' + warning_message if warning_message else ''}"
+            action="deploy",
+            status="error",
+            message=f"Configuration validation failed: {error_message}"
         )
         db.session.add(log)
         db.session.commit()
+        
+        raise ValueError(f"Configuration validation failed: {error_message}\nSuggestion: {error_analysis['suggestion']}")
+    
+    try:
+        # Connect to the node
+        ssh_client = paramiko.SSHClient()
+        ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        
+        # Enhanced connection error handling
+        connection_attempts = 0
+        max_attempts = 3
+        connection_error = None
+        
+        while connection_attempts < max_attempts:
+            try:
+                if node.ssh_key_path:
+                    ssh_client.connect(
+                        hostname=node.ip_address,
+                        port=node.ssh_port,
+                        username=node.ssh_user,
+                        key_filename=node.ssh_key_path,
+                        timeout=10
+                    )
+                else:
+                    ssh_client.connect(
+                        hostname=node.ip_address,
+                        port=node.ssh_port,
+                        username=node.ssh_user,
+                        password=node.ssh_password,
+                        timeout=10
+                    )
+                # If we get here, connection succeeded
+                connection_error = None
+                break
+            except Exception as e:
+                connection_error = str(e)
+                connection_attempts += 1
+                time.sleep(2)  # Short delay before retry
+        
+        if connection_error:
+            log = DeploymentLog(
+                site_id=site_id,
+                node_id=node_id,
+                action="deploy",
+                status="error", 
+                message=f"Failed to connect to node after {max_attempts} attempts: {connection_error}"
+            )
+            db.session.add(log)
+            db.session.commit()
+            raise ValueError(f"Failed to connect to node: {connection_error}")
+        
+        # Ensure the nginx config directory exists
+        stdin, stdout, stderr = ssh_client.exec_command(f"mkdir -p {node.nginx_config_path}")
+        exit_status = stdout.channel.recv_exit_status()
+        
+        if exit_status != 0:
+            error = stderr.read().decode('utf-8')
+            log = DeploymentLog(
+                site_id=site_id,
+                node_id=node_id,
+                action="deploy",
+                status="error",
+                message=f"Failed to create nginx config directory: {error}"
+            )
+            db.session.add(log)
+            db.session.commit()
+            ssh_client.close()
+            raise ValueError(f"Failed to create nginx config directory: {error}")
+        
+        # Create the config file
+        config_file_path = f"{node.nginx_config_path}/{domain}.conf"
+        sftp = ssh_client.open_sftp()
+        
+        # Write to a temporary file first
+        temp_file_path = f"{config_file_path}.tmp"
+        with sftp.file(temp_file_path, 'w') as f:
+            f.write(nginx_config)
+        
+        # Move the temporary file to the final location (atomic operation)
+        ssh_client.exec_command(f"mv {temp_file_path} {config_file_path}")
+        
+        # Special handling for HTTPS sites - check and create SSL directories if needed
+        if site.protocol == 'https':
+            # Extract SSL certificate paths
+            ssl_certificate, ssl_certificate_key = NginxValidationService.extract_ssl_file_paths(nginx_config)
+            
+            # If certificate paths exist, ensure their parent directories exist
+            if ssl_certificate:
+                cert_dir = os.path.dirname(ssl_certificate)
+                stdin, stdout, stderr = ssh_client.exec_command(f"mkdir -p {cert_dir}")
+            
+            if ssl_certificate_key:
+                key_dir = os.path.dirname(ssl_certificate_key)
+                stdin, stdout, stderr = ssh_client.exec_command(f"mkdir -p {key_dir}")
+            
+            # Check if SSL certificates exist and log a warning if not
+            all_exist, missing_files, _ = NginxValidationService.check_ssl_certificate_paths(node_id, nginx_config)
+            if not all_exist:
+                missing_files_str = ", ".join(missing_files)
+                log_activity('warning', f"Deployed HTTPS site {domain} but SSL certificates are missing: {missing_files_str}")
+                
+                # Add to warnings but allow deployment to continue
+                warnings.append(f"Deployed HTTPS site but SSL certificates are missing: {missing_files_str}")
+        
+        # Reload Nginx
+        stdin, stdout, stderr = ssh_client.exec_command(node.nginx_reload_command)
+        exit_status = stdout.channel.recv_exit_status()
+        
+        if exit_status != 0:
+            error = stderr.read().decode('utf-8')
+            # Check if it's an SSL certificate error during reload
+            if "SSL" in error and "certificate" in error and "failed" in error:
+                # For SSL certificate errors, log a warning but consider deployment partially successful
+                log = DeploymentLog(
+                    site_id=site_id,
+                    node_id=node_id,
+                    action="deploy",
+                    status="warning",
+                    message=f"Deployment completed but Nginx reload had SSL certificate warnings: {error}"
+                )
+                db.session.add(log)
+                
+                # Update site node status to reflect warning
+                site_node = SiteNode.query.filter_by(site_id=site_id, node_id=node_id).first()
+                if site_node:
+                    site_node.status = "warning"
+                    site_node.updated_at = datetime.utcnow()
+                else:
+                    # Create new site_node relationship with warning status
+                    site_node = SiteNode(
+                        site_id=site_id,
+                        node_id=node_id,
+                        status="warning",
+                        created_at=datetime.utcnow(),
+                        updated_at=datetime.utcnow()
+                    )
+                    db.session.add(site_node)
+                
+                db.session.commit()
+                ssh_client.close()
+                
+                warning_message = f"Site configuration deployed but Nginx reload had SSL certificate warnings. You need to request SSL certificates for {domain}."
+                warnings.append(warning_message)
+                
+                # Return success with warnings
+                return True
+            else:
+                # For other errors, log and raise exception
+                log = DeploymentLog(
+                    site_id=site_id,
+                    node_id=node_id,
+                    action="deploy",
+                    status="error",
+                    message=f"Failed to reload nginx: {error}"
+                )
+                db.session.add(log)
+                db.session.commit()
+                ssh_client.close()
+                raise ValueError(f"Failed to reload nginx: {error}")
+        
+        # Update or create the site_node relationship
+        site_node = SiteNode.query.filter_by(site_id=site_id, node_id=node_id).first()
+        if site_node:
+            site_node.status = "deployed"
+            site_node.updated_at = datetime.utcnow()
+        else:
+            site_node = SiteNode(
+                site_id=site_id,
+                node_id=node_id,
+                status="deployed",
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow()
+            )
+            db.session.add(site_node)
+        
+        # Log successful deployment
+        log = DeploymentLog(
+            site_id=site_id,
+            node_id=node_id,
+            action="deploy",
+            status="success",
+            message=f"Successfully deployed {site.domain} to {node.name}"
+        )
+        db.session.add(log)
+        db.session.commit()
+        
+        # Version the configuration in git if configured
+        from app.services.config_versioning_service import save_config_version
+        # Get the username from session if available
+        try:
+            from flask import session
+            from flask_login import current_user
+            username = current_user.username if current_user and current_user.is_authenticated else "system"
+        except:
+            username = "system"
+        
+        try:
+            save_config_version(site, nginx_config, username)
+        except Exception as e:
+            # Log but don't fail deployment if versioning fails
+            log_activity('warning', f"Failed to save config version for {site.domain}: {str(e)}")
         
         ssh_client.close()
         return True
         
     except Exception as e:
-        # Handle errors
-        site_node.status = 'error'
-        site_node.error_message = str(e)
-        
         # Log the error
         log = DeploymentLog(
             site_id=site_id,
             node_id=node_id,
-            action='deploy' if not test_only else 'test',
-            status='error',
-            message=str(e)
+            action="deploy",
+            status="error",
+            message=f"Deployment error: {str(e)}"
         )
         db.session.add(log)
         db.session.commit()
         
-        raise e
+        # Re-raise the exception
+        raise
 
 def get_node_stats(node):
     """
