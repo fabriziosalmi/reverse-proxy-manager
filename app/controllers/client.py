@@ -235,6 +235,9 @@ def delete_site(site_id):
     # Delete all SSL certificates
     SSLCertificate.query.filter_by(site_id=site_id).delete()
     
+    # Delete all deployment logs for this site
+    DeploymentLog.query.filter_by(site_id=site_id).delete()
+    
     # Delete the site
     db.session.delete(site)
     db.session.commit()

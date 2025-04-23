@@ -265,6 +265,46 @@ def delete_node(node_id):
     flash('Node deleted successfully', 'success')
     return redirect(url_for('admin.list_nodes'))
 
+@admin.route('/nodes/<int:node_id>')
+@login_required
+@admin_required
+def view_node(node_id):
+    node = Node.query.get_or_404(node_id)
+    
+    # Get all sites deployed on this node
+    site_nodes = SiteNode.query.filter_by(node_id=node_id).all()
+    sites = [Site.query.get(sn.site_id) for sn in site_nodes]
+    
+    # Get recent deployment logs for this node
+    deployment_logs = DeploymentLog.query.filter_by(node_id=node_id).order_by(DeploymentLog.created_at.desc()).limit(10).all()
+    
+    # Get server stats and connection info
+    # In a real implementation, this would make SSH connections to the node
+    # and retrieve real-time data. For now, we'll use mock data
+    server_stats = {
+        'cpu_usage': '32%',
+        'memory_usage': '4.2GB / 8GB (52%)',
+        'disk_usage': '45GB / 100GB (45%)',
+        'uptime': '14 days, 6 hours',
+        'load_average': '0.74, 0.82, 0.76'
+    }
+    
+    connection_stats = {
+        'total_connections': 248,
+        'active_http': 156,
+        'active_https': 92,
+        'requests_per_second': 42.7,
+        'bandwidth_usage': '8.5 MB/s'
+    }
+    
+    return render_template('admin/nodes/view.html', 
+                          node=node, 
+                          sites=sites, 
+                          site_nodes=site_nodes,
+                          deployment_logs=deployment_logs,
+                          server_stats=server_stats,
+                          connection_stats=connection_stats)
+
 # Site Management (Admin View)
 @admin.route('/sites')
 @login_required

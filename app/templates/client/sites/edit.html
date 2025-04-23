@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+
+{% block title %}Edit Site - {{ site.name }} - Italia CDN Proxy Manager{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="row mb-4">
+        <div class="col-12">
+            <h1 class="display-5 fw-bold mb-2">Edit Site: {{ site.name }}</h1>
+            <p class="text-muted">Update your site configuration and deployment settings.</p>
+        </div>
+    </div>
+
+    <div class="card shadow-sm">
+        <div class="card-body p-4">
+            <form method="POST" action="{{ url_for('client.edit_site', site_id=site.id) }}">
+                <!-- Basic Information -->
+                <div class="mb-4">
+                    <h4 class="fw-semibold mb-3">Basic Information</h4>
+                    
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label for="name" class="form-label">Site Name</label>
+                            <input type="text" id="name" name="name" required
+                                   class="form-control" value="{{ site.name }}">
+                            <div class="form-text">A friendly name to identify this site</div>
+                        </div>
+                        
+                        <div class="col-md-6">
+                            <label for="domain" class="form-label">Domain Name</label>
+                            <input type="text" id="domain" name="domain" 
+                                   class="form-control" value="{{ site.domain }}" readonly>
+                            <div class="form-text">Domain name cannot be changed once set</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Origin Server Information -->
+                <div class="mb-4">
+                    <h4 class="fw-semibold mb-3">Origin Server</h4>
+                    
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label for="protocol" class="form-label">Protocol</label>
+                            <select id="protocol" name="protocol" required
+                                    class="form-select">
+                                <option value="http" {% if site.protocol == 'http' %}selected{% endif %}>HTTP</option>
+                                <option value="https" {% if site.protocol == 'https' %}selected{% endif %}>HTTPS</option>
+                            </select>
+                        </div>
+                        
+                        <div class="col-md-4">
+                            <label for="origin_address" class="form-label">Origin Address</label>
+                            <input type="text" id="origin_address" name="origin_address" required
+                                   class="form-control" value="{{ site.origin_address }}">
+                        </div>
+                        
+                        <div class="col-md-4">
+                            <label for="origin_port" class="form-label">Port</label>
+                            <input type="number" id="origin_port" name="origin_port" required
+                                   class="form-control" value="{{ site.origin_port }}" min="1" max="65535">
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Deployment Nodes -->
+                <div class="mb-4">
+                    <h4 class="fw-semibold mb-3">Deployment Nodes</h4>
+                    <p class="text-muted mb-3">Select one or more nodes where this site will be deployed:</p>
+                    
+                    <div class="row g-3">
+                        {% for node in nodes %}
+                        <div class="col-md-6 col-lg-4">
+                            <div class="border rounded p-3 {% if not node.is_active %}opacity-50{% endif %}">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="nodes" value="{{ node.id }}" id="node-{{ node.id }}"
+                                           {% if node.id|string in assigned_node_ids or node.id in assigned_node_ids %}checked{% endif %}
+                                           {% if not node.is_active %}disabled{% endif %}>
+                                    <label class="form-check-label" for="node-{{ node.id }}">
+                                        <strong>{{ node.name }}</strong>
+                                        <span class="badge rounded-pill ms-2 {% if node.is_active %}bg-success{% else %}bg-danger{% endif %}">
+                                            {{ 'Active' if node.is_active else 'Inactive' }}
+                                        </span>
+                                        <div class="small text-muted">{{ node.ip_address }}</div>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    
+                    {% if not nodes %}
+                    <div class="alert alert-warning">No active nodes are available. Please contact an administrator.</div>
+                    {% endif %}
+                </div>
+                
+                <!-- Advanced Settings -->
+                <div class="mb-4">
+                    <h4 class="fw-semibold mb-3">Advanced Settings</h4>
+                    
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="use_waf" id="use_waf"
+                                   {% if site.use_waf %}checked{% endif %}>
+                            <label class="form-check-label" for="use_waf">
+                                <strong>Enable WAF</strong>
+                                <div class="form-text">Use Web Application Firewall for additional security</div>
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="custom_config" class="form-label">Custom Nginx Configuration</label>
+                        <textarea id="custom_config" name="custom_config" rows="6"
+                                  class="form-control">{{ site.custom_config or '' }}</textarea>
+                        <div class="form-text">Advanced users can add custom Nginx configuration directives</div>
+                    </div>
+                </div>
+                
+                <div class="d-flex justify-content-between">
+                    <a href="{{ url_for('client.view_site', site_id=site.id) }}" class="btn btn-outline-secondary">
+                        Cancel
+                    </a>
+                    <button type="submit" class="btn btn-primary">
+                        Update Site
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

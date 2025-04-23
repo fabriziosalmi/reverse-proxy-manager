@@ -52,14 +52,18 @@
                             <td>{{ node.created_at.strftime('%Y-%m-%d') }}</td>
                             <td>
                                 <div class="btn-group btn-group-sm">
-                                    <a href="{{ url_for('admin.edit_node', node_id=node.id) }}" class="btn btn-outline-primary">
+                                    <a href="{{ url_for('admin.view_node', node_id=node.id) }}" class="btn btn-outline-info" title="View Details">
+                                        <i class="fas fa-eye"></i>
+                                    </a>
+                                    <a href="{{ url_for('admin.edit_node', node_id=node.id) }}" class="btn btn-outline-primary" title="Edit Node">
                                         <i class="fas fa-edit"></i>
                                     </a>
                                     <button type="button" class="btn btn-outline-danger" 
                                             data-bs-toggle="modal" 
                                             data-bs-target="#deleteNodeModal" 
                                             data-node-id="{{ node.id }}"
-                                            data-node-name="{{ node.name }}">
+                                            data-node-name="{{ node.name }}"
+                                            title="Delete Node">
                                         <i class="fas fa-trash"></i>
                                     </button>
                                 </div>
