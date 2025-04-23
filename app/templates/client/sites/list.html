@@ -102,6 +102,12 @@
                     </thead>
                     <tbody>
                         {% for site in sites %}
+                        {% set pending_deployment = false %}
+                        {% for site_node in site.site_nodes %}
+                            {% if site_node.status == 'pending' %}
+                                {% set pending_deployment = true %}
+                            {% endif %}
+                        {% endfor %}
                         <tr>
                             <td>{{ site.name }}</td>
                             <td>{{ site.domain }}</td>
@@ -112,9 +118,15 @@
                                 </span>
                             </td>
                             <td>
-                                <span class="badge rounded-pill {% if site.is_active %}bg-success{% else %}bg-danger{% endif %}">
-                                    {{ 'Active' if site.is_active else 'Inactive' }}
-                                </span>
+                                {% if site.is_active %}
+                                    {% if pending_deployment %}
+                                        <span class="badge rounded-pill bg-warning text-dark">Pending Deployment</span>
+                                    {% else %}
+                                        <span class="badge rounded-pill bg-success">Active</span>
+                                    {% endif %}
+                                {% else %}
+                                    <span class="badge rounded-pill bg-danger">Inactive</span>
+                                {% endif %}
                             </td>
                             <td>{{ site.created_at.strftime('%Y-%m-%d') }}</td>
                             <td>

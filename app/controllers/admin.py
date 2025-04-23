@@ -43,6 +43,12 @@ def dashboard():
     # Get the latest deployment logs
     latest_logs = DeploymentLog.query.order_by(DeploymentLog.created_at.desc()).limit(10).all()
     
+    # Get nodes for nodes list
+    nodes = Node.query.order_by(Node.name).limit(5).all()
+    
+    # Get recent sites for sites list
+    sites = Site.query.order_by(Site.created_at.desc()).limit(5).all()
+    
     return render_template('admin/dashboard.html', 
                            user_count=user_count,
                            node_count=node_count,
@@ -52,7 +58,9 @@ def dashboard():
                            latest_logs=latest_logs,
                            now=now,
                            error_log_count=error_log_count,
-                           ssl_expiring_count=ssl_expiring_count)
+                           ssl_expiring_count=ssl_expiring_count,
+                           nodes=nodes,
+                           sites=sites)
 
 # User Management
 @admin.route('/users')
