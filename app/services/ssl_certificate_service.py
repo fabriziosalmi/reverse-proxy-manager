@@ -1,60 +1,30 @@
 import os
-import paramiko
-import tempfile
-import time
-import json
 import socket
+import json
 import dns.resolver
+import subprocess
+import paramiko
+import requests
+import time
 from datetime import datetime, timedelta
-from app.models.models import db, Site, Node, SiteNode, DeploymentLog, SSLCertificate
+from cryptography import x509
+from cryptography.hazmat.backends import default_backend
+from cryptography.x509.oid import NameOID
+from app.models.models import Site, Node, SiteNode, SSLCertificate, db
 from app.services.logger_service import log_activity
 from flask import current_app
 
 class SSLCertificateService:
-    """Service for managing SSL certificates and Let's Encrypt integration"""
-    
-    # Supported DNS providers for DNS challenge
-    DNS_PROVIDERS = {
-        'cloudflare': {
-            'plugin': 'certbot-dns-cloudflare',
-            'credentials_format': 'dns_cloudflare_api_token = {token}'
-        },
-        'route53': {
-            'plugin': 'certbot-dns-route53',
-            'credentials_format': '''[default]
-aws_access_key_id = {access_key}
-aws_secret_access_key = {secret_key}'''
-        },
-        'digitalocean': {
-            'plugin': 'certbot-dns-digitalocean',
-            'credentials_format': 'dns_digitalocean_token = {token}'
-        },
-        'godaddy': {
-            'plugin': 'certbot-dns-godaddy',
-            'credentials_format': '''certbot_dns_godaddy:dns_godaddy_secret = {secret}
-certbot_dns_godaddy:dns_godaddy_key = {key}'''
-        },
-        'namecheap': {
-            'plugin': 'certbot-dns-namecheap',
-            'credentials_format': '''dns_namecheap_api_key = {api_key}
-dns_namecheap_username = {username}'''
-        }
-    }
-    
-    # SSL challenge types
-    CHALLENGE_TYPES = ['http', 'dns', 'manual-dns']
-
-    # Certificate types
-    CERT_TYPES = ['standard', 'wildcard']
+    """Service for managing SSL certificates"""
     
     @staticmethod
     def check_certificate_status(site_id, node_id=None):
         """
-        Check the status of SSL certificates for a site on all nodes or a specific node
+        Check the status of SSL certificates for a site, optionally on a specific node
         
         Args:
             site_id: ID of the site to check
-            node_id: Optional ID of specific node to check
+            node_id: Optional ID of a specific node to check
             
         Returns:
             dict: Certificate status information
@@ -63,364 +33,461 @@ dns_namecheap_username = {username}'''
         if not site:
             return {"error": "Site not found"}
         
-        if site.protocol != 'https':
-            return {"error": "Site is not configured for HTTPS"}
-        
-        # Get nodes to check
+        # Get all nodes serving this site or just the specified node
         if node_id:
             nodes = [Node.query.get(node_id)]
             if not nodes[0]:
-                return {"error": "Node not found"}
+                return {"error": f"Node with ID {node_id} not found"}
         else:
-            # Get all nodes that have this site deployed
-            site_nodes = SiteNode.query.filter_by(site_id=site_id, status='deployed').all()
+            site_nodes = SiteNode.query.filter_by(site_id=site_id).all()
             nodes = [Node.query.get(sn.node_id) for sn in site_nodes]
         
         results = []
         
         for node in nodes:
             try:
-                cert_info = SSLCertificateService._get_certificate_info(node, site.domain)
-                results.append({
+                # Connect to the node
+                ssh_client = paramiko.SSHClient()
+                ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                
+                if node.ssh_key_path:
+                    ssh_client.connect(
+                        hostname=node.ip_address,
+                        port=node.ssh_port,
+                        username=node.ssh_user,
+                        key_filename=node.ssh_key_path
+                    )
+                else:
+                    ssh_client.connect(
+                        hostname=node.ip_address,
+                        port=node.ssh_port,
+                        username=node.ssh_user,
+                        password=node.ssh_password
+                    )
+                
+                # Define certificate paths based on site domain
+                cert_path = f"/etc/letsencrypt/live/{site.domain}/fullchain.pem"
+                key_path = f"/etc/letsencrypt/live/{site.domain}/privkey.pem"
+                
+                # Check if certificates exist
+                stdin, stdout, stderr = ssh_client.exec_command(f"test -f {cert_path} && echo 'exists' || echo 'not found'")
+                cert_exists = stdout.read().decode('utf-8').strip() == 'exists'
+                
+                stdin, stdout, stderr = ssh_client.exec_command(f"test -f {key_path} && echo 'exists' || echo 'not found'")
+                key_exists = stdout.read().decode('utf-8').strip() == 'exists'
+                
+                node_result = {
                     "node_id": node.id,
                     "node_name": node.name,
-                    "ip_address": node.ip_address,
-                    "certificate": cert_info
-                })
+                    "certificate_exists": cert_exists,
+                    "key_exists": key_exists
+                }
+                
+                # If certificates exist, get detailed information
+                if cert_exists:
+                    # Read the certificate
+                    sftp = ssh_client.open_sftp()
+                    temp_cert_path = tempfile.mktemp()
+                    sftp.get(cert_path, temp_cert_path)
+                    
+                    with open(temp_cert_path, 'rb') as cert_file:
+                        cert_data = cert_file.read()
+                        cert = x509.load_pem_x509_certificate(cert_data, default_backend())
+                    
+                    # Clean up temp file
+                    os.unlink(temp_cert_path)
+                    
+                    # Parse certificate information
+                    issuer = cert.issuer.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value
+                    subject = cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value
+                    valid_from = cert.not_valid_before
+                    valid_until = cert.not_valid_after
+                    days_remaining = (valid_until - datetime.now()).days
+                    
+                    # Get certificate fingerprint
+                    fingerprint = cert.fingerprint(hashes.SHA256()).hex(':')
+                    
+                    # Check SAN (Subject Alternative Names)
+                    san = []
+                    try:
+                        ext = cert.extensions.get_extension_for_oid(x509.oid.ExtensionOID.SUBJECT_ALTERNATIVE_NAME)
+                        for name in ext.value:
+                            if isinstance(name, x509.DNSName):
+                                san.append(str(name.value))
+                    except x509.extensions.ExtensionNotFound:
+                        # No SAN extension
+                        pass
+                    
+                    # Check if certificate matches domain
+                    domain_match = site.domain in san or site.domain == subject or f"*.{site.domain.split('.', 1)[1]}" in san
+                    
+                    # Check if it's a wildcard certificate
+                    is_wildcard = any(name.startswith('*.') for name in san)
+                    
+                    # Check certificate status (valid, expired, etc.)
+                    now = datetime.now()
+                    if now < valid_from:
+                        status = "not yet valid"
+                    elif now > valid_until:
+                        status = "expired"
+                    elif days_remaining < 7:
+                        status = "expiring soon"
+                    else:
+                        status = "valid"
+                    
+                    certificate_info = {
+                        "issuer": issuer,
+                        "subject": subject,
+                        "valid_from": valid_from.strftime('%Y-%m-%d'),
+                        "valid_until": valid_until.strftime('%Y-%m-%d'),
+                        "days_remaining": days_remaining,
+                        "is_wildcard": is_wildcard,
+                        "domain_match": domain_match,
+                        "san": san,
+                        "fingerprint": fingerprint,
+                        "status": status
+                    }
+                    
+                    # Add certificate info to node_result
+                    node_result["certificate"] = certificate_info
+                    
+                    # Check if certificate is in the database and update if needed
+                    cert_record = SSLCertificate.query.filter_by(
+                        site_id=site_id, 
+                        node_id=node.id
+                    ).first()
+                    
+                    if cert_record:
+                        # Update existing record
+                        cert_record.issuer = issuer
+                        cert_record.subject = subject
+                        cert_record.valid_from = valid_from
+                        cert_record.valid_until = valid_until
+                        cert_record.days_remaining = days_remaining
+                        cert_record.status = status
+                        cert_record.is_wildcard = is_wildcard
+                        cert_record.fingerprint = fingerprint
+                        cert_record.updated_at = datetime.now()
+                    else:
+                        # Create new record
+                        cert_record = SSLCertificate(
+                            site_id=site_id,
+                            node_id=node.id,
+                            issuer=issuer,
+                            subject=subject,
+                            valid_from=valid_from,
+                            valid_until=valid_until,
+                            days_remaining=days_remaining,
+                            status=status,
+                            is_wildcard=is_wildcard,
+                            fingerprint=fingerprint,
+                            created_at=datetime.now(),
+                            updated_at=datetime.now()
+                        )
+                        db.session.add(cert_record)
+                    
+                    db.session.commit()
+                
+                # Check if Let's Encrypt client (certbot) is installed
+                stdin, stdout, stderr = ssh_client.exec_command("which certbot 2>/dev/null || echo 'not found'")
+                certbot_path = stdout.read().decode('utf-8').strip()
+                node_result["certbot_installed"] = certbot_path != 'not found'
+                
+                # Check if certificate renewal is configured in cron
+                stdin, stdout, stderr = ssh_client.exec_command("crontab -l 2>/dev/null | grep 'certbot renew' || echo 'not found'")
+                renewal_cron = stdout.read().decode('utf-8').strip()
+                node_result["renewal_configured"] = renewal_cron != 'not found'
+                
+                # Close connection
+                ssh_client.close()
+                
+                # Add to results
+                results.append(node_result)
+                
             except Exception as e:
+                # Log exception
+                log_activity('error', f"Error checking certificate for site {site.domain} on node {node.name}: {str(e)}")
+                
+                # Add error result
                 results.append({
                     "node_id": node.id,
                     "node_name": node.name,
-                    "ip_address": node.ip_address,
                     "error": str(e)
                 })
-        
-        # Add DNS resolution info
-        dns_info = SSLCertificateService.check_domain_dns(site.domain)
         
         return {
             "site_id": site_id,
             "domain": site.domain,
-            "dns_info": dns_info,
             "results": results
         }
     
     @staticmethod
-    def _get_certificate_info(node, domain):
-        """
-        Get SSL certificate information for a domain on a node
-        
-        Args:
-            node: Node object
-            domain: Domain name
-            
-        Returns:
-            dict: Certificate information
-        """
-        try:
-            # Connect to the node via SSH
-            ssh_client = paramiko.SSHClient()
-            ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            
-            if node.ssh_key_path:
-                ssh_client.connect(
-                    hostname=node.ip_address,
-                    port=node.ssh_port,
-                    username=node.ssh_user,
-                    key_filename=node.ssh_key_path,
-                    timeout=10
-                )
-            else:
-                ssh_client.connect(
-                    hostname=node.ip_address,
-                    port=node.ssh_port,
-                    username=node.ssh_user,
-                    password=node.ssh_password,
-                    timeout=10
-                )
-            
-            # Check if certificate exists
-            cert_path = f"/etc/letsencrypt/live/{domain}/fullchain.pem"
-            stdin, stdout, stderr = ssh_client.exec_command(f"test -f {cert_path} && echo 'exists' || echo 'not found'")
-            result = stdout.read().decode('utf-8').strip()
-            
-            if result == 'not found':
-                ssh_client.close()
-                return {
-                    "exists": False,
-                    "message": f"Certificate not found at {cert_path}"
-                }
-            
-            # Get certificate information using OpenSSL
-            cmd = f"openssl x509 -in {cert_path} -noout -text | grep -A2 'Validity' | grep -v 'Validity'"
-            stdin, stdout, stderr = ssh_client.exec_command(cmd)
-            cert_dates = stdout.read().decode('utf-8').strip()
-            
-            # Get subject information (domain)
-            cmd = f"openssl x509 -in {cert_path} -noout -subject"
-            stdin, stdout, stderr = ssh_client.exec_command(cmd)
-            subject = stdout.read().decode('utf-8').strip()
-            
-            # Get issuer information (Let's Encrypt, etc.)
-            cmd = f"openssl x509 -in {cert_path} -noout -issuer"
-            stdin, stdout, stderr = ssh_client.exec_command(cmd)
-            issuer = stdout.read().decode('utf-8').strip()
-            
-            # Parse certificate expiration and calculate days remaining
-            not_after_line = [line for line in cert_dates.split('\n') if "Not After" in line][0]
-            # Extract date string
-            date_str = not_after_line.split(':', 1)[1].strip()
-            
-            # Parse using OpenSSL directly to convert date to timestamp
-            cmd = f"openssl x509 -in {cert_path} -noout -enddate | cut -d= -f2 | xargs -I{{}} date -d \"{{}}\" +%s"
-            stdin, stdout, stderr = ssh_client.exec_command(cmd)
-            expiry_timestamp = stdout.read().decode('utf-8').strip()
-            
-            if expiry_timestamp:
-                try:
-                    expiry_timestamp = int(expiry_timestamp)
-                    current_timestamp = int(time.time())
-                    days_remaining = (expiry_timestamp - current_timestamp) // (24 * 3600)
-                except (ValueError, TypeError):
-                    days_remaining = None
-            else:
-                days_remaining = None
-            
-            ssh_client.close()
-            
-            return {
-                "exists": True,
-                "subject": subject,
-                "issuer": issuer,
-                "validity": cert_dates,
-                "expiry_date": date_str,
-                "days_remaining": days_remaining,
-                "status": "valid" if days_remaining and days_remaining > 0 else "expired"
-            }
-            
-        except Exception as e:
-            raise Exception(f"Error checking certificate: {str(e)}")
-    
-    @staticmethod
     def check_domain_dns(domain):
         """
-        Check DNS resolution for a domain to help with SSL certificate setup
+        Check DNS resolution for the domain and compare with CDN nodes
         
         Args:
-            domain: Domain name to check
+            domain: Domain to check
             
         Returns:
-            dict: DNS resolution info
+            dict: DNS check results
         """
         try:
-            # Get A record
-            a_records = []
-            try:
-                answers = dns.resolver.resolve(domain, 'A')
-                for rdata in answers:
-                    a_records.append(str(rdata))
-            except Exception as e:
-                a_records = [f"Error: {str(e)}"]
+            # Get all active nodes' IPs
+            nodes = Node.query.filter_by(is_active=True).all()
+            node_ips = [node.ip_address for node in nodes if node.ip_address]
             
-            # Get AAAA record (IPv6)
-            aaaa_records = []
+            # Get the domain's A records
             try:
-                answers = dns.resolver.resolve(domain, 'AAAA')
-                for rdata in answers:
-                    aaaa_records.append(str(rdata))
-            except Exception:
-                aaaa_records = []  # No IPv6 records is common
-                
-            # Get CNAME record
+                # Try to get A records
+                dns_result = dns.resolver.resolve(domain, 'A')
+                a_records = [rdata.address for rdata in dns_result]
+            except dns.resolver.NoAnswer:
+                a_records = []
+            
+            # Also try to get CNAME records
             cname_records = []
             try:
-                answers = dns.resolver.resolve(domain, 'CNAME')
-                for rdata in answers:
-                    cname_records.append(str(rdata))
-            except Exception:
-                cname_records = []  # No CNAME is common
-                
-            # Get CAA records (Certificate Authority Authorization)
-            caa_records = []
-            try:
-                # Try with base domain
-                base_domain = '.'.join(domain.split('.')[-2:])
-                answers = dns.resolver.resolve(base_domain, 'CAA')
-                for rdata in answers:
-                    property_tag = rdata.property.decode('utf-8')
-                    value = rdata.value.decode('utf-8')
-                    caa_records.append(f"{property_tag}: {value}")
-            except Exception:
-                caa_records = []  # No CAA records is common
-                
-            # Get node names from application database
-            nodes = Node.query.filter_by(is_active=True).all()
-            node_ips = [node.ip_address for node in nodes]
+                cname_result = dns.resolver.resolve(domain, 'CNAME')
+                cname_records = [rdata.target.to_text() for rdata in cname_result]
+            except dns.resolver.NoAnswer:
+                pass
             
-            # Check if domain resolves to any of our CDN nodes
-            matching_nodes = []
-            for ip in a_records:
-                if ip in node_ips:
-                    node = Node.query.filter_by(ip_address=ip).first()
-                    if node:
-                        matching_nodes.append({
-                            "node_id": node.id,
-                            "node_name": node.name,
-                            "ip_address": node.ip_address
-                        })
+            # Check if any of the domain's IPs match our node IPs
+            matching_ips = [ip for ip in a_records if ip in node_ips]
             
-            # Is domain resolving correctly?
-            domain_resolution_correct = len(matching_nodes) > 0
+            # Check if any CNAME target matches a hostname we recognize
+            # (This would require additional logic to map hostnames to IP addresses)
+            
+            # Estimate DNS propagation status
+            if matching_ips:
+                dns_status = "ok"
+                dns_message = f"Domain points to {len(matching_ips)} CDN nodes"
+                matching_percentage = round((len(matching_ips) / len(node_ips)) * 100)
+            elif len(a_records) > 0:
+                dns_status = "incorrect"
+                dns_message = "Domain points to non-CDN IPs"
+                matching_percentage = 0
+            elif len(cname_records) > 0:
+                dns_status = "cname"
+                dns_message = f"Domain has CNAME records: {', '.join(cname_records)}"
+                matching_percentage = 0
+            else:
+                dns_status = "not_found"
+                dns_message = "No DNS records found for domain"
+                matching_percentage = 0
             
             return {
+                "domain": domain,
+                "dns_status": dns_status,
+                "message": dns_message,
                 "a_records": a_records,
-                "aaaa_records": aaaa_records,
                 "cname_records": cname_records,
-                "caa_records": caa_records,
-                "pointing_to_cdn": domain_resolution_correct,
-                "matching_nodes": matching_nodes,
-                "dns_status": "ok" if domain_resolution_correct else "warning"
+                "cdn_node_ips": node_ips,
+                "matching_ips": matching_ips,
+                "matching_percentage": matching_percentage
             }
+            
         except Exception as e:
             return {
-                "error": str(e),
-                "dns_status": "error"
+                "domain": domain,
+                "dns_status": "error",
+                "error": str(e)
             }
     
     @staticmethod
     def get_issuance_recommendations(site_id):
         """
-        Provide recommendations for SSL certificate issuance methods based on domain/DNS configuration
+        Generate recommendations for SSL certificate issuance based on domain and node status
         
         Args:
             site_id: ID of the site
             
         Returns:
-            dict: Recommendations for SSL issuance
+            dict: SSL issuance recommendations
         """
         site = Site.query.get(site_id)
         if not site:
             return {"error": "Site not found"}
         
-        if site.protocol != 'https':
-            return {"error": "Site is not configured for HTTPS"}
+        # Check DNS status first
+        dns_check = SSLCertificateService.check_domain_dns(site.domain)
         
-        # Check DNS resolution
-        dns_info = SSLCertificateService.check_domain_dns(site.domain)
+        # Get all nodes for this site
+        site_nodes = SiteNode.query.filter_by(site_id=site_id).all()
+        nodes = [Node.query.get(sn.node_id) for sn in site_nodes]
         
-        recommendations = {
-            "domain": site.domain,
-            "methods": [],
-            "preferred_method": None,
-            "notes": []
-        }
+        # Check if domain has wildcard (*.example.com)
+        domain_parts = site.domain.split('.')
+        is_subdomain = len(domain_parts) > 2
+        has_www = domain_parts[0] == 'www'
+        base_domain = '.'.join(domain_parts[1:]) if is_subdomain else site.domain
         
-        # HTTP-01 Challenge Validation
-        http_method = {
-            "type": "http",
-            "name": "HTTP Challenge",
-            "description": "Certbot places a token file in the /.well-known/acme-challenge/ directory which Let's Encrypt validates",
-            "requirements": [
-                "Domain must resolve to server IP",
-                "Port 80 must be open and accessible from the internet",
-                "No wildcard certificates"
-            ],
-            "suitable": dns_info.get("pointing_to_cdn", False)
-        }
-        recommendations["methods"].append(http_method)
-        
-        # DNS-01 Challenge with API
-        dns_method = {
-            "type": "dns",
-            "name": "DNS API Challenge",
-            "description": "Automatically creates TXT records with your DNS provider via API",
-            "requirements": [
-                "Supported DNS provider with API access",
-                "API credentials for your DNS provider",
-                "Supports wildcard certificates"
-            ],
-            "suitable": True,  # Always an option if credentials provided
-            "providers": list(SSLCertificateService.DNS_PROVIDERS.keys())
-        }
-        recommendations["methods"].append(dns_method)
-        
-        # Manual DNS Challenge
-        manual_dns_method = {
-            "type": "manual-dns",
-            "name": "Manual DNS Challenge",
-            "description": "Manually create TXT records with your DNS provider",
-            "requirements": [
-                "Access to modify your domain's DNS settings",
-                "Supports wildcard certificates",
-                "More effort but works with any DNS provider"
-            ],
-            "suitable": True  # Always an option
-        }
-        recommendations["methods"].append(manual_dns_method)
-        
-        # Determine preferred method
-        if dns_info.get("pointing_to_cdn", False):
-            recommendations["preferred_method"] = "http"
-            recommendations["notes"].append("HTTP validation is recommended since your domain is correctly pointed to the CDN.")
+        # Determine recommended validation method based on DNS status
+        if dns_check['dns_status'] == 'ok' and dns_check['matching_percentage'] >= 80:
+            # Domain is pointing to most of our nodes, HTTP validation is possible
+            recommended_method = "http"
+            method_reason = "Domain points to CDN nodes, making HTTP validation possible"
+        elif dns_check['dns_status'] == 'ok' and dns_check['matching_percentage'] > 0:
+            # Domain is pointing to some nodes, HTTP validation might work
+            recommended_method = "http"
+            method_reason = f"Domain points to {dns_check['matching_percentage']}% of CDN nodes. HTTP validation might work but DNS validation is more reliable."
         else:
-            recommendations["preferred_method"] = "dns"
-            recommendations["notes"].append("DNS validation is recommended since your domain does not currently resolve to your CDN node.")
-            recommendations["notes"].append("Consider using a DNS provider's API for automation or manual DNS validation.")
+            # Domain is not pointing to our nodes, use DNS validation
+            recommended_method = "dns"
+            method_reason = "Domain is not pointing to CDN nodes. DNS validation is required."
         
-        # Check for wildcard certificate needs
-        if site.domain.count('.') > 1:
-            recommendations["notes"].append("For a wildcard certificate to cover all subdomains, you must use DNS validation.")
+        # Determine if wildcard certificates might be useful
+        should_use_wildcard = False
+        wildcard_reason = None
+        
+        if is_subdomain and not has_www:
+            # Check if there are sibling subdomains already configured
+            other_subdomains = Site.query.filter(
+                Site.domain.like(f"%.{base_domain}"),
+                Site.id != site_id
+            ).all()
+            
+            if len(other_subdomains) >= 2:
+                should_use_wildcard = True
+                wildcard_reason = f"Found {len(other_subdomains)} other subdomains of {base_domain}. A wildcard certificate would cover all current and future subdomains."
+        
+        # Check if certbot is installed on nodes
+        certbot_status = []
+        for node in nodes:
+            try:
+                ssh_client = paramiko.SSHClient()
+                ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                
+                if node.ssh_key_path:
+                    ssh_client.connect(
+                        hostname=node.ip_address,
+                        port=node.ssh_port,
+                        username=node.ssh_user,
+                        key_filename=node.ssh_key_path,
+                        timeout=5
+                    )
+                else:
+                    ssh_client.connect(
+                        hostname=node.ip_address,
+                        port=node.ssh_port,
+                        username=node.ssh_user,
+                        password=node.ssh_password,
+                        timeout=5
+                    )
+                
+                # Check for certbot
+                stdin, stdout, stderr = ssh_client.exec_command("which certbot 2>/dev/null || echo 'not found'")
+                certbot_path = stdout.read().decode('utf-8').strip()
+                
+                # Check if Nginx has SSL module
+                stdin, stdout, stderr = ssh_client.exec_command("nginx -V 2>&1 | grep -o with-http_ssl_module || echo 'not found'")
+                ssl_module = stdout.read().decode('utf-8').strip()
+                
+                certbot_status.append({
+                    "node_id": node.id,
+                    "node_name": node.name,
+                    "certbot_installed": certbot_path != 'not found',
+                    "ssl_module_enabled": ssl_module != 'not found',
+                    "certbot_path": certbot_path if certbot_path != 'not found' else None
+                })
+                
+                ssh_client.close()
+            except Exception as e:
+                certbot_status.append({
+                    "node_id": node.id,
+                    "node_name": node.name,
+                    "error": str(e)
+                })
+        
+        # Generate recommended installation steps based on the validation method
+        installation_steps = []
+        
+        if recommended_method == "http":
+            installation_steps = [
+                "Ensure the domain is correctly pointing to the CDN nodes (if not already)",
+                "On each node, ensure the Nginx configuration includes the challenge path",
+                "Request the certificate using the HTTP validation method",
+                "Configure cron for automatic renewal"
+            ]
+        elif recommended_method == "dns":
+            installation_steps = [
+                "Gather API credentials for your DNS provider",
+                "Install appropriate DNS plugin for certbot",
+                "Request the certificate using the DNS validation method",
+                "Configure cron for automatic renewal"
+            ]
+        
+        # For nodes without certbot, add installation instructions
+        nodes_missing_certbot = [node["node_name"] for node in certbot_status if not node.get("certbot_installed", False)]
+        if nodes_missing_certbot:
+            installation_steps.insert(0, f"Install certbot on nodes: {', '.join(nodes_missing_certbot)}")
+        
+        # For nodes without SSL module, add warning
+        nodes_missing_ssl = [node["node_name"] for node in certbot_status if not node.get("ssl_module_enabled", False)]
+        
+        # Prepare the recommendations
+        recommendations = {
+            "site_id": site_id,
+            "domain": site.domain,
+            "dns_status": dns_check,
+            "recommended_method": recommended_method,
+            "method_reason": method_reason,
+            "should_use_wildcard": should_use_wildcard,
+            "wildcard_reason": wildcard_reason,
+            "certbot_status": certbot_status,
+            "installation_steps": installation_steps,
+            "nodes_missing_certbot": nodes_missing_certbot,
+            "nodes_missing_ssl": nodes_missing_ssl
+        }
         
         return recommendations
     
     @staticmethod
-    def request_certificate(site_id, node_id, email=None, challenge_type='http', 
-                           dns_provider=None, dns_credentials=None, cert_type='standard'):
+    def request_certificate(site_id, node_id, email, challenge_type='http', dns_provider=None, dns_credentials=None, cert_type='standard'):
         """
-        Request a new Let's Encrypt certificate for a site
+        Request a new SSL certificate for a site on a specific node
         
         Args:
             site_id: ID of the site
-            node_id: ID of the node to request the certificate on
-            email: Email address for Let's Encrypt registration
-            challenge_type: Type of challenge to use (http, dns, manual-dns)
-            dns_provider: DNS provider for DNS challenge
-            dns_credentials: Credentials for DNS provider
-            cert_type: Type of certificate (standard or wildcard)
+            node_id: ID of the node to request certificate on
+            email: Email address for Let's Encrypt notifications
+            challenge_type: Type of challenge to use ('http', 'dns', 'manual-dns')
+            dns_provider: DNS provider to use for DNS challenges (e.g., 'cloudflare')
+            dns_credentials: Credentials for DNS API access
+            cert_type: Type of certificate to issue ('standard' or 'wildcard')
             
         Returns:
-            dict: Result of the certificate request
+            dict: Certificate request result
         """
         site = Site.query.get(site_id)
         node = Node.query.get(node_id)
         
         if not site or not node:
-            return {"error": "Site or node not found"}
-            
-        # Validate parameters
-        if challenge_type not in SSLCertificateService.CHALLENGE_TYPES:
-            return {"error": f"Invalid challenge type. Must be one of: {', '.join(SSLCertificateService.CHALLENGE_TYPES)}"}
-            
-        if cert_type not in SSLCertificateService.CERT_TYPES:
-            return {"error": f"Invalid certificate type. Must be one of: {', '.join(SSLCertificateService.CERT_TYPES)}"}
-            
-        # If using DNS challenge, validate DNS provider
-        if challenge_type == 'dns':
-            if not dns_provider:
-                return {"error": "DNS provider is required for DNS challenge"}
-                
-            if dns_provider not in SSLCertificateService.DNS_PROVIDERS:
-                return {"error": f"Unsupported DNS provider. Supported providers: {', '.join(SSLCertificateService.DNS_PROVIDERS.keys())}"}
-                
-            if not dns_credentials:
-                return {"error": "DNS credentials are required for DNS challenge"}
+            return {"success": False, "message": "Site or node not found"}
         
-        # For wildcard certificates, force DNS challenge
-        if cert_type == 'wildcard' and challenge_type not in ['dns', 'manual-dns']:
-            return {"error": "Wildcard certificates require DNS challenge authentication"}
-            
+        domain = site.domain
+        
+        # For wildcard certificates, ensure domain is properly formatted
+        if cert_type == 'wildcard':
+            # Extract the base domain (e.g., example.com from sub.example.com)
+            domain_parts = domain.split('.')
+            if len(domain_parts) > 2:
+                base_domain = '.'.join(domain_parts[-2:])
+                wildcard_domain = f"*.{base_domain}"
+                domains = [wildcard_domain, base_domain]
+            else:
+                wildcard_domain = f"*.{domain}"
+                domains = [wildcard_domain, domain]
+        else:
+            # For standard certs, add www. variant if it doesn't start with www.
+            if domain.startswith('www.'):
+                domains = [domain]
+            else:
+                domains = [domain, f"www.{domain}"]
+        
         try:
-            # Connect to the node via SSH
+            # Connect to the node
             ssh_client = paramiko.SSHClient()
             ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             
@@ -439,236 +506,252 @@ dns_namecheap_username = {username}'''
                     password=node.ssh_password
                 )
             
-            # Ensure certbot is installed
-            stdin, stdout, stderr = ssh_client.exec_command("which certbot || echo 'not found'")
-            result = stdout.read().decode('utf-8').strip()
+            # Check if certbot is installed
+            stdin, stdout, stderr = ssh_client.exec_command("which certbot")
+            certbot_path = stdout.read().decode('utf-8').strip()
             
-            if result == 'not found':
-                # Try to install certbot automatically
-                ssh_client.exec_command("apt-get update && apt-get install -y certbot python3-certbot-nginx")
+            if not certbot_path:
+                # Install certbot if not present
+                log_activity('info', f"Installing certbot on node {node.name}")
                 
-                # Check again
-                stdin, stdout, stderr = ssh_client.exec_command("which certbot || echo 'not found'")
-                result = stdout.read().decode('utf-8').strip()
+                # Try to determine OS and install certbot
+                stdin, stdout, stderr = ssh_client.exec_command(
+                    "if [ -f /etc/debian_version ]; then "
+                    "apt-get update && apt-get install -y certbot python3-certbot-nginx; "
+                    "elif [ -f /etc/redhat-release ]; then "
+                    "yum install -y certbot python3-certbot-nginx; "
+                    "else "
+                    "echo 'Unsupported OS'; "
+                    "fi"
+                )
                 
-                if result == 'not found':
+                # Wait for installation to complete
+                exit_status = stdout.channel.recv_exit_status()
+                installation_output = stdout.read().decode('utf-8') + stderr.read().decode('utf-8')
+                
+                if exit_status != 0 or 'Unsupported OS' in installation_output:
                     ssh_client.close()
                     return {
                         "success": False,
-                        "message": "Certbot not found and could not be installed automatically. Please install certbot manually."
+                        "message": f"Failed to install certbot: {installation_output}"
+                    }
+                
+                # Verify certbot is now installed
+                stdin, stdout, stderr = ssh_client.exec_command("which certbot")
+                certbot_path = stdout.read().decode('utf-8').strip()
+                
+                if not certbot_path:
+                    ssh_client.close()
+                    return {
+                        "success": False,
+                        "message": "Failed to install certbot"
                     }
             
-            # If using DNS challenge with provider API, install required plugin
-            credentials_file = None
-            if challenge_type == 'dns' and dns_provider:
-                # Install the DNS plugin
-                plugin_package = SSLCertificateService.DNS_PROVIDERS[dns_provider]['plugin']
-                ssh_client.exec_command(f"apt-get update && apt-get install -y {plugin_package}")
+            # For HTTP validation, ensure the challenge directory exists
+            if challenge_type == 'http':
+                # Ensure webroot path for ACME challenge exists
+                webroot_path = "/var/www/letsencrypt"
+                stdin, stdout, stderr = ssh_client.exec_command(f"mkdir -p {webroot_path}/.well-known/acme-challenge")
                 
-                # Check if plugin was installed successfully
-                stdin, stdout, stderr = ssh_client.exec_command(f"pip3 list | grep {plugin_package} || echo 'not found'")
-                result = stdout.read().decode('utf-8').strip()
+                # Check if Nginx configuration has the ACME challenge location
+                challenge_location = f"""
+    # ACME challenge location for Let's Encrypt verification
+    location /.well-known/acme-challenge/ {{
+        root {webroot_path};
+    }}"""
                 
-                if "not found" in result:
-                    # Try pip installation as fallback
-                    ssh_client.exec_command(f"pip3 install {plugin_package}")
-                    
-                    # Check again
-                    stdin, stdout, stderr = ssh_client.exec_command(f"pip3 list | grep {plugin_package} || echo 'not found'")
-                    result = stdout.read().decode('utf-8').strip()
-                    
-                    if "not found" in result:
+                # Check for this location in the site's Nginx config
+                nginx_config_path = f"{node.nginx_config_path}/{domain}.conf"
+                stdin, stdout, stderr = ssh_client.exec_command(f"grep -q '.well-known/acme-challenge' {nginx_config_path} || echo 'missing'")
+                if stdout.read().decode('utf-8').strip() == 'missing':
+                    # Add the challenge location to the Nginx config
+                    # This is a basic approach - a more robust method would parse the config
+                    stdin, stdout, stderr = ssh_client.exec_command(
+                        f"sed -i '/server_name/a\\{challenge_location}' {nginx_config_path} && "
+                        f"{node.nginx_reload_command}"
+                    )
+                    exit_status = stdout.channel.recv_exit_status()
+                    if exit_status != 0:
                         ssh_client.close()
                         return {
                             "success": False,
-                            "message": f"Failed to install DNS plugin {plugin_package}. Please install it manually."
+                            "message": f"Failed to update Nginx configuration: {stderr.read().decode('utf-8')}"
                         }
-                
-                # Format credentials for the specific DNS provider
-                credentials_format = SSLCertificateService.DNS_PROVIDERS[dns_provider]['credentials_format']
-                formatted_credentials = credentials_format
-                
-                # Replace placeholders with actual credentials
-                for key, value in dns_credentials.items():
-                    formatted_credentials = formatted_credentials.replace(f"{{{key}}}", value)
-                
-                # Create credentials directory if it doesn't exist
-                credentials_dir = "/etc/letsencrypt/dns-credentials"
-                ssh_client.exec_command(f"mkdir -p {credentials_dir} && chmod 700 {credentials_dir}")
-                
-                # Create credentials file
-                credentials_file = f"{credentials_dir}/{dns_provider}.ini"
-                ssh_client.exec_command(f"echo '{formatted_credentials}' > {credentials_file} && chmod 600 {credentials_file}")
             
-            # Determine domain(s) to include in certificate request
-            domains = []
-            if cert_type == 'standard':
-                domains.append(site.domain)
-            elif cert_type == 'wildcard':
-                # Extract base domain (e.g., from sub.example.com to example.com)
-                if site.domain.count('.') > 1:
-                    base_domain = '.'.join(site.domain.split('.')[-2:])
-                else:
-                    base_domain = site.domain
-                    
-                domains.append(site.domain)         # Include the specific domain
-                domains.append(f"*.{base_domain}")  # Include wildcard domain
-            
-            domains_arg = " ".join([f"-d {domain}" for domain in domains])
-            
-            # Prepare the certbot command based on challenge type
-            email_arg = f"--email {email}" if email else "--register-unsafely-without-email"
+            # Build certbot command based on validation method
+            certbot_cmd = [certbot_path, "certonly", "--non-interactive", "--agree-tos", "-m", email]
             
             if challenge_type == 'http':
-                # Ensure the /var/www/letsencrypt directory exists for ACME challenges
-                ssh_client.exec_command("mkdir -p /var/www/letsencrypt/.well-known/acme-challenge")
-                certbot_cmd = f"certbot certonly --webroot -w /var/www/letsencrypt --agree-tos {email_arg} {domains_arg} --non-interactive"
-            elif challenge_type == 'dns':  # Automated DNS challenge
-                dns_plugin = dns_provider.replace('-', '_')
-                certbot_cmd = f"certbot certonly --dns-{dns_plugin} --dns-{dns_plugin}-credentials {credentials_file} --agree-tos {email_arg} {domains_arg} --non-interactive"
-            elif challenge_type == 'manual-dns':  # Manual DNS challenge
-                # For manual DNS, we need to capture the output to show instructions to the user
-                certbot_cmd = f"certbot certonly --manual --preferred-challenges dns --agree-tos {email_arg} {domains_arg} --manual-public-ip-logging-ok"
+                certbot_cmd.extend(["--webroot", "-w", webroot_path])
+                for domain in domains:
+                    certbot_cmd.extend(["-d", domain])
+            
+            elif challenge_type == 'dns':
+                if not dns_provider:
+                    ssh_client.close()
+                    return {
+                        "success": False,
+                        "message": "DNS provider is required for DNS validation"
+                    }
                 
-                # This will prompt for manual input, so we need special handling
+                # Install DNS plugin if needed
+                plugin_name = f"certbot-dns-{dns_provider}"
+                stdin, stdout, stderr = ssh_client.exec_command(f"pip3 show {plugin_name} || echo 'not installed'")
+                if "not installed" in stdout.read().decode('utf-8'):
+                    # Install the plugin
+                    stdin, stdout, stderr = ssh_client.exec_command(f"pip3 install {plugin_name}")
+                    exit_status = stdout.channel.recv_exit_status()
+                    if exit_status != 0:
+                        ssh_client.close()
+                        return {
+                            "success": False,
+                            "message": f"Failed to install {plugin_name}: {stderr.read().decode('utf-8')}"
+                        }
+                
+                # Set up credentials file
+                creds_dir = "/root/.secrets"
+                creds_file = f"{creds_dir}/{dns_provider}_credentials.ini"
+                
+                stdin, stdout, stderr = ssh_client.exec_command(f"mkdir -p {creds_dir}")
+                
+                # Create credentials file content based on provider
+                creds_content = ""
+                if dns_provider == 'cloudflare':
+                    creds_content = f"dns_cloudflare_api_token = {dns_credentials['token']}"
+                elif dns_provider == 'route53':
+                    creds_content = f"dns_route53_access_key = {dns_credentials['access_key']}\ndns_route53_secret_key = {dns_credentials['secret_key']}"
+                elif dns_provider == 'digitalocean':
+                    creds_content = f"dns_digitalocean_token = {dns_credentials['token']}"
+                elif dns_provider == 'godaddy':
+                    creds_content = f"dns_godaddy_key = {dns_credentials['key']}\ndns_godaddy_secret = {dns_credentials['secret']}"
+                elif dns_provider == 'namecheap':
+                    creds_content = f"dns_namecheap_username = {dns_credentials['username']}\ndns_namecheap_api_key = {dns_credentials['api_key']}"
+                
+                # Write the credentials file
+                sftp = ssh_client.open_sftp()
+                with sftp.file(creds_file, 'w') as f:
+                    f.write(creds_content)
+                sftp.close()
+                
+                # Secure the credentials file
+                stdin, stdout, stderr = ssh_client.exec_command(f"chmod 600 {creds_file}")
+                
+                # Build the certbot command with DNS plugin
+                certbot_cmd.extend([f"--dns-{dns_provider}", f"--dns-{dns_provider}-credentials", creds_file])
+                for domain in domains:
+                    certbot_cmd.extend(["-d", domain])
+            
+            elif challenge_type == 'manual-dns':
+                # Manual DNS validation - we'll show the TXT records to create
+                for domain in domains:
+                    certbot_cmd.extend(["-d", domain])
+                certbot_cmd.extend(["--manual", "--preferred-challenges", "dns"])
+                
+                # Execute certbot in manual mode to get the DNS records
+                cmd_str = " ".join(certbot_cmd)
+                stdin, stdout, stderr = ssh_client.exec_command(cmd_str)
+                
+                # Buffer for storing output lines
+                output_buffer = []
+                txt_records = []
+                
+                # This will block until certbot asks for manual input or times out
+                for line in stdout:
+                    output_buffer.append(line.strip())
+                    # Look for lines mentioning TXT records
+                    if '_acme-challenge' in line and 'TXT record' in line:
+                        txt_records.append(line.strip())
+                
+                # Get the full output including errors
+                full_output = "\n".join(output_buffer)
+                errors = stderr.read().decode('utf-8')
+                
+                # Manual DNS challenges require user action
                 ssh_client.close()
+                
                 return {
                     "success": True,
-                    "message": "Please use the manual token setup on the node directly",
-                    "instructions": "Connect to the node and run the following command:\n" + certbot_cmd,
-                    "node_ip": node.ip_address,
-                    "challenge_type": "manual-dns"
+                    "message": "Manual DNS challenge initiated. Please add the TXT records shown below.",
+                    "txt_records": txt_records,
+                    "instructions": "Add these TXT records to your DNS configuration, then wait for DNS propagation before continuing.",
+                    "manual": True,
+                    "output": full_output,
+                    "errors": errors
                 }
             
-            # Run certbot
-            stdin, stdout, stderr = ssh_client.exec_command(certbot_cmd)
+            # Run certbot command (for HTTP and DNS automated validations)
+            cmd_str = " ".join(certbot_cmd)
+            stdin, stdout, stderr = ssh_client.exec_command(cmd_str)
+            
+            # Wait for command to complete
             exit_status = stdout.channel.recv_exit_status()
-            output = stdout.read().decode('utf-8')
-            error = stderr.read().decode('utf-8')
+            cmd_output = stdout.read().decode('utf-8')
+            cmd_error = stderr.read().decode('utf-8')
             
             if exit_status != 0:
-                # Log the failure
-                log_activity('error', f"Failed to obtain certificate for {site.domain} on node {node.name}: {error}")
-                
-                # Create deployment log entry
-                log = DeploymentLog(
-                    site_id=site_id,
-                    node_id=node_id,
-                    action='ssl_request',
-                    status='error',
-                    message=f"Failed to obtain SSL certificate: {error}"
-                )
-                db.session.add(log)
-                db.session.commit()
-                
                 ssh_client.close()
                 return {
                     "success": False,
-                    "message": f"Failed to obtain certificate: {error}"
+                    "message": f"Certificate request failed: {cmd_error}",
+                    "output": cmd_output,
+                    "error": cmd_error
                 }
             
-            # Check if certificate was actually issued
-            primary_domain = site.domain
-            cert_info = SSLCertificateService._get_certificate_info(node, primary_domain)
+            # Check if certificates were created successfully
+            stdin, stdout, stderr = ssh_client.exec_command(f"test -f /etc/letsencrypt/live/{domain}/fullchain.pem && echo 'success' || echo 'failed'")
+            cert_check = stdout.read().decode('utf-8').strip()
             
-            if not cert_info.get("exists", False):
+            if cert_check != 'success':
                 ssh_client.close()
                 return {
                     "success": False,
-                    "message": "Certificate request appeared successful, but certificate file was not found."
+                    "message": "Certificate was not generated properly",
+                    "output": cmd_output,
+                    "error": cmd_error
                 }
             
-            # Store certificate information in database
-            certificate = SSLCertificate.query.filter_by(site_id=site_id, domain=primary_domain).first()
-            if not certificate:
-                certificate = SSLCertificate(
-                    site_id=site_id,
-                    domain=primary_domain,
-                    certificate_path=f"/etc/letsencrypt/live/{primary_domain}/cert.pem",
-                    private_key_path=f"/etc/letsencrypt/live/{primary_domain}/privkey.pem",
-                    fullchain_path=f"/etc/letsencrypt/live/{primary_domain}/fullchain.pem",
-                    issuer="Let's Encrypt",
-                    status='active'
-                )
-                db.session.add(certificate)
-            else:
-                certificate.status = 'active'
-                certificate.updated_at = datetime.utcnow()
-                
-            # Try to parse the expiry date
-            try:
-                if cert_info.get("days_remaining"):
-                    certificate.expires_at = datetime.utcnow() + timedelta(days=cert_info.get("days_remaining"))
-            except:
-                pass
-                
-            db.session.commit()
+            # Set up auto-renewal if not already configured
+            stdin, stdout, stderr = ssh_client.exec_command("crontab -l 2>/dev/null | grep -q 'certbot renew' || (crontab -l 2>/dev/null; echo '15 3 * * * certbot renew --quiet --post-hook \"systemctl reload nginx\"') | crontab -")
             
-            # Log the success
-            log_activity('info', f"Successfully obtained certificate for {site.domain} on node {node.name}")
-            
-            # Create deployment log entry
-            log = DeploymentLog(
-                site_id=site_id,
-                node_id=node_id,
-                action='ssl_request',
-                status='success',
-                message=f"Successfully obtained SSL certificate ({cert_type}) using {challenge_type} challenge"
-            )
-            db.session.add(log)
-            db.session.commit()
+            # Update SSL certificate record in database
+            # First check if the certificate exists
+            cert_status = SSLCertificateService.check_certificate_status(site_id, node_id)
             
             ssh_client.close()
             
             return {
                 "success": True,
-                "message": "Certificate successfully obtained",
-                "certificate": cert_info,
-                "certificate_type": cert_type,
-                "challenge_type": challenge_type,
-                "domains": domains
+                "message": f"Successfully issued {cert_type} certificate for {', '.join(domains)}",
+                "domains": domains,
+                "cert_type": cert_type,
+                "validation_method": challenge_type
             }
             
         except Exception as e:
-            # Log the error
-            log_activity('error', f"Error requesting certificate for {site.domain} on node {node.name}: {str(e)}")
-            
-            # Create deployment log entry
-            log = DeploymentLog(
-                site_id=site_id,
-                node_id=node_id,
-                action='ssl_request',
-                status='error',
-                message=f"Error requesting certificate: {str(e)}"
-            )
-            db.session.add(log)
-            db.session.commit()
-            
+            log_activity('error', f"Error requesting certificate for {domain} on node {node.name}: {str(e)}")
             return {
                 "success": False,
-                "message": f"Error requesting certificate: {str(e)}"
+                "message": f"Failed to request certificate: {str(e)}"
             }
     
     @staticmethod
-    def setup_auto_renewal(node_id, renewal_days=30, post_renewal_script=None):
+    def setup_auto_renewal(node_id, renewal_days=30):
         """
-        Ensure automatic certificate renewal is properly configured on a node
+        Set up automatic certificate renewal on a node
         
         Args:
             node_id: ID of the node
-            renewal_days: Days before expiry to renew certificates
-            post_renewal_script: Custom script to run after renewal
+            renewal_days: Days before expiry to renew
             
         Returns:
-            dict: Result of the setup
+            dict: Setup result
         """
         node = Node.query.get(node_id)
-        
         if not node:
-            return {"error": "Node not found"}
+            return {"success": False, "message": "Node not found"}
         
         try:
-            # Connect to the node via SSH
+            # Connect to the node
             ssh_client = paramiko.SSHClient()
             ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             
@@ -687,155 +770,84 @@ dns_namecheap_username = {username}'''
                     password=node.ssh_password
                 )
             
-            # Check if cron is installed
-            stdin, stdout, stderr = ssh_client.exec_command("which crontab || echo 'not found'")
-            result = stdout.read().decode('utf-8').strip()
+            # Check if certbot is installed
+            stdin, stdout, stderr = ssh_client.exec_command("which certbot")
+            certbot_path = stdout.read().decode('utf-8').strip()
             
-            if result == 'not found':
+            if not certbot_path:
                 ssh_client.close()
                 return {
                     "success": False,
-                    "message": "Crontab not found. Please install cron."
+                    "message": "Certbot is not installed on this node"
                 }
             
-            # Check if certbot renew cron job already exists
-            stdin, stdout, stderr = ssh_client.exec_command("crontab -l | grep certbot")
-            cron_check = stdout.read().decode('utf-8').strip()
+            # Set up cron job for auto-renewal
+            cron_cmd = f"0 3 * * * {certbot_path} renew --quiet --renew-hook 'systemctl reload nginx' --deploy-hook 'systemctl reload nginx'"
             
-            if "certbot renew" in cron_check:
-                # Cron job already exists, but we'll update it with our improved version
-                ssh_client.exec_command("crontab -l | grep -v certbot | crontab -")
+            # Check if cron job already exists
+            stdin, stdout, stderr = ssh_client.exec_command("crontab -l 2>/dev/null | grep -q 'certbot renew' && echo 'exists' || echo 'not found'")
+            cron_exists = stdout.read().decode('utf-8').strip() == 'exists'
             
-            # Create renewal hook scripts directory
-            ssh_client.exec_command("mkdir -p /etc/letsencrypt/renewal-hooks/post")
+            if cron_exists:
+                # Update existing cron job
+                stdin, stdout, stderr = ssh_client.exec_command(
+                    "crontab -l | sed '/certbot renew/d' | (cat; echo '%s') | crontab -" % cron_cmd
+                )
+            else:
+                # Add new cron job
+                stdin, stdout, stderr = ssh_client.exec_command(
+                    "(crontab -l 2>/dev/null; echo '%s') | crontab -" % cron_cmd
+                )
             
-            # Create a post-renewal script to reload Nginx and perform any custom actions
-            post_hook_path = "/etc/letsencrypt/renewal-hooks/post/reload-nginx.sh"
-            post_hook_script = "#!/bin/bash\n\n"
-            post_hook_script += "# Reload Nginx to use new certificates\n"
-            post_hook_script += "systemctl reload nginx\n\n"
+            # Configure renewal days
+            config_cmd = f"echo 'renew_before_expiry = {renewal_days} days' > /etc/letsencrypt/renewal-hooks/renew-days.conf"
+            stdin, stdout, stderr = ssh_client.exec_command(config_cmd)
             
-            # Add any custom post-renewal actions
-            if post_renewal_script:
-                post_hook_script += "# Custom post-renewal actions\n"
-                post_hook_script += f"{post_renewal_script}\n"
-            
-            # Create the script file and make it executable
-            stdin, stdout, stderr = ssh_client.exec_command(f"echo '{post_hook_script}' > {post_hook_path} && chmod +x {post_hook_path}")
-            
-            # Create a script to handle certificate renewal reporting
-            report_script_path = "/usr/local/bin/certbot-renewal-report.sh"
-            report_script = """#!/bin/bash
-
-# Run certbot renew with detailed output
-certbot renew --days-before-expiry {renewal_days} --non-interactive
-
-# Get status of certificates
-CERT_STATUS=$(find /etc/letsencrypt/live -maxdepth 1 -type d | grep -v '^/etc/letsencrypt/live$' | while read -r CERT_DIR; do
-    DOMAIN=$(basename "$CERT_DIR")
-    CERT_FILE="$CERT_DIR/cert.pem"
-    
-    if [ -f "$CERT_FILE" ]; then
-        EXPIRY=$(openssl x509 -in "$CERT_FILE" -noout -enddate | cut -d= -f2)
-        EXPIRY_EPOCH=$(date -d "$EXPIRY" +%s)
-        NOW_EPOCH=$(date +%s)
-        DAYS_LEFT=$(( ($EXPIRY_EPOCH - $NOW_EPOCH) / 86400 ))
-        
-        echo "$DOMAIN: $DAYS_LEFT days until expiry ($EXPIRY)"
-    fi
-done)
-
-# Log the results
-echo "$(date): Certificate renewal check completed" >> /var/log/certbot-renewal.log
-echo "$CERT_STATUS" >> /var/log/certbot-renewal.log
-echo "----------------------------------------" >> /var/log/certbot-renewal.log
-
-# For certificates expiring soon (less than 15 days), log a warning
-echo "$CERT_STATUS" | grep -E ': ([0-9]|1[0-4]) days' > /dev/null
-if [ $? -eq 0 ]; then
-    echo "WARNING: Some certificates are expiring soon!" >> /var/log/certbot-renewal.log
-    EXPIRING_CERTS=$(echo "$CERT_STATUS" | grep -E ': ([0-9]|1[0-4]) days')
-    echo "$EXPIRING_CERTS" >> /var/log/certbot-renewal.log
-fi
-""".replace("{renewal_days}", str(renewal_days))
-            
-            # Create the report script and make it executable
-            stdin, stdout, stderr = ssh_client.exec_command(f"echo '{report_script}' > {report_script_path} && chmod +x {report_script_path}")
-            
-            # Add certbot renew job to crontab (run daily at 3:00 AM)
-            cron_cmd = f'(crontab -l 2>/dev/null; echo "0 3 * * * /usr/local/bin/certbot-renewal-report.sh > /dev/null 2>&1") | crontab -'
-            stdin, stdout, stderr = ssh_client.exec_command(cron_cmd)
-            exit_status = stdout.channel.recv_exit_status()
-            
-            if exit_status != 0:
-                error = stderr.read().decode('utf-8')
-                ssh_client.close()
-                return {
-                    "success": False,
-                    "message": f"Failed to configure auto-renewal: {error}"
-                }
-            
-            # Verify the job was added
-            stdin, stdout, stderr = ssh_client.exec_command("crontab -l | grep certbot")
-            cron_verify = stdout.read().decode('utf-8').strip()
+            # Verify cron job was added
+            stdin, stdout, stderr = ssh_client.exec_command("crontab -l | grep 'certbot renew'")
+            verification = stdout.read().decode('utf-8').strip()
             
             ssh_client.close()
             
-            if "/usr/local/bin/certbot-renewal-report.sh" in cron_verify:
-                # Log the success
-                log_activity('info', f"Successfully configured SSL auto-renewal on node {node.name}")
-                
-                return {
-                    "success": True,
-                    "message": "Certificate auto-renewal successfully configured",
-                    "cron_entry": cron_verify,
-                    "renewal_days": renewal_days
-                }
-            else:
+            if not verification:
                 return {
                     "success": False,
-                    "message": "Failed to configure auto-renewal: cron job verification failed"
+                    "message": "Failed to set up auto-renewal cron job"
                 }
             
+            return {
+                "success": True,
+                "message": f"Successfully set up auto-renewal {renewal_days} days before expiry",
+                "cron_job": verification
+            }
+            
         except Exception as e:
+            log_activity('error', f"Error setting up auto-renewal on node {node.name}: {str(e)}")
             return {
                 "success": False,
-                "message": f"Error configuring auto-renewal: {str(e)}"
+                "message": f"Failed to set up auto-renewal: {str(e)}"
             }
     
     @staticmethod
-    def get_supported_dns_providers():
+    def revoke_certificate(site_id, node_id):
         """
-        Get list of supported DNS providers for DNS challenges
-        
-        Returns:
-            list: List of supported DNS providers
-        """
-        return list(SSLCertificateService.DNS_PROVIDERS.keys())
-    
-    @staticmethod
-    def revoke_certificate(site_id, node_id, domain=None):
-        """
-        Revoke an existing SSL certificate
+        Revoke an SSL certificate for a site on a node
         
         Args:
             site_id: ID of the site
-            node_id: ID of the node where certificate is installed
-            domain: Optional specific domain to revoke
+            node_id: ID of the node
             
         Returns:
-            dict: Result of the revocation
+            dict: Revocation result
         """
         site = Site.query.get(site_id)
         node = Node.query.get(node_id)
         
         if not site or not node:
-            return {"error": "Site or node not found"}
-            
-        domain_to_revoke = domain or site.domain
+            return {"success": False, "message": "Site or node not found"}
         
         try:
-            # Connect to the node via SSH
+            # Connect to the node
             ssh_client = paramiko.SSHClient()
             ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             
@@ -853,18 +865,21 @@ fi
                     username=node.ssh_user,
                     password=node.ssh_password
                 )
-                
-            # Check if certificate exists
-            cert_info = SSLCertificateService._get_certificate_info(node, domain_to_revoke)
             
-            if not cert_info.get("exists", False):
+            # Check if certificates exist
+            cert_path = f"/etc/letsencrypt/live/{site.domain}/fullchain.pem"
+            stdin, stdout, stderr = ssh_client.exec_command(f"test -f {cert_path} && echo 'exists' || echo 'not found'")
+            cert_exists = stdout.read().decode('utf-8').strip() == 'exists'
+            
+            if not cert_exists:
+                ssh_client.close()
                 return {
                     "success": False,
-                    "message": f"No certificate found for {domain_to_revoke}"
+                    "message": f"No certificate found for {site.domain} on this node"
                 }
-                
+            
             # Revoke the certificate
-            stdin, stdout, stderr = ssh_client.exec_command(f"certbot revoke --cert-name {domain_to_revoke} --non-interactive")
+            stdin, stdout, stderr = ssh_client.exec_command(f"certbot revoke --cert-path {cert_path} --delete-after-revoke --non-interactive")
             exit_status = stdout.channel.recv_exit_status()
             output = stdout.read().decode('utf-8')
             error = stderr.read().decode('utf-8')
@@ -873,94 +888,135 @@ fi
                 ssh_client.close()
                 return {
                     "success": False,
-                    "message": f"Failed to revoke certificate: {error}"
+                    "message": f"Failed to revoke certificate: {error}",
+                    "output": output,
+                    "error": error
                 }
-                
-            # Update the certificate status in the database
-            certificate = SSLCertificate.query.filter_by(site_id=site_id, domain=domain_to_revoke).first()
-            if certificate:
-                certificate.status = 'revoked'
-                certificate.updated_at = datetime.utcnow()
+            
+            # Delete the certificate record from database
+            cert_record = SSLCertificate.query.filter_by(
+                site_id=site_id, 
+                node_id=node_id
+            ).first()
+            
+            if cert_record:
+                db.session.delete(cert_record)
                 db.session.commit()
-                
-            # Log the revocation
-            log_activity('info', f"Certificate for {domain_to_revoke} has been revoked")
             
             ssh_client.close()
             
             return {
                 "success": True,
-                "message": f"Certificate for {domain_to_revoke} successfully revoked"
+                "message": f"Successfully revoked certificate for {site.domain}",
+                "output": output
             }
             
         except Exception as e:
+            log_activity('error', f"Error revoking certificate for {site.domain} on node {node.name}: {str(e)}")
             return {
                 "success": False,
-                "message": f"Error revoking certificate: {str(e)}"
+                "message": f"Failed to revoke certificate: {str(e)}"
             }
     
     @staticmethod
-    def certificate_health_check(days_warning=30):
+    def certificate_health_check():
         """
-        Check all certificates across all nodes for expiration issues
+        Check the health of all SSL certificates across the system
         
-        Args:
-            days_warning: Days threshold for expiration warning
-            
         Returns:
             dict: Health check results
         """
-        certificates = SSLCertificate.query.filter_by(status='active').all()
+        # Get all SSL certificates from database
+        certs = SSLCertificate.query.all()
+        
         expiring_soon = []
         expired = []
         healthy = []
         
-        # Check each certificate
-        for cert in certificates:
-            if not cert.expires_at:
-                # Unknown expiry date
-                expiring_soon.append({
-                    'id': cert.id,
-                    'domain': cert.domain,
-                    'site_id': cert.site_id,
-                    'status': 'unknown'
-                })
+        for cert in certs:
+            site = Site.query.get(cert.site_id)
+            node = Node.query.get(cert.node_id)
+            
+            if not site or not node:
                 continue
                 
-            days_remaining = (cert.expires_at - datetime.utcnow()).days
+            # Skip if not active or valid
+            if cert.status not in ['valid', 'expiring soon']:
+                continue
+                
+            cert_info = {
+                "site_id": cert.site_id,
+                "node_id": cert.node_id,
+                "domain": site.domain,
+                "node_name": node.name,
+                "days_remaining": cert.days_remaining,
+                "valid_until": cert.valid_until.strftime('%Y-%m-%d')
+            }
             
-            if days_remaining < 0:
-                # Certificate has expired
-                expired.append({
-                    'id': cert.id,
-                    'domain': cert.domain,
-                    'site_id': cert.site_id,
-                    'days_remaining': days_remaining,
-                    'expires_at': cert.expires_at.isoformat()
-                })
-            elif days_remaining < days_warning:
-                # Certificate expiring soon
-                expiring_soon.append({
-                    'id': cert.id,
-                    'domain': cert.domain,
-                    'site_id': cert.site_id,
-                    'days_remaining': days_remaining,
-                    'expires_at': cert.expires_at.isoformat()
-                })
+            if cert.days_remaining <= 0:
+                expired.append(cert_info)
+            elif cert.days_remaining <= 7:
+                expiring_soon.append(cert_info)
             else:
-                # Healthy certificate
-                healthy.append({
-                    'id': cert.id,
-                    'domain': cert.domain,
-                    'site_id': cert.site_id,
-                    'days_remaining': days_remaining,
-                    'expires_at': cert.expires_at.isoformat()
-                })
+                healthy.append(cert_info)
+        
+        # Sort by days remaining
+        expiring_soon.sort(key=lambda x: x['days_remaining'])
+        healthy.sort(key=lambda x: x['days_remaining'])
         
         return {
-            'total_certificates': len(certificates),
-            'healthy': healthy,
-            'expiring_soon': expiring_soon,
-            'expired': expired,
-            'warning_threshold_days': days_warning
+            "total_certificates": len(certs),
+            "healthy_count": len(healthy),
+            "expiring_soon_count": len(expiring_soon),
+            "expired_count": len(expired),
+            "expiring_soon": expiring_soon,
+            "expired": expired,
+            "healthy": healthy
         }
+    
+    @staticmethod
+    def get_supported_dns_providers():
+        """
+        Get a list of supported DNS providers for DNS validation
+        
+        Returns:
+            list: Supported DNS providers
+        """
+        return [
+            {
+                "name": "Cloudflare",
+                "id": "cloudflare",
+                "description": "Cloudflare DNS API",
+                "credentials": ["API Token"]
+            },
+            {
+                "name": "Route 53",
+                "id": "route53",
+                "description": "Amazon Route 53 DNS API",
+                "credentials": ["Access Key", "Secret Key"]
+            },
+            {
+                "name": "DigitalOcean",
+                "id": "digitalocean",
+                "description": "DigitalOcean DNS API",
+                "credentials": ["API Token"]
+            },
+            {
+                "name": "GoDaddy",
+                "id": "godaddy",
+                "description": "GoDaddy DNS API",
+                "credentials": ["API Key", "API Secret"]
+            },
+            {
+                "name": "Namecheap",
+                "id": "namecheap",
+                "description": "Namecheap DNS API",
+                "credentials": ["Username", "API Key"]
+            },
+            {
+                "name": "Manual DNS",
+                "id": "manual",
+                "description": "Manual DNS validation (no API)",
+                "credentials": []
+            }
+        ]
