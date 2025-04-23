@@ -3,40 +3,52 @@
 {% block title %}Login - Italia CDN Proxy Manager{% endblock %}
 
 {% block content %}
-<div class="max-w-md mx-auto bg-white p-8 rounded-lg shadow-md">
-    <h2 class="text-2xl font-bold mb-6 text-center">Login</h2>
-    
-    <form method="POST" action="{{ url_for('auth.login') }}">
-        <div class="mb-4">
-            <label for="username" class="block text-gray-700 font-medium mb-2">Username</label>
-            <input type="text" id="username" name="username" required
-                   class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-        </div>
-        
-        <div class="mb-6">
-            <label for="password" class="block text-gray-700 font-medium mb-2">Password</label>
-            <input type="password" id="password" name="password" required
-                   class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-        </div>
-        
-        <div class="flex items-center justify-between mb-6">
-            <div class="flex items-center">
-                <input type="checkbox" id="remember" name="remember" class="h-4 w-4 text-blue-600">
-                <label for="remember" class="ml-2 block text-gray-700">Remember me</label>
+<div class="container py-5">
+    <div class="row justify-content-center">
+        <div class="col-md-6 col-lg-5">
+            <div class="card shadow-sm">
+                <div class="card-header bg-primary text-white">
+                    <h3 class="card-title mb-0 text-center">Login</h3>
+                </div>
+                <div class="card-body p-4">
+                    {% with messages = get_flashed_messages(with_categories=true) %}
+                        {% if messages %}
+                            {% for category, message in messages %}
+                                <div class="alert alert-{{ category if category != 'error' else 'danger' }} alert-dismissible fade show">
+                                    {{ message }}
+                                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                                </div>
+                            {% endfor %}
+                        {% endif %}
+                    {% endwith %}
+
+                    <form method="POST" action="{{ url_for('auth.login') }}">
+                        <div class="mb-3">
+                            <label for="username" class="form-label">Username</label>
+                            <input type="text" class="form-control" id="username" name="username" required>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="password" class="form-label">Password</label>
+                            <input type="password" class="form-control" id="password" name="password" required>
+                        </div>
+                        
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="remember" name="remember">
+                            <label class="form-check-label" for="remember">Remember me</label>
+                        </div>
+                        
+                        <div class="d-grid">
+                            <button type="submit" class="btn btn-primary">Sign In</button>
+                        </div>
+                    </form>
+                    
+                    <div class="mt-4 text-center">
+                        <p>Don't have an account? <a href="{{ url_for('auth.register') }}" class="text-primary">Register</a></p>
+                    </div>
+                </div>
             </div>
-            <!-- Add password reset link if implementing that feature -->
-            <!-- <a href="#" class="text-blue-600 hover:text-blue-800">Forgot password?</a> -->
         </div>
-        
-        <div>
-            <button type="submit" class="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
-                Sign In
-            </button>
-        </div>
-    </form>
-    
-    <div class="mt-6 text-center">
-        <p>Don't have an account? <a href="{{ url_for('auth.register') }}" class="text-blue-600 hover:text-blue-800">Register</a></p>
     </div>
 </div>
 {% endblock %}
