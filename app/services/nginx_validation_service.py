@@ -48,6 +48,17 @@ class NginxValidationService:
                 if match and '//' in match.group(1):
                     errors.append(f"Line {i+1} has potentially invalid location path: {line.strip()}")
         
+        # Add validation for potentially dangerous domain names
+        domain_match = re.search(r'server_name\s+([^;]+);', config_content)
+        if domain_match:
+            domain = domain_match.group(1).strip()
+            # Check for invalid characters in domain name
+            if re.search(r'[^a-zA-Z0-9\.\-\*]', domain):
+                errors.append(f"Domain name contains potentially invalid characters: {domain}")
+            # Check for very long domain names that might cause issues
+            if len(domain) > 253:
+                errors.append(f"Domain name exceeds maximum length (253 characters): {domain}")
+        
         # Return validation results
         is_valid = len(errors) == 0
         error_message = "\n".join(errors) if errors else "Configuration appears valid"
