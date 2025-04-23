@@ -63,6 +63,7 @@ class Node(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     nginx_config_path = db.Column(db.String(256), default='/etc/nginx/conf.d')
     nginx_reload_command = db.Column(db.String(256), default='sudo systemctl reload nginx')
+    detected_nginx_path = db.Column(db.String(256), nullable=True)  # Store detected nginx path
     
     # Relationships
     site_nodes = db.relationship('SiteNode', backref='node', lazy='dynamic')
@@ -80,6 +81,185 @@ class Node(db.Model):
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'nginx_config_path': self.nginx_config_path
         }
+        
+    def install_nginx(self, user_id=None):
+        """
+        Install Nginx on the remote node
+        
+        Args:
+            user_id: Optional ID of the user performing the installation
+            
+        Returns:
+            tuple: (success, message)
+        """
+        import paramiko
+        from app.services.logger_service import log_activity
+        
+        try:
+            # Connect to the node via SSH
+            ssh_client = paramiko.SSHClient()
+            ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            
+            # Connect using key or password
+            if self.ssh_key_path:
+                ssh_client.connect(
+                    hostname=self.ip_address,
+                    port=self.ssh_port,
+                    username=self.ssh_user,
+                    key_filename=self.ssh_key_path,
+                    timeout=20  # Longer timeout for installation
+                )
+            else:
+                ssh_client.connect(
+                    hostname=self.ip_address,
+                    port=self.ssh_port,
+                    username=self.ssh_user,
+                    password=self.ssh_password,
+                    timeout=20  # Longer timeout for installation
+                )
+            
+            # Detect OS
+            stdin, stdout, stderr = ssh_client.exec_command(
+                "lsb_release -ds 2>/dev/null || "
+                "cat /etc/os-release 2>/dev/null | grep PRETTY_NAME | cut -d '\"' -f 2 || "
+                "echo 'Unknown'"
+            )
+            os_info = stdout.read().decode('utf-8').strip()
+            
+            # Set up installation commands based on OS
+            install_commands = []
+            
+            if "Ubuntu" in os_info or "Debian" in os_info:
+                # Ubuntu/Debian installation
+                install_commands = [
+                    "sudo apt update -y",
+                    "sudo apt install -y nginx",
+                    "sudo systemctl enable nginx",
+                    "sudo systemctl start nginx",
+                    "sudo mkdir -p /var/www/letsencrypt",  # Create directory for ACME challenges
+                    "sudo mkdir -p /var/cache/nginx"  # Create cache directory
+                ]
+            elif "CentOS" in os_info or "Red Hat" in os_info or "Fedora" in os_info:
+                # CentOS/RHEL/Fedora installation
+                install_commands = [
+                    "sudo yum -y update",
+                    "sudo yum -y install epel-release",
+                    "sudo yum -y install nginx",
+                    "sudo systemctl enable nginx",
+                    "sudo systemctl start nginx",
+                    "sudo mkdir -p /var/www/letsencrypt",
+                    "sudo mkdir -p /var/cache/nginx",
+                    "sudo setsebool -P httpd_can_network_connect 1"  # Allow proxy connections
+                ]
+            elif "Alpine" in os_info:
+                # Alpine Linux installation
+                install_commands = [
+                    "sudo apk update",
+                    "sudo apk add nginx",
+                    "sudo rc-update add nginx default",
+                    "sudo service nginx start",
+                    "sudo mkdir -p /var/www/letsencrypt",
+                    "sudo mkdir -p /var/cache/nginx"
+                ]
+            else:
+                ssh_client.close()
+                return False, f"Unsupported OS detected: {os_info}. Please install Nginx manually."
+            
+            # Execute installation commands
+            all_output = []
+            for cmd in install_commands:
+                stdin, stdout, stderr = ssh_client.exec_command(cmd, get_pty=True)
+                stdout_output = stdout.read().decode('utf-8').strip()
+                stderr_output = stderr.read().decode('utf-8').strip()
+                all_output.append(f"Command: {cmd}")
+                if stdout_output:
+                    all_output.append(f"Output: {stdout_output}")
+                if stderr_output:
+                    all_output.append(f"Error: {stderr_output}")
+                all_output.append("---")
+            
+            # Verify installation
+            stdin, stdout, stderr = ssh_client.exec_command("nginx -v 2>&1")
+            version_output = stdout.read().decode('utf-8').strip() + stderr.read().decode('utf-8').strip()
+            
+            # Create Nginx config directory if it doesn't exist
+            stdin, stdout, stderr = ssh_client.exec_command(f"sudo mkdir -p {self.nginx_config_path}")
+            
+            # Close the SSH connection
+            ssh_client.close()
+            
+            if "nginx version" in version_output.lower():
+                # Installation was successful
+                installation_output = "\n".join(all_output)
+                success_message = f"Nginx installed successfully on {self.name} ({self.ip_address})"
+                
+                # Log the successful installation
+                log_details = {
+                    'node_id': self.id,
+                    'user_id': user_id,
+                    'output': installation_output,
+                    'nginx_version': version_output
+                }
+                log_activity('info', f"Nginx installed on node {self.name}", log_details)
+                
+                # Create a system log entry
+                system_log = SystemLog(
+                    user_id=user_id,
+                    category='admin',
+                    action='install_nginx',
+                    resource_type='node',
+                    resource_id=self.id,
+                    details=f"Nginx installed successfully: {version_output}"
+                )
+                db.session.add(system_log)
+                db.session.commit()
+                
+                return True, success_message
+            else:
+                # Installation failed
+                error_msg = f"Nginx installation failed on {self.name}. Commands executed but Nginx not found."
+                
+                # Log the failure
+                log_details = {
+                    'node_id': self.id,
+                    'user_id': user_id,
+                    'output': "\n".join(all_output)
+                }
+                log_activity('error', f"Failed to install Nginx on node {self.name}", log_details)
+                
+                # Create a system log entry for the failure
+                system_log = SystemLog(
+                    user_id=user_id,
+                    category='admin',
+                    action='install_nginx',
+                    resource_type='node',
+                    resource_id=self.id,
+                    details=f"Nginx installation failed: {error_msg}"
+                )
+                db.session.add(system_log)
+                db.session.commit()
+                
+                return False, error_msg
+                
+        except Exception as e:
+            error_msg = f"Failed to install Nginx: {str(e)}"
+            
+            # Log the exception
+            log_activity('error', f"Exception during Nginx installation on node {self.name}: {str(e)}")
+            
+            # Create a system log entry for the error
+            system_log = SystemLog(
+                user_id=user_id,
+                category='admin',
+                action='install_nginx',
+                resource_type='node',
+                resource_id=self.id,
+                details=error_msg
+            )
+            db.session.add(system_log)
+            db.session.commit()
+            
+            return False, error_msg
 
 
 class Site(db.Model):

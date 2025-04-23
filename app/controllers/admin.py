@@ -448,6 +448,23 @@ def redeploy_all_sites(node_id):
     
     return redirect(url_for('admin.view_node', node_id=node_id))
 
+@admin.route('/nodes/<int:node_id>/install-nginx', methods=['POST'])
+@login_required
+@admin_required
+def install_nginx(node_id):
+    """Install Nginx on a node where it's missing"""
+    node = Node.query.get_or_404(node_id)
+    
+    # Call the Node model's install_nginx method
+    success, message = node.install_nginx(user_id=current_user.id)
+    
+    if success:
+        flash(message, 'success')
+    else:
+        flash(message, 'error')
+    
+    return redirect(url_for('admin.view_node', node_id=node_id))
+
 # Site Management (Admin View)
 @admin.route('/sites')
 @login_required
