@@ -1,0 +1,159 @@
+{% extends 'base.html' %}
+
+{% block title %}View Configuration - {{ site.domain }} - Admin{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{{ url_for('admin.dashboard') }}">Dashboard</a></li>
+            <li class="breadcrumb-item"><a href="{{ url_for('admin.list_sites') }}">Sites</a></li>
+            <li class="breadcrumb-item"><a href="{{ url_for('admin.view_site', site_id=site.id) }}">{{ site.domain }}</a></li>
+            <li class="breadcrumb-item"><a href="{{ url_for('admin.site_config_versions', site_id=site.id) }}">Versions</a></li>
+            <li class="breadcrumb-item active" aria-current="page">{{ version.short_hash }}</li>
+        </ol>
+    </nav>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert alert-{{ category if category != 'error' else 'danger' }} alert-dismissible fade show">
+                    {{ message }}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1>Configuration: <small class="text-muted">{{ version.short_hash }}</small></h1>
+        <div>
+            <button type="button" 
+                    class="btn btn-warning" 
+                    data-bs-toggle="modal" 
+                    data-bs-target="#rollbackModal">
+                <i class="fas fa-history me-2"></i>Rollback to This Version
+            </button>
+        </div>
+    </div>
+
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-light">
+            <div class="d-flex justify-content-between align-items-center">
+                <h5 class="card-title mb-0">Version Details</h5>
+                <span class="badge bg-primary">{{ version.date.strftime('%Y-%m-%d %H:%M:%S') }}</span>
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-4">
+                    <p><strong>Version:</strong> <code>{{ version.commit_hash }}</code></p>
+                </div>
+                <div class="col-md-4">
+                    <p><strong>Author:</strong> {{ version.author }}</p>
+                </div>
+                <div class="col-md-4">
+                    <p><strong>Message:</strong> {{ version.message }}</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card shadow-sm">
+        <div class="card-header bg-light">
+            <div class="d-flex justify-content-between align-items-center">
+                <h5 class="card-title mb-0">Configuration Content</h5>
+                <div>
+                    <button class="btn btn-sm btn-outline-secondary" id="copyToClipboard">
+                        <i class="fas fa-copy me-1"></i>Copy
+                    </button>
+                </div>
+            </div>
+        </div>
+        <div class="card-body p-0">
+            <div class="bg-dark">
+                <pre class="p-3 text-light mb-0"><code id="configContent">{{ content }}</code></pre>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Rollback Modal -->
+<div class="modal fade" id="rollbackModal" tabindex="-1" aria-labelledby="rollbackModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="rollbackModalLabel">Confirm Rollback</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form method="POST" action="{{ url_for('admin.rollback_config_version', site_id=site.id, commit_hash=version.commit_hash) }}">
+                <div class="modal-body">
+                    <p>Are you sure you want to rollback to version <code>{{ version.short_hash }}</code>?</p>
+                    <p>This will create a new version with the rolled back configuration.</p>
+                    
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" id="deployRollback" name="deploy" value="true" checked>
+                        <label class="form-check-label" for="deployRollback">
+                            Deploy rolled back configuration
+                        </label>
+                        <div class="form-text">
+                            If checked, the rolled back configuration will be deployed to all nodes.
+                        </div>
+                    </div>
+                    
+                    <div class="alert alert-warning">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        Rolling back to an older version may cause disruption if the configuration is incompatible with your current setup.
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-warning">Rollback</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Copy to clipboard functionality
+        const copyButton = document.getElementById('copyToClipboard');
+        const configContent = document.getElementById('configContent');
+        
+        if (copyButton && configContent) {
+            copyButton.addEventListener('click', function() {
+                const text = configContent.textContent;
+                
+                // Create a temporary textarea element
+                const textarea = document.createElement('textarea');
+                textarea.value = text;
+                textarea.setAttribute('readonly', '');
+                textarea.style.position = 'absolute';
+                textarea.style.left = '-9999px';
+                document.body.appendChild(textarea);
+                
+                // Select and copy
+                textarea.select();
+                document.execCommand('copy');
+                
+                // Remove the textarea
+                document.body.removeChild(textarea);
+                
+                // Show feedback
+                const originalText = copyButton.innerHTML;
+                copyButton.innerHTML = '<i class="fas fa-check me-1"></i>Copied!';
+                copyButton.classList.replace('btn-outline-secondary', 'btn-success');
+                
+                // Reset button after a delay
+                setTimeout(function() {
+                    copyButton.innerHTML = originalText;
+                    copyButton.classList.replace('btn-success', 'btn-outline-secondary');
+                }, 2000);
+            });
+        }
+    });
+</script>
+{% endblock %}

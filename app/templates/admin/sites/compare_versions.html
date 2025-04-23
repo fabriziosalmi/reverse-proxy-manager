@@ -1,0 +1,220 @@
+{% extends 'base.html' %}
+
+{% block title %}Compare Configurations - {{ site.domain }} - Admin{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{{ url_for('admin.dashboard') }}">Dashboard</a></li>
+            <li class="breadcrumb-item"><a href="{{ url_for('admin.list_sites') }}">Sites</a></li>
+            <li class="breadcrumb-item"><a href="{{ url_for('admin.view_site', site_id=site.id) }}">{{ site.domain }}</a></li>
+            <li class="breadcrumb-item"><a href="{{ url_for('admin.site_config_versions', site_id=site.id) }}">Versions</a></li>
+            <li class="breadcrumb-item active" aria-current="page">Compare</li>
+        </ol>
+    </nav>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert alert-{{ category if category != 'error' else 'danger' }} alert-dismissible fade show">
+                    {{ message }}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1>Compare Configurations: {{ site.domain }}</h1>
+    </div>
+
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-light">
+            <h5 class="card-title mb-0">Select Versions to Compare</h5>
+        </div>
+        <div class="card-body">
+            <form method="POST" action="{{ url_for('admin.compare_config_versions', site_id=site.id) }}">
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="mb-3">
+                            <label for="version1" class="form-label">From Version</label>
+                            <select class="form-select" id="version1" name="version1" required>
+                                <option value="">Select a version...</option>
+                                {% for version in versions %}
+                                    <option value="{{ version.commit_hash }}" {% if v1 and v1.commit_hash == version.commit_hash %}selected{% endif %}>
+                                        {{ version.short_hash }} - {{ version.date.strftime('%Y-%m-%d %H:%M') }} - {{ version.message }}
+                                    </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="mb-3">
+                            <label for="version2" class="form-label">To Version (Leave blank for current)</label>
+                            <select class="form-select" id="version2" name="version2">
+                                <option value="">Current Version</option>
+                                {% for version in versions %}
+                                    <option value="{{ version.commit_hash }}" {% if v2 and v2.commit_hash == version.commit_hash %}selected{% endif %}>
+                                        {{ version.short_hash }} - {{ version.date.strftime('%Y-%m-%d %H:%M') }} - {{ version.message }}
+                                    </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <div class="d-flex justify-content-end">
+                    <button type="submit" class="btn btn-primary">Compare</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    {% if diff %}
+        <div class="card shadow-sm">
+            <div class="card-header bg-light">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h5 class="card-title mb-0">
+                        Comparing 
+                        <code>{{ v1.short_hash }}</code> 
+                        {% if v2.short_hash %}
+                            to <code>{{ v2.short_hash }}</code>
+                        {% else %}
+                            to <span class="badge bg-primary">Current</span>
+                        {% endif %}
+                    </h5>
+                    <div>
+                        <button class="btn btn-sm btn-outline-secondary" id="copyDiff">
+                            <i class="fas fa-copy me-1"></i>Copy
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="card-body p-0">
+                <div class="bg-dark">
+                    <pre class="p-3 text-light mb-0"><code id="diffContent">{% for type, line in diff %}{% if type == 'addition' %}<span class="text-success">{{ line }}</span>{% elif type == 'deletion' %}<span class="text-danger">{{ line }}</span>{% else %}{{ line }}{% endif %}
+{% endfor %}</code></pre>
+                </div>
+            </div>
+        </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Prevent selecting the same version twice
+        const version1Select = document.getElementById('version1');
+        const version2Select = document.getElementById('version2');
+        
+        if (version1Select && version2Select) {
+            version1Select.addEventListener('change', function() {
+                const selectedValue = this.value;
+                
+                // Enable all options in version2
+                for (let i = 0; i < version2Select.options.length; i++) {
+                    version2Select.options[i].disabled = false;
+                }
+                
+                // Disable the same option in version2
+                if (selectedValue) {
+                    for (let i = 0; i < version2Select.options.length; i++) {
+                        if (version2Select.options[i].value === selectedValue) {
+                            version2Select.options[i].disabled = true;
+                            
+                            // If it was selected, reset the selection
+                            if (version2Select.value === selectedValue) {
+                                version2Select.value = '';
+                            }
+                            
+                            break;
+                        }
+                    }
+                }
+            });
+            
+            version2Select.addEventListener('change', function() {
+                const selectedValue = this.value;
+                
+                // Enable all options in version1
+                for (let i = 0; i < version1Select.options.length; i++) {
+                    version1Select.options[i].disabled = false;
+                }
+                
+                // Disable the same option in version1
+                if (selectedValue) {
+                    for (let i = 0; i < version1Select.options.length; i++) {
+                        if (version1Select.options[i].value === selectedValue) {
+                            version1Select.options[i].disabled = true;
+                            
+                            // If it was selected, reset the selection
+                            if (version1Select.value === selectedValue) {
+                                version1Select.value = '';
+                            }
+                            
+                            break;
+                        }
+                    }
+                }
+            });
+            
+            // Initialize the disabled state
+            if (version1Select.value) {
+                for (let i = 0; i < version2Select.options.length; i++) {
+                    if (version2Select.options[i].value === version1Select.value) {
+                        version2Select.options[i].disabled = true;
+                        break;
+                    }
+                }
+            }
+            
+            if (version2Select.value) {
+                for (let i = 0; i < version1Select.options.length; i++) {
+                    if (version1Select.options[i].value === version2Select.value) {
+                        version1Select.options[i].disabled = true;
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // Copy to clipboard functionality
+        const copyButton = document.getElementById('copyDiff');
+        const diffContent = document.getElementById('diffContent');
+        
+        if (copyButton && diffContent) {
+            copyButton.addEventListener('click', function() {
+                // Get text without HTML tags
+                const text = diffContent.innerText;
+                
+                // Create a temporary textarea element
+                const textarea = document.createElement('textarea');
+                textarea.value = text;
+                textarea.setAttribute('readonly', '');
+                textarea.style.position = 'absolute';
+                textarea.style.left = '-9999px';
+                document.body.appendChild(textarea);
+                
+                // Select and copy
+                textarea.select();
+                document.execCommand('copy');
+                
+                // Remove the textarea
+                document.body.removeChild(textarea);
+                
+                // Show feedback
+                const originalText = copyButton.innerHTML;
+                copyButton.innerHTML = '<i class="fas fa-check me-1"></i>Copied!';
+                copyButton.classList.replace('btn-outline-secondary', 'btn-success');
+                
+                // Reset button after a delay
+                setTimeout(function() {
+                    copyButton.innerHTML = originalText;
+                    copyButton.classList.replace('btn-success', 'btn-outline-secondary');
+                }, 2000);
+            });
+        }
+    });
+</script>
+{% endblock %}

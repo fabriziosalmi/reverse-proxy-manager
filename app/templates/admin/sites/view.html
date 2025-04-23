@@ -14,11 +14,29 @@
     
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h1>Site Details: {{ site.name }}</h1>
-        <form method="POST" action="{{ url_for('admin.toggle_site_active', site_id=site.id) }}" class="ms-2">
-            <button type="submit" class="btn btn-{{ 'danger' if site.is_active else 'success' }}">
-                {{ 'Deactivate' if site.is_active else 'Activate' }}
-            </button>
-        </form>
+        <div class="d-flex">
+            <div class="dropdown me-2">
+                <button class="btn btn-primary dropdown-toggle" type="button" id="configActionsDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+                    <i class="fas fa-cog me-1"></i> Config Actions
+                </button>
+                <ul class="dropdown-menu" aria-labelledby="configActionsDropdown">
+                    <li><a class="dropdown-item" href="{{ url_for('admin.site_config_versions', site_id=site.id) }}">
+                        <i class="fas fa-history me-2"></i>Version History
+                    </a></li>
+                    <li><a class="dropdown-item" href="{{ url_for('admin.compare_config_versions', site_id=site.id) }}">
+                        <i class="fas fa-code-compare me-2"></i>Compare Versions
+                    </a></li>
+                    <li><a class="dropdown-item" href="{{ url_for('admin.test_site_config', site_id=site.id) }}">
+                        <i class="fas fa-vial me-2"></i>Test Configuration
+                    </a></li>
+                </ul>
+            </div>
+            <form method="POST" action="{{ url_for('admin.toggle_site_active', site_id=site.id) }}" class="ms-2">
+                <button type="submit" class="btn btn-{{ 'danger' if site.is_active else 'success' }}">
+                    {{ 'Deactivate' if site.is_active else 'Activate' }}
+                </button>
+            </form>
+        </div>
     </div>
     
     {% with messages = get_flashed_messages(with_categories=true) %}

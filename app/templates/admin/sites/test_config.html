@@ -1,0 +1,72 @@
+{% extends 'base.html' %}
+
+{% block title %}Test Configuration - {{ site.domain }} - Admin{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{{ url_for('admin.dashboard') }}">Dashboard</a></li>
+            <li class="breadcrumb-item"><a href="{{ url_for('admin.list_sites') }}">Sites</a></li>
+            <li class="breadcrumb-item"><a href="{{ url_for('admin.view_site', site_id=site.id) }}">{{ site.domain }}</a></li>
+            <li class="breadcrumb-item active" aria-current="page">Test Configuration</li>
+        </ol>
+    </nav>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert alert-{{ category if category != 'error' else 'danger' }} alert-dismissible fade show">
+                    {{ message|safe }}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1>Test Configuration: {{ site.domain }}</h1>
+    </div>
+
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-light">
+            <h5 class="card-title mb-0">Test Nginx Configuration</h5>
+        </div>
+        <div class="card-body">
+            <p class="mb-4">
+                This will test the Nginx configuration for {{ site.domain }} on a selected node without deploying it.
+                The test will check for syntax errors and other potential issues with the configuration.
+            </p>
+
+            <form method="POST" action="{{ url_for('admin.test_site_config', site_id=site.id) }}">
+                <div class="mb-3">
+                    <label for="node_id" class="form-label">Select Node for Testing</label>
+                    <select class="form-select" id="node_id" name="node_id" required>
+                        <option value="">Select a node...</option>
+                        {% for node in nodes %}
+                            <option value="{{ node.id }}">{{ node.name }} ({{ node.ip_address }})</option>
+                        {% endfor %}
+                    </select>
+                    <div class="form-text">
+                        Choose a node to test the configuration. The test will execute `nginx -t` on the selected node.
+                    </div>
+                </div>
+
+                <div class="alert alert-info">
+                    <i class="fas fa-info-circle me-2"></i>
+                    Testing does not affect the live configuration. It validates the configuration before deployment.
+                </div>
+
+                <div class="d-flex justify-content-between mt-4">
+                    <a href="{{ url_for('admin.view_site', site_id=site.id) }}" class="btn btn-outline-secondary">
+                        Cancel
+                    </a>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-vial me-2"></i>Test Configuration
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

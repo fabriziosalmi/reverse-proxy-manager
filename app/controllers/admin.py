@@ -1,6 +1,6 @@
 from flask import Blueprint, render_template, request, flash, redirect, url_for, jsonify, abort
 from flask_login import login_required, current_user
-from app.models.models import db, User, Node, Site, SiteNode, DeploymentLog
+from app.models.models import db, User, Node, Site, SiteNode, DeploymentLog, ConfigVersion
 from app.services.access_control import admin_required
 from datetime import datetime
 import random
@@ -897,3 +897,158 @@ def system_logs():
                               'from_date': from_date,
                               'to_date': to_date
                           })
+
+@admin.route('/sites/<int:site_id>/versions')
+@login_required
+@admin_required
+def site_config_versions(site_id):
+    """View configuration version history for a site"""
+    site = Site.query.get_or_404(site_id)
+    
+    # Get configuration versions from the service
+    from app.services.config_versioning_service import get_config_versions
+    versions = get_config_versions(site)
+    
+    # Get database versions
+    db_versions = ConfigVersion.query.filter_by(site_id=site_id).order_by(ConfigVersion.created_at.desc()).all()
+    
+    # Map DB versions to Git commits for additional metadata
+    version_map = {v.commit_hash: v for v in db_versions}
+    
+    # Enhance version data with DB info
+    for version in versions:
+        if version['commit_hash'] in version_map:
+            db_version = version_map[version['commit_hash']]
+            version['user'] = db_version.author
+            
+    return render_template('admin/sites/versions.html', site=site, versions=versions)
+
+@admin.route('/sites/<int:site_id>/versions/<string:commit_hash>')
+@login_required
+@admin_required
+def view_config_version(site_id, commit_hash):
+    """View a specific configuration version"""
+    site = Site.query.get_or_404(site_id)
+    
+    # Get the configuration content
+    from app.services.config_versioning_service import get_config_content, get_config_versions
+    content = get_config_content(site, commit_hash)
+    
+    if not content:
+        flash('Configuration version not found', 'error')
+        return redirect(url_for('admin.site_config_versions', site_id=site_id))
+    
+    # Get version details
+    versions = get_config_versions(site)
+    version = next((v for v in versions if v['commit_hash'] == commit_hash), None)
+    
+    return render_template('admin/sites/view_version.html', site=site, version=version, content=content)
+
+@admin.route('/sites/<int:site_id>/versions/compare', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def compare_config_versions(site_id):
+    """Compare two configuration versions"""
+    site = Site.query.get_or_404(site_id)
+    
+    from app.services.config_versioning_service import get_config_versions, compare_configs
+    
+    # Get available versions for selection
+    versions = get_config_versions(site)
+    
+    if request.method == 'POST':
+        # Get selected versions for comparison
+        version1 = request.form.get('version1')
+        version2 = request.form.get('version2', None)
+        
+        # Get diff
+        diff = compare_configs(site, version1, version2)
+        
+        # Format the diff for display
+        formatted_diff = []
+        if diff:
+            for line in diff.split('\n'):
+                if line.startswith('+'):
+                    formatted_diff.append(('addition', line))
+                elif line.startswith('-'):
+                    formatted_diff.append(('deletion', line))
+                else:
+                    formatted_diff.append(('context', line))
+                    
+            # Get version details for display
+            v1_details = next((v for v in versions if v['commit_hash'] == version1), None)
+            v2_details = next((v for v in versions if v['commit_hash'] == version2), None) if version2 else {'short_hash': 'Current'}
+            
+            return render_template('admin/sites/compare_versions.html', 
+                                  site=site, 
+                                  versions=versions, 
+                                  diff=formatted_diff,
+                                  v1=v1_details,
+                                  v2=v2_details)
+        else:
+            flash('Error comparing versions', 'error')
+    
+    # Initial version selection form
+    return render_template('admin/sites/compare_versions.html', site=site, versions=versions, diff=None)
+
+@admin.route('/sites/<int:site_id>/versions/<string:commit_hash>/rollback', methods=['POST'])
+@login_required
+@admin_required
+def rollback_config_version(site_id, commit_hash):
+    """Rollback to a specific configuration version"""
+    site = Site.query.get_or_404(site_id)
+    
+    # Check if we should deploy the rolled back config
+    deploy = request.form.get('deploy', 'false') == 'true'
+    
+    # Perform the rollback
+    from app.services.config_versioning_service import rollback_config
+    success = rollback_config(site, commit_hash, deploy, current_user.id)
+    
+    if success:
+        if deploy:
+            flash(f'Successfully rolled back and deployed configuration for {site.domain}', 'success')
+        else:
+            flash(f'Successfully rolled back configuration for {site.domain} (not deployed)', 'success')
+    else:
+        flash(f'Error rolling back configuration for {site.domain}', 'error')
+    
+    return redirect(url_for('admin.site_config_versions', site_id=site_id))
+
+@admin.route('/sites/<int:site_id>/test-config', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def test_site_config(site_id):
+    """Test a site configuration without deploying it"""
+    site = Site.query.get_or_404(site_id)
+    
+    if request.method == 'POST':
+        # Get the node to test on
+        node_id = request.form.get('node_id')
+        if not node_id:
+            flash('Please select a node to test on', 'error')
+            nodes = Node.query.filter_by(is_active=True).all()
+            return render_template('admin/sites/test_config.html', site=site, nodes=nodes)
+        
+        # Generate configuration
+        from app.services.nginx_service import generate_nginx_config, deploy_to_node
+        config = generate_nginx_config(site)
+        
+        try:
+            # Test the configuration (test_only=True)
+            success, warnings = deploy_to_node(site.id, int(node_id), config, test_only=True)
+            
+            if success:
+                flash('Configuration test successful', 'success')
+                if warnings:
+                    flash('Warnings: ' + '<br>'.join(warnings), 'warning')
+            else:
+                flash('Configuration test failed', 'error')
+            
+            return redirect(url_for('admin.view_site', site_id=site_id))
+        except Exception as e:
+            flash(f'Error testing configuration: {str(e)}', 'error')
+    
+    # Show test form
+    nodes = Node.query.filter_by(is_active=True).all()
+    return render_template('admin/sites/test_config.html', site=site, nodes=nodes)

@@ -448,7 +448,7 @@ def save_config_to_git(site, config_content):
     if not repo.head.is_valid() or len(repo.index.diff("HEAD")) > 0:
         repo.git.commit('-m', message)
 
-def deploy_to_node(site_id, node_id, nginx_config):
+def deploy_to_node(site_id, node_id, nginx_config, test_only=False):
     """
     Deploy Nginx configuration to a node
     
@@ -456,6 +456,10 @@ def deploy_to_node(site_id, node_id, nginx_config):
         site_id: ID of the site being deployed
         node_id: ID of the node to deploy to
         nginx_config: Nginx configuration content
+        test_only: If True, only test the configuration without applying it
+        
+    Returns:
+        bool: Success or failure
     """
     site = Site.query.get(site_id)
     node = Node.query.get(node_id)
@@ -469,6 +473,39 @@ def deploy_to_node(site_id, node_id, nginx_config):
         db.session.add(site_node)
     
     try:
+        # First, validate the configuration locally
+        from app.services.nginx_validation_service import NginxValidationService
+        
+        is_valid, error_message = NginxValidationService.validate_config_syntax(nginx_config)
+        if not is_valid:
+            raise ValueError(f"Invalid Nginx configuration: {error_message}")
+        
+        # Validate security best practices
+        _, ssl_warnings = NginxValidationService.validate_ssl_config(nginx_config)
+        _, security_warnings = NginxValidationService.validate_security_headers(nginx_config)
+        
+        # Test configuration on the node
+        is_valid, test_output = NginxValidationService.test_config_on_node(node_id, nginx_config, site.domain)
+        if not is_valid:
+            raise ValueError(f"Nginx configuration test failed: {test_output}")
+        
+        # If test_only, we stop here after validation
+        if test_only:
+            # Log the successful test
+            log = DeploymentLog(
+                site_id=site_id,
+                node_id=node_id,
+                action='test',
+                status='success',
+                message=f"Configuration test successful for {site.domain}"
+            )
+            db.session.add(log)
+            db.session.commit()
+            
+            # Return warnings about security best practices
+            all_warnings = ssl_warnings + security_warnings
+            return True, all_warnings
+        
         # Connect to the node via SSH
         ssh_client = paramiko.SSHClient()
         ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -520,13 +557,18 @@ def deploy_to_node(site_id, node_id, nginx_config):
         site_node.deployed_at = datetime.utcnow()
         site_node.error_message = None
         
+        # Create warning message if any security warnings
+        warning_message = ""
+        if ssl_warnings or security_warnings:
+            warning_message = "Deployed with warnings: " + ", ".join(ssl_warnings + security_warnings)
+        
         # Log the deployment
         log = DeploymentLog(
             site_id=site_id,
             node_id=node_id,
             action='deploy',
             status='success',
-            message=f"Successfully deployed {site.domain} to {node.name}"
+            message=f"Successfully deployed {site.domain} to {node.name}{' - ' + warning_message if warning_message else ''}"
         )
         db.session.add(log)
         db.session.commit()
@@ -543,7 +585,7 @@ def deploy_to_node(site_id, node_id, nginx_config):
         log = DeploymentLog(
             site_id=site_id,
             node_id=node_id,
-            action='deploy',
+            action='deploy' if not test_only else 'test',
             status='error',
             message=str(e)
         )
