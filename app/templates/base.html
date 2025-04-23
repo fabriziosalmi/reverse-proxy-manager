@@ -329,10 +329,16 @@
                                     </a>
                                     <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="adminToolsDropdown">
                                         <li>
+                                            <a class="dropdown-item" href="{{ url_for('admin.ssl_dashboard') }}">
+                                                <i class="fas fa-shield-alt me-2"></i> SSL Dashboard
+                                            </a>
+                                        </li>
+                                        <li>
                                             <a class="dropdown-item" href="{{ url_for('admin.system_logs') }}">
                                                 <i class="fas fa-clipboard-list me-2"></i> System Logs
                                             </a>
                                         </li>
+                                        <li><hr class="dropdown-divider"></li>
                                         <li>
                                             <a class="dropdown-item text-danger" href="{{ url_for('admin.system_reset') }}">
                                                 <i class="fas fa-exclamation-triangle me-2"></i> System Reset
