@@ -722,3 +722,166 @@ def api_list_nodes():
 def api_list_sites():
     sites = Site.query.all()
     return jsonify([site.to_dict() for site in sites])
+
+@admin.route('/system/reset', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def system_reset():
+    """Reset functionality for admins to delete all sites and nodes (testing purposes)"""
+    if request.method == 'GET':
+        # Count entities to be deleted
+        site_count = Site.query.count()
+        node_count = Node.query.count()
+        site_node_count = SiteNode.query.count()
+        deployment_logs_count = DeploymentLog.query.count()
+        
+        return render_template('admin/reset.html', 
+                              site_count=site_count, 
+                              node_count=node_count,
+                              site_node_count=site_node_count,
+                              deployment_logs_count=deployment_logs_count)
+    
+    if request.method == 'POST':
+        # Verify admin password for security
+        password = request.form.get('password')
+        if not current_user.check_password(password):
+            flash('Invalid password. Reset operation canceled.', 'error')
+            return redirect(url_for('admin.system_reset'))
+        
+        reset_type = request.form.get('reset_type', 'all')
+        
+        try:
+            # Import logger service
+            from app.services.logger_service import log_activity
+            
+            if reset_type in ['all', 'sites']:
+                # Delete all deployments first (foreign key constraints)
+                DeploymentLog.query.delete()
+                
+                # Delete all site nodes relationships
+                SiteNode.query.delete()
+                
+                # Delete all sites
+                site_count = Site.query.count()
+                Site.query.delete()
+                
+                db.session.commit()
+                
+                # Log the reset action for sites
+                log_activity(
+                    category='admin',
+                    action='reset',
+                    resource_type='site',
+                    details=f'Deleted all sites ({site_count}) and their deployments'
+                )
+                
+            if reset_type in ['all', 'nodes']:
+                # If sites weren't already deleted, we need to delete site_nodes
+                if reset_type != 'all' and reset_type != 'sites':
+                    SiteNode.query.delete()
+                    DeploymentLog.query.delete()
+                
+                # Delete all nodes
+                node_count = Node.query.count()
+                Node.query.delete()
+                
+                db.session.commit()
+                
+                # Log the reset action for nodes
+                log_activity(
+                    category='admin',
+                    action='reset',
+                    resource_type='node',
+                    details=f'Deleted all nodes ({node_count})'
+                )
+            
+            flash('System reset completed successfully', 'success')
+            
+            # Add a special log entry for the complete reset
+            if reset_type == 'all':
+                log_activity(
+                    category='admin',
+                    action='reset',
+                    resource_type='system',
+                    details='Complete system reset executed'
+                )
+                
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Error during reset: {str(e)}', 'error')
+            
+            # Log the failed reset attempt
+            log_activity(
+                category='admin',
+                action='reset_failed',
+                resource_type='system',
+                details=f'Reset operation failed: {str(e)}'
+            )
+            
+        return redirect(url_for('admin.dashboard'))
+
+@admin.route('/system/logs')
+@login_required
+@admin_required
+def system_logs():
+    """View all system logs (auth, admin, security, etc.)"""
+    # Get filter parameters
+    category = request.args.get('category')
+    user_id = request.args.get('user_id')
+    resource_type = request.args.get('resource_type')
+    from_date = request.args.get('from_date')
+    to_date = request.args.get('to_date')
+    
+    # Import SystemLog model
+    from app.models.models import SystemLog
+    
+    # Base query
+    query = SystemLog.query
+    
+    # Apply filters
+    if category:
+        query = query.filter(SystemLog.category == category)
+    
+    if user_id:
+        query = query.filter(SystemLog.user_id == user_id)
+    
+    if resource_type:
+        query = query.filter(SystemLog.resource_type == resource_type)
+    
+    if from_date:
+        try:
+            from_datetime = datetime.strptime(from_date, '%Y-%m-%d')
+            query = query.filter(SystemLog.created_at >= from_datetime)
+        except ValueError:
+            pass
+    
+    if to_date:
+        try:
+            to_datetime = datetime.strptime(to_date, '%Y-%m-%d')
+            # Set to end of day
+            to_datetime = to_datetime.replace(hour=23, minute=59, second=59)
+            query = query.filter(SystemLog.created_at <= to_datetime)
+        except ValueError:
+            pass
+    
+    # Fetch distinct filter options for dropdowns
+    categories = db.session.query(SystemLog.category).distinct().all()
+    resource_types = db.session.query(SystemLog.resource_type).distinct().all()
+    users = User.query.all()
+    
+    # Get logs with pagination
+    page = request.args.get('page', 1, type=int)
+    logs = query.order_by(SystemLog.created_at.desc()).paginate(page=page, per_page=50)
+    
+    return render_template('admin/system_logs.html',
+                          logs=logs,
+                          categories=[c[0] for c in categories if c[0]],
+                          resource_types=[r[0] for r in resource_types if r[0]],
+                          users=users,
+                          filters={
+                              'category': category,
+                              'user_id': user_id,
+                              'resource_type': resource_type,
+                              'from_date': from_date,
+                              'to_date': to_date
+                          })

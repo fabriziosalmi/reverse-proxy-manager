@@ -206,3 +206,35 @@ class DeploymentLog(db.Model):
             'message': self.message,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
+
+
+class SystemLog(db.Model):
+    """System-wide log model for tracking all activities beyond deployments"""
+    __tablename__ = 'system_logs'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)  # Null for system events
+    category = db.Column(db.String(32), nullable=False)  # auth, admin, system, security, etc.
+    action = db.Column(db.String(64), nullable=False)    # login, logout, create, delete, etc.
+    resource_type = db.Column(db.String(32), nullable=True)  # user, node, site, etc.
+    resource_id = db.Column(db.Integer, nullable=True)       # ID of the affected resource
+    details = db.Column(db.Text, nullable=True)              # Additional details
+    ip_address = db.Column(db.String(45), nullable=True)     # IP address of user/system
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    user = db.relationship('User', backref=db.backref('system_logs', lazy='dynamic'))
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'user': self.user.username if self.user else None,
+            'category': self.category,
+            'action': self.action,
+            'resource_type': self.resource_type,
+            'resource_id': self.resource_id,
+            'details': self.details,
+            'ip_address': self.ip_address,
+            'created_at': self.created_at.isoformat() if self.created_at else None
+        }
