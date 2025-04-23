@@ -2,6 +2,43 @@
 
 {% block title %}Manage Nodes - Italia CDN Proxy{% endblock %}
 
+{% block styles %}
+<style>
+    /* Node list custom styling */
+    .node-status-info {
+        font-size: 0.85rem;
+        line-height: 1.4;
+    }
+    
+    .table td {
+        vertical-align: middle;
+    }
+    
+    .node-details-container {
+        min-width: 180px;
+    }
+    
+    tr.align-middle:hover {
+        background-color: rgba(0,0,0,0.03);
+    }
+    
+    .badge.bg-light {
+        color: #212529;
+        border: 1px solid #dee2e6;
+    }
+    
+    /* Add some animation for status changes */
+    @keyframes fadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+    }
+    
+    .node-status-info {
+        animation: fadeIn 0.3s ease-in-out;
+    }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="container py-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
@@ -55,28 +92,75 @@
                             <th>ID</th>
                             <th>Name</th>
                             <th>IP Address</th>
-                            <th>SSH User</th>
-                            <th>SSH Port</th>
+                            <th>External IP</th>
+                            <th>SSH Info</th>
                             <th>Status</th>
-                            <th>Added</th>
+                            <th>Details</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for node in nodes %}
-                        <tr>
+                        <tr class="align-middle" id="node-row-{{ node.id }}">
                             <td>
                                 <input type="checkbox" class="form-check-input node-checkbox" data-node-id="{{ node.id }}" value="{{ node.id }}">
                             </td>
                             <td>{{ node.id }}</td>
-                            <td>{{ node.name }}</td>
+                            <td>
+                                <span class="fw-semibold">{{ node.name }}</span>
+                                {% if node.is_discovered %}
+                                    <span class="badge bg-info ms-1" title="This node was automatically discovered">Discovered</span>
+                                {% endif %}
+                            </td>
                             <td>{{ node.ip_address }}</td>
-                            <td>{{ node.ssh_user }}</td>
-                            <td>{{ node.ssh_port }}</td>
-                            <td><span class="badge bg-{{ 'success' if node.is_active else 'danger' }}">
-                                {{ 'Active' if node.is_active else 'Inactive' }}
-                            </span></td>
-                            <td>{{ node.created_at.strftime('%Y-%m-%d') }}</td>
+                            <td id="external-ip-{{ node.id }}">
+                                <button class="btn btn-sm btn-outline-secondary" onclick="checkExternalIP({{ node.id }})" title="Check external IP">
+                                    <i class="fas fa-globe"></i> Check
+                                </button>
+                            </td>
+                            <td>
+                                <div>
+                                    <small class="text-secondary">User: <span class="text-dark">{{ node.ssh_user }}</span></small>
+                                </div>
+                                <div>
+                                    <small class="text-secondary">Port: <span class="text-dark">{{ node.ssh_port }}</span></small>
+                                </div>
+                                <div>
+                                    <small class="text-secondary">Auth: 
+                                        <span class="text-dark badge bg-light text-dark border">
+                                            {% if node.ssh_key_path %}Key{% else %}Password{% endif %}
+                                        </span>
+                                    </small>
+                                </div>
+                            </td>
+                            <td>
+                                <span class="badge bg-{{ 'success' if node.is_active else 'danger' }} p-2">
+                                    <i class="fas fa-{{ 'check-circle' if node.is_active else 'times-circle' }} me-1"></i>
+                                    {{ 'Active' if node.is_active else 'Inactive' }}
+                                </span>
+                                <div class="mt-1">
+                                    <small class="text-muted">{{ node.created_at.strftime('%Y-%m-%d') }}</small>
+                                </div>
+                            </td>
+                            <td>
+                                <div class="node-details-container">
+                                    <div>
+                                        <small class="text-secondary">Nginx path: </small>
+                                        <small class="text-dark">{{ node.nginx_config_path }}</small>
+                                    </div>
+                                    {% if node.detected_nginx_path %}
+                                    <div>
+                                        <small class="text-secondary">Nginx bin: </small>
+                                        <small class="text-dark">{{ node.detected_nginx_path }}</small>
+                                    </div>
+                                    {% endif %}
+                                    <div id="node-stats-{{ node.id }}" class="mt-1">
+                                        <button class="btn btn-sm btn-outline-info" onclick="checkNodeStatus({{ node.id }})" title="Check node status">
+                                            <i class="fas fa-server"></i> Check Status
+                                        </button>
+                                    </div>
+                                </div>
+                            </td>
                             <td>
                                 <div class="btn-group btn-group-sm">
                                     <a href="{{ url_for('admin.view_node', node_id=node.id) }}" class="btn btn-outline-info" title="View Details">
@@ -200,5 +284,91 @@
             });
         }
     });
+    
+    // Function to check external IP address
+    function checkExternalIP(nodeId) {
+        const ipElement = document.getElementById(`external-ip-${nodeId}`);
+        ipElement.innerHTML = '<div class="spinner-border spinner-border-sm text-secondary" role="status"><span class="visually-hidden">Loading...</span></div> Checking...';
+        
+        fetch(`{{ url_for('admin.check_external_ip', node_id=0) }}`.replace('0', nodeId))
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    ipElement.innerHTML = `<span class="fw-bold text-success"><i class="fas fa-globe"></i> ${data.external_ip}</span>`;
+                } else {
+                    ipElement.innerHTML = `<span class="text-danger"><i class="fas fa-exclamation-triangle"></i> ${data.error || 'Failed to check'}</span>
+                        <button class="btn btn-sm btn-outline-secondary ms-2" onclick="checkExternalIP(${nodeId})" title="Try again">
+                            <i class="fas fa-redo"></i>
+                        </button>`;
+                }
+            })
+            .catch(error => {
+                ipElement.innerHTML = `<span class="text-danger"><i class="fas fa-exclamation-triangle"></i> Request failed</span>
+                    <button class="btn btn-sm btn-outline-secondary ms-2" onclick="checkExternalIP(${nodeId})" title="Try again">
+                        <i class="fas fa-redo"></i>
+                    </button>`;
+            });
+    }
+    
+    // Function to check node status
+    function checkNodeStatus(nodeId) {
+        const statsElement = document.getElementById(`node-stats-${nodeId}`);
+        statsElement.innerHTML = '<div class="spinner-border spinner-border-sm text-secondary" role="status"><span class="visually-hidden">Loading...</span></div> Checking status...';
+        
+        fetch(`{{ url_for('admin.get_node_stats_ajax', node_id=0) }}`.replace('0', nodeId))
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    const serverStats = data.serverStats;
+                    let statsHtml = '<div class="mt-2 node-status-info">';
+                    
+                    if (serverStats.cpu_usage && serverStats.cpu_usage !== 'N/A') {
+                        statsHtml += `<div><small class="text-secondary">CPU: <span class="badge bg-${getCpuBadgeColor(serverStats.cpu_usage)}">${serverStats.cpu_usage}</span></small></div>`;
+                    }
+                    
+                    if (serverStats.memory_usage && serverStats.memory_usage !== 'N/A') {
+                        statsHtml += `<div><small class="text-secondary">Memory: <span class="text-dark">${serverStats.memory_usage}</span></small></div>`;
+                    }
+                    
+                    if (serverStats.disk_usage && serverStats.disk_usage !== 'N/A') {
+                        statsHtml += `<div><small class="text-secondary">Disk: <span class="text-dark">${serverStats.disk_usage}</span></small></div>`;
+                    }
+                    
+                    if (serverStats.external_ip) {
+                        document.getElementById(`external-ip-${nodeId}`).innerHTML = `<span class="fw-bold text-success"><i class="fas fa-globe"></i> ${serverStats.external_ip}</span>`;
+                    }
+                    
+                    statsHtml += `<div class="mt-1">
+                                    <button class="btn btn-sm btn-outline-secondary" onclick="checkNodeStatus(${nodeId})" title="Refresh status">
+                                        <i class="fas fa-sync-alt"></i> Refresh
+                                    </button>
+                                  </div>`;
+                    statsHtml += '</div>';
+                    
+                    statsElement.innerHTML = statsHtml;
+                } else {
+                    statsElement.innerHTML = `<span class="text-danger"><i class="fas fa-exclamation-triangle"></i> ${data.error || 'Failed to check status'}</span>
+                        <button class="btn btn-sm btn-outline-secondary ms-2" onclick="checkNodeStatus(${nodeId})" title="Try again">
+                            <i class="fas fa-redo"></i>
+                        </button>`;
+                }
+            })
+            .catch(error => {
+                statsElement.innerHTML = `<span class="text-danger"><i class="fas fa-exclamation-triangle"></i> Request failed</span>
+                    <button class="btn btn-sm btn-outline-secondary ms-2" onclick="checkNodeStatus(${nodeId})" title="Try again">
+                        <i class="fas fa-redo"></i>
+                    </button>`;
+            });
+    }
+    
+    // Helper function to determine CPU usage badge color
+    function getCpuBadgeColor(cpuUsage) {
+        const usage = parseInt(cpuUsage.replace('%', ''));
+        if (isNaN(usage)) return 'secondary';
+        
+        if (usage < 30) return 'success';
+        if (usage < 70) return 'warning';
+        return 'danger';
+    }
 </script>
 {% endblock %}
