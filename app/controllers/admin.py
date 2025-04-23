@@ -1201,6 +1201,8 @@ def test_site_config(site_id):
 @admin_required
 def manage_ssl_certificates(site_id):
     """Manage SSL certificates for a site"""
+    from flask import session as flask_session  # Import session with a different name to avoid shadowing
+    
     site = Site.query.get_or_404(site_id)
     
     # Get all nodes serving this site
@@ -1226,8 +1228,7 @@ def manage_ssl_certificates(site_id):
                 flash(f"Error checking certificate: {result['error']}", 'error')
             
             # Store result in session for template rendering
-            from flask import session
-            session['cert_check_result'] = result
+            flask_session['cert_check_result'] = result
             
         elif action == 'request':
             # Request new certificate
@@ -1294,7 +1295,7 @@ def manage_ssl_certificates(site_id):
             if result.get('success', False):
                 if challenge_type == 'manual-dns':
                     # Special handling for manual DNS challenge
-                    session['manual_dns_instructions'] = result
+                    flask_session['manual_dns_instructions'] = result
                     flash(f'Follow the manual DNS challenge instructions. You will need to create DNS TXT records.', 'info')
                 else:
                     cert_type_name = "wildcard" if cert_type == 'wildcard' else "standard"
@@ -1333,10 +1334,10 @@ def manage_ssl_certificates(site_id):
         return redirect(url_for('admin.manage_ssl_certificates', site_id=site_id))
     
     # Get certificate status from session if available
-    cert_check_result = session.pop('cert_check_result', None)
-    dns_check_result = session.pop('dns_check_result', None)
-    ssl_recommendations = session.pop('ssl_recommendations', None)
-    manual_dns_instructions = session.pop('manual_dns_instructions', None)
+    cert_check_result = flask_session.pop('cert_check_result', None)
+    dns_check_result = flask_session.pop('dns_check_result', None)
+    ssl_recommendations = flask_session.pop('ssl_recommendations', None)
+    manual_dns_instructions = flask_session.pop('manual_dns_instructions', None)
     
     # If HTTPS site and no other data is available, automatically do a DNS check
     if site.protocol == 'https' and not dns_check_result and not cert_check_result and not ssl_recommendations:
@@ -1362,6 +1363,7 @@ def manage_ssl_certificates(site_id):
     # Check certificate health
     cert_health = None
     if site.protocol == 'https':
+        from app.models.models import SSLCertificate
         ssl_certificates = SSLCertificate.query.filter_by(site_id=site_id).all()
     
     return render_template(
