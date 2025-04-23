@@ -2117,3 +2117,188 @@ subjectAltName = DNS:{domain}, DNS:www.{domain}
                 "success": False,
                 "message": f"Failed to ensure SSL directories: {str(e)}"
             }
+    
+    @staticmethod
+    def configure_automated_ssl_renewal_check():
+        """
+        Set up automated SSL certificate renewal check and send notifications for expiring certificates
+        
+        Returns:
+            dict: Configuration result
+        """
+        # We'll add a cron job that checks for expiring certificates daily
+        try:
+            # Get email configuration from app config
+            from flask import current_app
+            admin_email = current_app.config.get('ADMIN_EMAIL', '')
+            
+            if not admin_email:
+                log_activity('warning', "No admin email configured for SSL expiry notifications")
+            
+            # Create a script file to check certificates
+            check_script = """#!/bin/bash
+# Script to check SSL certificate expiry and send notifications
+
+# Output file for results
+output_file="/tmp/ssl_expiry_check.txt"
+echo "SSL Certificate Expiry Check - $(date)" > $output_file
+
+# Check for SSL certificates expiring in the next 30 days
+for domain_dir in /etc/letsencrypt/live/*/; do
+    domain=$(basename "$domain_dir")
+    cert_file="${domain_dir}fullchain.pem"
+    
+    if [ -f "$cert_file" ]; then
+        expiry_date=$(openssl x509 -enddate -noout -in "$cert_file" | cut -d= -f2)
+        expiry_epoch=$(date -d "$expiry_date" +%s)
+        current_epoch=$(date +%s)
+        seconds_until_expiry=$((expiry_epoch - current_epoch))
+        days_until_expiry=$((seconds_until_expiry / 86400))
+        
+        echo "Domain: $domain, Expires in: $days_until_expiry days" >> $output_file
+        
+        if [ $days_until_expiry -le 30 ]; then
+            echo "WARNING: Certificate for $domain expires in $days_until_expiry days" >> $output_file
+            
+            # Try to renew automatically
+            certbot renew --cert-name "$domain" --quiet
+            
+            # Check if renewal was successful
+            new_expiry_date=$(openssl x509 -enddate -noout -in "$cert_file" | cut -d= -f2)
+            new_expiry_epoch=$(date -d "$new_expiry_date" +%s)
+            new_seconds_until_expiry=$((new_expiry_epoch - current_epoch))
+            new_days_until_expiry=$((new_seconds_until_expiry / 86400))
+            
+            if [ $new_days_until_expiry -gt $days_until_expiry ]; then
+                echo "SUCCESS: Certificate for $domain renewed successfully" >> $output_file
+            else
+                echo "FAILURE: Certificate for $domain could not be renewed" >> $output_file
+                
+                # Send notification email if configured
+                if [ -n "$ADMIN_EMAIL" ]; then
+                    echo "Certificate renewal for $domain failed. Please check manually." | mail -s "SSL Certificate Renewal Failed for $domain" $ADMIN_EMAIL
+                fi
+            fi
+        fi
+    fi
+done
+
+# Send summary if any certificates are expiring soon
+if grep -q "WARNING" $output_file; then
+    if [ -n "$ADMIN_EMAIL" ]; then
+        cat $output_file | mail -s "SSL Certificate Expiry Warning" $ADMIN_EMAIL
+    fi
+fi
+"""
+            
+            # Install the script on all active nodes
+            nodes = Node.query.filter_by(is_active=True).all()
+            results = []
+            
+            for node in nodes:
+                try:
+                    # Connect to the node
+                    ssh_client = paramiko.SSHClient()
+                    ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                    
+                    if node.ssh_key_path:
+                        ssh_client.connect(
+                            hostname=node.ip_address,
+                            port=node.ssh_port,
+                            username=node.ssh_user,
+                            key_filename=node.ssh_key_path,
+                            timeout=10
+                        )
+                    else:
+                        ssh_client.connect(
+                            hostname=node.ip_address,
+                            port=node.ssh_port,
+                            username=node.ssh_user,
+                            password=node.ssh_password,
+                            timeout=10
+                        )
+                    
+                    # Create the script file
+                    script_path = "/usr/local/bin/check_ssl_expiry.sh"
+                    
+                    # Replace placeholder with actual admin email
+                    script_content = check_script.replace("$ADMIN_EMAIL", admin_email)
+                    
+                    # Write the script to the node
+                    sftp = ssh_client.open_sftp()
+                    with sftp.file(script_path, 'w') as f:
+                        f.write(script_content)
+                    sftp.close()
+                    
+                    # Make it executable
+                    ssh_client.exec_command(f"chmod +x {script_path}")
+                    
+                    # Add cron job to run daily
+                    cron_cmd = f"0 3 * * * {script_path} > /dev/null 2>&1"
+                    ssh_client.exec_command(f"(crontab -l 2>/dev/null | grep -v check_ssl_expiry.sh; echo '{cron_cmd}') | crontab -")
+                    
+                    # Install mail utility if not present
+                    ssh_client.exec_command("which mail >/dev/null || (apt-get update && apt-get install -y mailutils)")
+                    
+                    # Verify cron job was added
+                    stdin, stdout, stderr = ssh_client.exec_command("crontab -l | grep check_ssl_expiry.sh")
+                    verification = stdout.read().decode('utf-8').strip()
+                    
+                    node_result = {
+                        "node_id": node.id,
+                        "node_name": node.name,
+                        "success": bool(verification),
+                        "cron_job": verification if verification else None
+                    }
+                    
+                    # Ensure renewal hook is setup
+                    hook_path = "/etc/letsencrypt/renewal-hooks/post"
+                    ssh_client.exec_command(f"mkdir -p {hook_path}")
+                    
+                    # Create a hook script to reload Nginx
+                    hook_script = """#!/bin/bash
+# Hook script to reload Nginx after certificate renewal
+nginx -t && systemctl reload nginx || echo "Nginx reload failed"
+"""
+                    
+                    hook_file = f"{hook_path}/reload-nginx.sh"
+                    sftp = ssh_client.open_sftp()
+                    with sftp.file(hook_file, 'w') as f:
+                        f.write(hook_script)
+                    sftp.close()
+                    
+                    # Make it executable
+                    ssh_client.exec_command(f"chmod +x {hook_file}")
+                    
+                    ssh_client.close()
+                    
+                    results.append(node_result)
+                    
+                except Exception as e:
+                    results.append({
+                        "node_id": node.id,
+                        "node_name": node.name,
+                        "success": False,
+                        "error": str(e)
+                    })
+            
+            # Count successes and failures
+            successes = sum(1 for result in results if result.get("success", False))
+            failures = len(results) - successes
+            
+            log_activity('info', f"SSL renewal check configured on {successes} nodes, failed on {failures} nodes")
+            
+            return {
+                "success": successes > 0,
+                "message": f"SSL renewal check configured on {successes} nodes, failed on {failures} nodes",
+                "configured_nodes": successes,
+                "failed_nodes": failures,
+                "results": results
+            }
+            
+        except Exception as e:
+            log_activity('error', f"Failed to configure SSL renewal check: {str(e)}")
+            return {
+                "success": False,
+                "message": f"Failed to configure SSL renewal check: {str(e)}"
+            }

@@ -1,12 +1,14 @@
-from flask import Blueprint, render_template, request, flash, redirect, url_for, jsonify
+from flask import Blueprint, render_template, request, flash, redirect, url_for, jsonify, current_app
 from flask_login import login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 from app.models.models import db, User
 from datetime import datetime
+from app import limiter
 
 auth = Blueprint('auth', __name__)
 
 @auth.route('/login', methods=['GET', 'POST'])
+@limiter.limit(lambda: current_app.config.get('AUTH_RATE_LIMIT'))
 def login():
     if current_user.is_authenticated:
         return redirect(url_for('client.dashboard'))
@@ -185,6 +187,7 @@ def profile():
 
 # API endpoints
 @auth.route('/api/login', methods=['POST'])
+@limiter.limit(lambda: current_app.config.get('AUTH_RATE_LIMIT'))
 def api_login():
     data = request.get_json()
     

@@ -2,12 +2,15 @@ from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
 from flask_migrate import Migrate
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 import os
 
 # Create extensions here but don't initialize them yet
 db = SQLAlchemy()
 login_manager = LoginManager()
 migrate = Migrate()
+limiter = Limiter(key_func=get_remote_address)
 
 def create_app(config_name="default"):
     app = Flask(__name__)
@@ -20,10 +23,19 @@ def create_app(config_name="default"):
     db.init_app(app)
     login_manager.init_app(app)
     migrate.init_app(app, db)
+    limiter.init_app(app)
     
     # Set up login manager
     login_manager.login_view = 'auth.login'
     login_manager.login_message = 'Please log in to access this page.'
+    
+    # Apply security headers middleware
+    @app.after_request
+    def apply_security_headers(response):
+        secure_headers = app.config.get('SECURE_HEADERS', {})
+        for header, value in secure_headers.items():
+            response.headers[header] = value
+        return response
     
     # Create Nginx config repo directory if it doesn't exist
     nginx_config_repo = app.config.get('NGINX_CONFIG_GIT_REPO')

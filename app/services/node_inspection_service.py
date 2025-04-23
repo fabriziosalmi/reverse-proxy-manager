@@ -663,3 +663,259 @@ class NodeInspectionService:
         if match and match.group(1).strip():
             return match.group(1).strip()
         return None
+    
+    @staticmethod
+    def health_check_all_nodes():
+        """
+        Perform a health check on all active nodes
+        
+        Returns:
+            dict: Health check results
+        """
+        nodes = Node.query.filter_by(is_active=True).all()
+        
+        results = {
+            "total_nodes": len(nodes),
+            "healthy_nodes": 0,
+            "unhealthy_nodes": 0,
+            "unreachable_nodes": 0,
+            "node_results": []
+        }
+        
+        for node in nodes:
+            node_result = NodeInspectionService.health_check_node(node.id)
+            results["node_results"].append(node_result)
+            
+            if node_result["status"] == "healthy":
+                results["healthy_nodes"] += 1
+            elif node_result["status"] == "unhealthy":
+                results["unhealthy_nodes"] += 1
+            else: # unreachable
+                results["unreachable_nodes"] += 1
+        
+        # Add a system log entry
+        system_log = SystemLog(
+            action="health_check",
+            level="info" if results["unreachable_nodes"] == 0 and results["unhealthy_nodes"] == 0 else "warning",
+            message=f"Health check: {results['healthy_nodes']} healthy, {results['unhealthy_nodes']} unhealthy, {results['unreachable_nodes']} unreachable"
+        )
+        db.session.add(system_log)
+        db.session.commit()
+        
+        return results
+    
+    @staticmethod
+    def health_check_node(node_id):
+        """
+        Perform health check on a single node
+        
+        Args:
+            node_id (int): ID of the node to check
+            
+        Returns:
+            dict: Health check results for the node
+        """
+        node = Node.query.get(node_id)
+        if not node:
+            return {
+                "node_id": node_id,
+                "status": "error",
+                "message": f"Node with ID {node_id} not found"
+            }
+        
+        try:
+            # Connect to the node
+            ssh_client = paramiko.SSHClient()
+            ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            
+            # Set a shorter timeout for unreachable nodes
+            try:
+                if node.ssh_key_path:
+                    ssh_client.connect(
+                        hostname=node.ip_address,
+                        port=node.ssh_port,
+                        username=node.ssh_user,
+                        key_filename=node.ssh_key_path,
+                        timeout=5
+                    )
+                else:
+                    ssh_client.connect(
+                        hostname=node.ip_address,
+                        port=node.ssh_port,
+                        username=node.ssh_user,
+                        password=node.ssh_password,
+                        timeout=5
+                    )
+            except (paramiko.SSHException, socket.timeout, socket.error) as e:
+                # Node is unreachable
+                logger.error(f"Node {node.name} ({node.ip_address}) is unreachable: {str(e)}")
+                
+                # Update node status
+                node.last_health_check = datetime.utcnow()
+                node.health_status = "unreachable"
+                node.health_message = str(e)
+                db.session.commit()
+                
+                return {
+                    "node_id": node.id,
+                    "node_name": node.name,
+                    "ip_address": node.ip_address,
+                    "status": "unreachable",
+                    "message": str(e),
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            
+            # Check if Nginx is running
+            stdin, stdout, stderr = ssh_client.exec_command("systemctl is-active nginx")
+            nginx_status = stdout.read().decode('utf-8').strip()
+            
+            # Check if Nginx configuration is valid
+            stdin, stdout, stderr = ssh_client.exec_command("nginx -t 2>&1")
+            nginx_test = stdout.read().decode('utf-8') + stderr.read().decode('utf-8')
+            nginx_config_valid = "test is successful" in nginx_test
+            
+            # Check system resources
+            checks = [
+                # Check CPU load
+                {
+                    "command": "cat /proc/loadavg | awk '{print $1}'",
+                    "name": "cpu_load",
+                    "threshold": 0.8 * multiprocessing.cpu_count() if hasattr(multiprocessing, 'cpu_count') else 3.0,
+                    "compare": lambda val, threshold: float(val) > threshold,
+                    "format": lambda val: float(val)
+                },
+                # Check memory usage
+                {
+                    "command": "free | grep Mem | awk '{print $3/$2 * 100.0}'",
+                    "name": "memory_usage_percent",
+                    "threshold": 90.0,
+                    "compare": lambda val, threshold: float(val) > threshold,
+                    "format": lambda val: float(val)
+                },
+                # Check disk space
+                {
+                    "command": "df / | tail -n 1 | awk '{print $5}' | sed 's/%//'",
+                    "name": "disk_usage_percent",
+                    "threshold": 90.0,
+                    "compare": lambda val, threshold: float(val) > threshold,
+                    "format": lambda val: float(val)
+                },
+                # Check if enough file descriptors are available
+                {
+                    "command": "cat /proc/sys/fs/file-nr | awk '{print $1/$3 * 100.0}'",
+                    "name": "file_descriptors_percent",
+                    "threshold": 90.0,
+                    "compare": lambda val, threshold: float(val) > threshold,
+                    "format": lambda val: float(val)
+                },
+                # Check for zombie processes
+                {
+                    "command": "ps aux | awk '{if ($8==\"Z\") print}' | wc -l",
+                    "name": "zombie_processes",
+                    "threshold": 5,
+                    "compare": lambda val, threshold: int(val) > threshold,
+                    "format": lambda val: int(val)
+                }
+            ]
+            
+            status_checks = {
+                "nginx_running": nginx_status == "active",
+                "nginx_config_valid": nginx_config_valid
+            }
+            
+            resources = {}
+            issues = []
+            
+            # Run resource checks
+            for check in checks:
+                try:
+                    stdin, stdout, stderr = ssh_client.exec_command(check["command"])
+                    value = stdout.read().decode('utf-8').strip()
+                    
+                    if value:
+                        try:
+                            formatted_value = check["format"](value)
+                            resources[check["name"]] = formatted_value
+                            
+                            # Check if this is causing an issue
+                            if check["compare"](formatted_value, check["threshold"]):
+                                issues.append({
+                                    "type": check["name"],
+                                    "value": formatted_value,
+                                    "threshold": check["threshold"],
+                                    "message": f"{check['name']} is {formatted_value}, threshold is {check['threshold']}"
+                                })
+                        except (ValueError, TypeError):
+                            resources[check["name"]] = value
+                    else:
+                        resources[check["name"]] = None
+                except Exception as e:
+                    resources[check["name"]] = f"Error: {str(e)}"
+            
+            # Check Nginx status issues
+            if not status_checks["nginx_running"]:
+                issues.append({
+                    "type": "nginx_not_running",
+                    "message": f"Nginx is not running. Status: {nginx_status}"
+                })
+                
+            if not status_checks["nginx_config_valid"]:
+                issues.append({
+                    "type": "nginx_config_invalid",
+                    "message": f"Nginx configuration is invalid: {nginx_test}"
+                })
+            
+            # Get websites deployed on this node
+            site_nodes = SiteNode.query.filter_by(node_id=node.id).all()
+            sites = [Site.query.get(sn.site_id) for sn in site_nodes]
+            
+            # Determine overall status
+            if issues:
+                status = "unhealthy"
+                message = f"Node has {len(issues)} health issues"
+            else:
+                status = "healthy"
+                message = "All checks passed"
+            
+            # Update node status in database
+            node.last_health_check = datetime.utcnow()
+            node.health_status = status
+            node.health_message = message
+            db.session.commit()
+            
+            ssh_client.close()
+            
+            return {
+                "node_id": node.id,
+                "node_name": node.name,
+                "ip_address": node.ip_address,
+                "status": status,
+                "message": message,
+                "timestamp": datetime.utcnow().isoformat(),
+                "checks": {
+                    "nginx_running": status_checks["nginx_running"],
+                    "nginx_config_valid": status_checks["nginx_config_valid"],
+                    "resources": resources
+                },
+                "issues": issues,
+                "sites_count": len(sites),
+                "sites": [{"id": site.id, "domain": site.domain} for site in sites if site]
+            }
+            
+        except Exception as e:
+            logger.error(f"Error during health check of node {node.name}: {str(e)}")
+            
+            # Update node status
+            node.last_health_check = datetime.utcnow()
+            node.health_status = "error"
+            node.health_message = str(e)
+            db.session.commit()
+            
+            return {
+                "node_id": node.id,
+                "node_name": node.name,
+                "ip_address": node.ip_address,
+                "status": "error",
+                "message": str(e),
+                "timestamp": datetime.utcnow().isoformat()
+            }

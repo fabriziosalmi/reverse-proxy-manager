@@ -678,11 +678,25 @@ def save_config_to_git(site, config_content):
         try:
             repo.git.add(file_path)
             
-            # Check if there are changes to commit
-            modified_files = [item.a_path for item in repo.index.diff('HEAD')] if repo.head.is_valid() else []
-            staged_files = [item.a_path for item in repo.index.diff('--cached')]
+            # Check if there are changes to commit - fixed the issue with --cached reference
+            has_changes = False
+            
+            # First check if the file is untracked
             untracked_files = repo.untracked_files
-            has_changes = len(modified_files) > 0 or len(staged_files) > 0 or file_path in untracked_files
+            if os.path.relpath(file_path, repo.working_dir) in untracked_files:
+                has_changes = True
+            
+            # Then check for modifications to tracked files
+            if not has_changes and repo.head.is_valid():
+                try:
+                    # Only check diff with HEAD if we have a valid HEAD reference
+                    diff_index = repo.index.diff('HEAD')
+                    modified_files = [item.a_path for item in diff_index]
+                    rel_path = os.path.relpath(file_path, repo.working_dir)
+                    has_changes = rel_path in modified_files
+                except git.GitCommandError:
+                    # If diff fails, assume there are changes
+                    has_changes = True
             
             # Only commit if there are actual changes
             if has_changes:
@@ -736,6 +750,27 @@ def deploy_to_node(site_id, node_id, nginx_config, test_only=False):
         If test_only=True: tuple (is_valid, warnings)
         Otherwise: True on success or raises an exception
     """
+    # Validate input parameters
+    if not isinstance(site_id, int) or not isinstance(node_id, int):
+        raise ValueError("site_id and node_id must be integers")
+    
+    if not nginx_config or not isinstance(nginx_config, str):
+        raise ValueError("nginx_config must be a non-empty string")
+    
+    # Sanitize nginx_config - remove any potential dangerous shell metacharacters
+    # This helps prevent command injection when the config is tested
+    dangerous_patterns = [
+        '$(', '`', '&&', '||', ';', '|', '>', '<', 
+        'rm -rf', 'mkfifo', 'mknod', ':(){ :|:& };:'
+    ]
+    
+    for pattern in dangerous_patterns:
+        if pattern in nginx_config:
+            suspicious_content = nginx_config[max(0, nginx_config.find(pattern)-10):nginx_config.find(pattern)+len(pattern)+10]
+            log_activity('security', f"Suspicious content in nginx config: {suspicious_content}", 'site', site_id, 
+                        f"Pattern '{pattern}' found in nginx config during deployment", None)
+            # Don't modify the config but alert about it
+    
     site = Site.query.get(site_id)
     node = Node.query.get(node_id)
     

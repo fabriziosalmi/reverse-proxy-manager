@@ -24,7 +24,17 @@ class User(db.Model):
         self.role = role
     
     def set_password(self, password):
-        self.password_hash = generate_password_hash(password)
+        """Set the password hash with a stronger hashing algorithm"""
+        # Enforce password complexity
+        if len(password) < 8:
+            raise ValueError("Password must be at least 8 characters long")
+            
+        # Check for complexity requirements (at least one uppercase, lowercase, and digit)
+        if not any(char.isupper() for char in password) or not any(char.islower() for char in password) or not any(char.isdigit() for char in password):
+            raise ValueError("Password must contain at least one uppercase letter, one lowercase letter, and one digit")
+            
+        # Use a stronger hashing method 
+        self.password_hash = generate_password_hash(password, method='pbkdf2:sha256:260000')
     
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
@@ -73,15 +83,29 @@ class Node(db.Model):
         """Decrypt password when accessed"""
         from cryptography.fernet import Fernet
         from flask import current_app
+        import base64
         
         if not self._ssh_password:
             return None
             
         try:
-            key = current_app.config.get('PASSWORD_ENCRYPTION_KEY', 'fallback_key_for_development_only').encode()
-            # Pad the key to 32 bytes for Fernet
-            key = key.ljust(32)[:32]
-            cipher = Fernet(Fernet.generate_key()) if len(key) < 32 else Fernet(key)
+            # Get encryption key from config or generate a secure key if needed
+            key = current_app.config.get('PASSWORD_ENCRYPTION_KEY')
+            if not key:
+                import logging
+                logging.warning("PASSWORD_ENCRYPTION_KEY not configured in application settings")
+                # Fall back to a development key only if not in production
+                if current_app.config.get('ENV') == 'production':
+                    raise ValueError("Missing PASSWORD_ENCRYPTION_KEY in production environment")
+                key = 'fallback_key_for_development_only'
+                
+            key = key.encode()
+            # Create a proper Fernet key using SHA256 to ensure correct length
+            import hashlib
+            key_hash = hashlib.sha256(key).digest()
+            fernet_key = base64.urlsafe_b64encode(key_hash)
+            
+            cipher = Fernet(fernet_key)
             decrypted = cipher.decrypt(self._ssh_password.encode())
             return decrypted.decode()
         except Exception as e:
@@ -99,12 +123,26 @@ class Node(db.Model):
             
         from cryptography.fernet import Fernet
         from flask import current_app
+        import base64
         
         try:
-            key = current_app.config.get('PASSWORD_ENCRYPTION_KEY', 'fallback_key_for_development_only').encode()
-            # Pad the key to 32 bytes for Fernet
-            key = key.ljust(32)[:32]
-            cipher = Fernet(Fernet.generate_key()) if len(key) < 32 else Fernet(key)
+            # Get encryption key from config or generate a secure key if needed
+            key = current_app.config.get('PASSWORD_ENCRYPTION_KEY')
+            if not key:
+                import logging
+                logging.warning("PASSWORD_ENCRYPTION_KEY not configured in application settings")
+                # Fall back to a development key only if not in production
+                if current_app.config.get('ENV') == 'production':
+                    raise ValueError("Missing PASSWORD_ENCRYPTION_KEY in production environment")
+                key = 'fallback_key_for_development_only'
+            
+            key = key.encode()
+            # Create a proper Fernet key using SHA256 to ensure correct length
+            import hashlib
+            key_hash = hashlib.sha256(key).digest()
+            fernet_key = base64.urlsafe_b64encode(key_hash)
+            
+            cipher = Fernet(fernet_key)
             encrypted = cipher.encrypt(password.encode())
             self._ssh_password = encrypted.decode()
         except Exception as e:
