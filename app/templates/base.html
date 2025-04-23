@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-bs-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -14,20 +14,56 @@
     <!-- Custom styles -->
     <style>
         :root {
+            /* Light theme variables */
             --primary-color: #0066CC;
             --primary-dark: #0052a3;
             --success-color: #198754;
             --info-color: #0dcaf0;
             --warning-color: #ffc107;
             --danger-color: #dc3545;
+            --bg-color: #f8f9fa;
+            --text-color: #343a40;
+            --card-bg: #ffffff;
+            --border-color: rgba(0, 0, 0, 0.075);
+            --box-shadow-color: rgba(0, 0, 0, 0.05);
+            --box-shadow-hover: rgba(0, 0, 0, 0.08);
+            --table-stripe-bg: rgba(0, 0, 0, 0.02);
+            --table-hover-bg: rgba(0, 102, 204, 0.03);
+            --nav-hover-bg: rgba(255, 255, 255, 0.1);
+            --input-focus-shadow: rgba(0, 102, 204, 0.25);
+            --dropdown-hover-bg: rgba(0, 102, 204, 0.05);
+            --footer-bg: #f8f9fa;
+            --footer-text: #6c757d;
+            --progress-bg: #e9ecef;
+        }
+        
+        [data-bs-theme="dark"] {
+            /* Dark theme variables */
+            --primary-color: #0d6efd;
+            --primary-dark: #0a58ca;
+            --bg-color: #212529;
+            --text-color: #f8f9fa;
+            --card-bg: #2c3034;
+            --border-color: rgba(255, 255, 255, 0.075);
+            --box-shadow-color: rgba(0, 0, 0, 0.15);
+            --box-shadow-hover: rgba(0, 0, 0, 0.25);
+            --table-stripe-bg: rgba(255, 255, 255, 0.05);
+            --table-hover-bg: rgba(13, 110, 253, 0.1);
+            --nav-hover-bg: rgba(255, 255, 255, 0.1);
+            --input-focus-shadow: rgba(13, 110, 253, 0.25);
+            --dropdown-hover-bg: rgba(13, 110, 253, 0.1);
+            --footer-bg: #212529;
+            --footer-text: #adb5bd;
+            --progress-bg: #495057;
         }
         
         body {
             min-height: 100vh;
             display: flex;
             flex-direction: column;
-            background-color: #f8f9fa;
-            color: #343a40;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            transition: background-color 0.3s ease, color 0.3s ease;
         }
         
         main {
@@ -41,8 +77,9 @@
         }
         
         .navbar {
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 2px 10px var(--box-shadow-color);
             padding: 0.75rem 1rem;
+            transition: box-shadow 0.3s ease;
         }
         
         .nav-link {
@@ -54,26 +91,27 @@
         }
         
         .nav-link:hover {
-            background-color: rgba(255, 255, 255, 0.1);
+            background-color: var(--nav-hover-bg);
         }
         
         .card {
             border-radius: 0.625rem;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+            box-shadow: 0 4px 12px var(--box-shadow-color);
             border: none;
             margin-bottom: 1.75rem;
             overflow: hidden;
             transition: transform 0.2s, box-shadow 0.2s;
+            background-color: var(--card-bg);
         }
         
         .card:hover {
             transform: translateY(-2px);
-            box-shadow: 0 6px 15px rgba(0, 0, 0, 0.08);
+            box-shadow: 0 6px 15px var(--box-shadow-hover);
         }
         
         .card-header {
-            border-bottom: 1px solid rgba(0, 0, 0, 0.075);
-            background-color: #fff;
+            border-bottom: 1px solid var(--border-color);
+            background-color: var(--card-bg);
             padding: 1rem 1.25rem;
             font-weight: 600;
         }
@@ -118,11 +156,11 @@
         }
         
         .table-striped tbody tr:nth-of-type(odd) {
-            background-color: rgba(0, 0, 0, 0.02);
+            background-color: var(--table-stripe-bg);
         }
         
         .table-hover tbody tr:hover {
-            background-color: rgba(0, 102, 204, 0.03);
+            background-color: var(--table-hover-bg);
         }
         
         .badge {
@@ -133,49 +171,98 @@
         .progress {
             height: 0.75rem;
             border-radius: 0.5rem;
-            background-color: #e9ecef;
+            background-color: var(--progress-bg);
         }
         
         .nav-link.active {
             font-weight: 600;
-            background-color: rgba(255, 255, 255, 0.15);
+            background-color: var(--nav-hover-bg);
         }
         
         .form-control, .form-select {
             border-radius: 0.375rem;
             padding: 0.5rem 0.75rem;
-            border-color: #dee2e6;
+            border-color: var(--border-color);
+            background-color: var(--card-bg);
+            color: var(--text-color);
+            transition: border-color 0.3s ease, background-color 0.3s ease, color 0.3s ease;
         }
         
         .form-control:focus, .form-select:focus {
-            box-shadow: 0 0 0 0.25rem rgba(0, 102, 204, 0.25);
+            box-shadow: 0 0 0 0.25rem var(--input-focus-shadow);
         }
         
         .dropdown-menu {
             border-radius: 0.5rem;
-            box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+            box-shadow: 0 0.5rem 1rem var(--box-shadow-color);
             padding: 0.5rem 0;
             border: none;
+            background-color: var(--card-bg);
+            transition: background-color 0.3s ease;
         }
         
         .dropdown-item {
             padding: 0.5rem 1.25rem;
             font-weight: 500;
+            color: var(--text-color);
+            transition: color 0.3s ease;
         }
         
         .dropdown-item:hover {
-            background-color: rgba(0, 102, 204, 0.05);
+            background-color: var(--dropdown-hover-bg);
         }
         
         .alert {
             border-radius: 0.5rem;
             border: none;
-            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+            box-shadow: 0 2px 6px var(--box-shadow-color);
         }
         
         footer {
             font-size: 0.9rem;
-            color: #6c757d;
+            color: var(--footer-text);
+            background-color: var(--footer-bg);
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+        
+        pre, code {
+            background-color: var(--table-stripe-bg);
+            color: var(--text-color);
+            transition: background-color 0.3s ease, color 0.3s ease;
+            border-radius: 0.375rem;
+        }
+        
+        /* Theme toggle button */
+        .theme-toggle {
+            cursor: pointer;
+            padding: 0.375rem 0.75rem;
+            font-size: 0.85rem;
+            display: flex;
+            align-items: center;
+            border-radius: 1.5rem;
+            transition: all 0.3s ease;
+            background-color: rgba(255, 255, 255, 0.15);
+            margin-left: 1rem;
+        }
+        
+        .theme-toggle:hover {
+            background-color: rgba(255, 255, 255, 0.25);
+        }
+        
+        [data-bs-theme="dark"] .theme-toggle .fa-moon {
+            display: none;
+        }
+        
+        [data-bs-theme="dark"] .theme-toggle .fa-sun {
+            display: inline-block;
+        }
+        
+        [data-bs-theme="light"] .theme-toggle .fa-sun {
+            display: none;
+        }
+        
+        [data-bs-theme="light"] .theme-toggle .fa-moon {
+            display: inline-block;
         }
         
         @media (max-width: 767.98px) {
@@ -186,6 +273,11 @@
             
             .card-body {
                 padding: 1.25rem;
+            }
+            
+            .theme-toggle {
+                margin-left: 0;
+                margin-top: 0.5rem;
             }
         }
     </style>
@@ -290,6 +382,14 @@
                                 </a>
                             </li>
                         {% endif %}
+                        <!-- Theme toggle button -->
+                        <li class="nav-item d-flex align-items-center">
+                            <button id="themeToggle" class="theme-toggle border-0" aria-label="Toggle theme">
+                                <i class="fas fa-sun me-1"></i>
+                                <i class="fas fa-moon me-1"></i>
+                                <span class="d-none d-md-inline">Theme</span>
+                            </button>
+                        </li>
                     </ul>
                 </div>
             </div>
@@ -331,7 +431,7 @@
         {% block content %}{% endblock %}
     </main>
     
-    <footer class="bg-light py-4 mt-auto border-top">
+    <footer class="py-4 mt-auto border-top">
         <div class="container">
             <div class="row">
                 <div class="col-md-6 text-center text-md-start">
@@ -346,6 +446,34 @@
     
     <!-- Bootstrap 5 JS with Popper -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- Theme toggle script -->
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const themeToggle = document.getElementById('themeToggle');
+            const htmlElement = document.documentElement;
+            
+            // Check for saved theme preference or use preferred color scheme
+            const savedTheme = localStorage.getItem('theme');
+            if (savedTheme) {
+                htmlElement.setAttribute('data-bs-theme', savedTheme);
+            } else {
+                // Use system preference as default
+                const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                htmlElement.setAttribute('data-bs-theme', prefersDark ? 'dark' : 'light');
+                localStorage.setItem('theme', prefersDark ? 'dark' : 'light');
+            }
+            
+            // Toggle theme when button is clicked
+            themeToggle.addEventListener('click', function() {
+                const currentTheme = htmlElement.getAttribute('data-bs-theme');
+                const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+                
+                htmlElement.setAttribute('data-bs-theme', newTheme);
+                localStorage.setItem('theme', newTheme);
+            });
+        });
+    </script>
     
     {% block scripts %}{% endblock %}
 </body>
