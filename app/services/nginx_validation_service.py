@@ -742,9 +742,27 @@ class NginxValidationService:
                 # Create dummy SSL certificate if it doesn't exist
                 ssh_client.exec_command("""
                 if [ ! -f /etc/nginx/ssl/dummy.crt ]; then
-                    sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-                    -keyout /etc/nginx/ssl/dummy.key -out /etc/nginx/ssl/dummy.crt \
-                    -subj "/CN=localhost" 2>/dev/null
+                    # Create a root CA key and certificate
+                    sudo openssl genrsa -out /etc/nginx/ssl/dummy-ca.key 2048 2>/dev/null
+                    sudo openssl req -x509 -new -nodes -key /etc/nginx/ssl/dummy-ca.key -sha256 -days 365 \
+                        -out /etc/nginx/ssl/dummy-ca.crt -subj "/CN=Dummy CA" 2>/dev/null
+                    
+                    # Create server key
+                    sudo openssl genrsa -out /etc/nginx/ssl/dummy.key 2048 2>/dev/null
+                    
+                    # Create CSR
+                    sudo openssl req -new -key /etc/nginx/ssl/dummy.key -out /etc/nginx/ssl/dummy.csr \
+                        -subj "/CN=localhost" 2>/dev/null
+                    
+                    # Sign the certificate with our CA
+                    sudo openssl x509 -req -in /etc/nginx/ssl/dummy.csr -CA /etc/nginx/ssl/dummy-ca.crt \
+                        -CAkey /etc/nginx/ssl/dummy-ca.key -CAcreateserial -out /etc/nginx/ssl/dummy.crt \
+                        -days 365 -sha256 2>/dev/null
+                    
+                    # Create chain file for SSL stapling
+                    sudo cp /etc/nginx/ssl/dummy-ca.crt /etc/nginx/ssl/dummy-chain.pem
+                    sudo cat /etc/nginx/ssl/dummy.crt /etc/nginx/ssl/dummy-ca.crt > /etc/nginx/ssl/dummy-fullchain.pem
+                    sudo chmod 644 /etc/nginx/ssl/*.pem /etc/nginx/ssl/*.crt /etc/nginx/ssl/*.key
                 fi
                 """)
                 
@@ -787,8 +805,21 @@ class NginxValidationService:
             
             # Create a temporary file for testing
             with tempfile.NamedTemporaryFile(mode='w+', delete=False) as temp:
-                # Wrap the server block in an http block to make it a valid standalone config
-                wrapped_content = "http {\n" + test_content + "\n}"
+                # Wrap the server block in a complete Nginx config with events and http sections
+                wrapped_content = """
+events {
+    worker_connections 1024;
+}
+
+http {
+    # Basic mime types
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+    
+    # Add server configuration
+%s
+}
+""" % test_content
                 temp.write(wrapped_content)
                 temp_path = temp.name
             
