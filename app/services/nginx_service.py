@@ -1,0 +1,278 @@
+import os
+import paramiko
+import tempfile
+import git
+from flask import current_app
+from app.models.models import db, Site, Node, SiteNode, DeploymentLog
+from datetime import datetime
+
+def generate_nginx_config(site):
+    """
+    Generate an Nginx configuration for a site.
+    
+    Args:
+        site: Site object containing configuration details
+        
+    Returns:
+        str: Nginx configuration file content
+    """
+    # Load the appropriate template
+    template_path = os.path.join(
+        current_app.config['NGINX_TEMPLATES_DIR'], 
+        'https.conf' if site.protocol == 'https' else 'http.conf'
+    )
+    
+    # If template doesn't exist, use a default one
+    if not os.path.exists(template_path):
+        # Create basic template
+        if site.protocol == 'https':
+            template = """
+server {
+    listen 443 ssl http2;
+    server_name {{domain}};
+    
+    ssl_certificate /etc/letsencrypt/live/{{domain}}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/{{domain}}/privkey.pem;
+    ssl_trusted_certificate /etc/letsencrypt/live/{{domain}}/chain.pem;
+    
+    # SSL configuration
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384;
+    ssl_session_timeout 1d;
+    ssl_session_cache shared:SSL:50m;
+    ssl_stapling on;
+    ssl_stapling_verify on;
+    
+    location / {
+        proxy_pass {{origin_protocol}}://{{origin_address}}:{{origin_port}};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # Websocket support
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        
+        # Timeouts
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+    
+    # Custom configuration
+    {{custom_config}}
+}
+
+# HTTP to HTTPS redirect
+server {
+    listen 80;
+    server_name {{domain}};
+    
+    location /.well-known/acme-challenge/ {
+        root /var/www/letsencrypt;
+    }
+    
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+"""
+        else:  # HTTP template
+            template = """
+server {
+    listen 80;
+    server_name {{domain}};
+    
+    location / {
+        proxy_pass {{origin_protocol}}://{{origin_address}}:{{origin_port}};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # Websocket support
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        
+        # Timeouts
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+    
+    # Custom configuration
+    {{custom_config}}
+}
+"""
+    else:
+        # Read template from file
+        with open(template_path, 'r') as file:
+            template = file.read()
+    
+    # Replace placeholders
+    config = template.replace('{{domain}}', site.domain)
+    config = config.replace('{{origin_protocol}}', site.protocol)
+    config = config.replace('{{origin_address}}', site.origin_address)
+    config = config.replace('{{origin_port}}', str(site.origin_port))
+    
+    # Add custom config if provided
+    if site.custom_config:
+        config = config.replace('{{custom_config}}', site.custom_config)
+    else:
+        config = config.replace('{{custom_config}}', '')
+    
+    # Add WAF configuration if needed
+    if site.use_waf:
+        # This is a placeholder for WAF integration (like CrowdSec)
+        waf_config = """
+    # WAF Configuration (CrowdSec)
+    include /etc/nginx/crowdsec/crowdsec.conf;
+"""
+        config = config.replace('{{custom_config}}', waf_config + site.custom_config if site.custom_config else waf_config)
+    
+    # Save to Git repo
+    save_config_to_git(site, config)
+    
+    return config
+
+def save_config_to_git(site, config_content):
+    """
+    Save the Nginx configuration to the Git repository
+    
+    Args:
+        site: Site object
+        config_content: Nginx configuration content
+    """
+    repo_path = current_app.config['NGINX_CONFIG_GIT_REPO']
+    
+    # Create repo if it doesn't exist
+    if not os.path.exists(os.path.join(repo_path, '.git')):
+        os.makedirs(repo_path, exist_ok=True)
+        repo = git.Repo.init(repo_path)
+    else:
+        repo = git.Repo(repo_path)
+    
+    # Create site directory if it doesn't exist
+    site_dir = os.path.join(repo_path, 'sites')
+    os.makedirs(site_dir, exist_ok=True)
+    
+    # Write config file
+    file_path = os.path.join(site_dir, f"{site.domain}.conf")
+    with open(file_path, 'w') as f:
+        f.write(config_content)
+    
+    # Add to Git
+    repo.git.add(file_path)
+    
+    # Commit changes
+    message = f"Updated config for {site.domain}"
+    if not repo.head.is_valid() or len(repo.index.diff("HEAD")) > 0:
+        repo.git.commit('-m', message)
+
+def deploy_to_node(site_id, node_id, nginx_config):
+    """
+    Deploy Nginx configuration to a node
+    
+    Args:
+        site_id: ID of the site being deployed
+        node_id: ID of the node to deploy to
+        nginx_config: Nginx configuration content
+    """
+    site = Site.query.get(site_id)
+    node = Node.query.get(node_id)
+    
+    if not site or not node:
+        raise ValueError("Site or node not found")
+    
+    site_node = SiteNode.query.filter_by(site_id=site_id, node_id=node_id).first()
+    if not site_node:
+        site_node = SiteNode(site_id=site_id, node_id=node_id, status='pending')
+        db.session.add(site_node)
+    
+    try:
+        # Connect to the node via SSH
+        ssh_client = paramiko.SSHClient()
+        ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        
+        # Connect using key or password
+        if node.ssh_key_path:
+            ssh_client.connect(
+                hostname=node.ip_address,
+                port=node.ssh_port,
+                username=node.ssh_user,
+                key_filename=node.ssh_key_path
+            )
+        else:
+            ssh_client.connect(
+                hostname=node.ip_address,
+                port=node.ssh_port,
+                username=node.ssh_user,
+                password=node.ssh_password
+            )
+        
+        # Create a temporary local file with the Nginx config
+        with tempfile.NamedTemporaryFile(mode='w+', delete=False) as temp:
+            temp.write(nginx_config)
+            temp_path = temp.name
+        
+        # Define the remote path
+        remote_filename = f"{site.domain}.conf"
+        remote_path = os.path.join(node.nginx_config_path, remote_filename)
+        
+        # Transfer the file
+        sftp = ssh_client.open_sftp()
+        sftp.put(temp_path, remote_path)
+        sftp.close()
+        
+        # Remove the temporary local file
+        os.unlink(temp_path)
+        
+        # Reload Nginx to apply the changes
+        stdin, stdout, stderr = ssh_client.exec_command(node.nginx_reload_command)
+        exit_status = stdout.channel.recv_exit_status()
+        
+        if exit_status != 0:
+            error_output = stderr.read().decode('utf-8')
+            raise Exception(f"Failed to reload Nginx: {error_output}")
+        
+        # Update the site_node status
+        site_node.status = 'deployed'
+        site_node.config_path = remote_path
+        site_node.deployed_at = datetime.utcnow()
+        site_node.error_message = None
+        
+        # Log the deployment
+        log = DeploymentLog(
+            site_id=site_id,
+            node_id=node_id,
+            action='deploy',
+            status='success',
+            message=f"Successfully deployed {site.domain} to {node.name}"
+        )
+        db.session.add(log)
+        db.session.commit()
+        
+        ssh_client.close()
+        return True
+        
+    except Exception as e:
+        # Handle errors
+        site_node.status = 'error'
+        site_node.error_message = str(e)
+        
+        # Log the error
+        log = DeploymentLog(
+            site_id=site_id,
+            node_id=node_id,
+            action='deploy',
+            status='error',
+            message=str(e)
+        )
+        db.session.add(log)
+        db.session.commit()
+        
+        raise e

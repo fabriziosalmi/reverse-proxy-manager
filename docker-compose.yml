@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  # Development service
+  app-dev:
+    build: .
+    volumes:
+      - .:/app
+    ports:
+      - "5000:5000"
+    environment:
+      - FLASK_ENV=development
+      - FLASK_DEBUG=1
+    command: flask run --host=0.0.0.0
+    restart: unless-stopped
+
+  # Production service
+  app-prod:
+    build: .
+    ports:
+      - "5000:5000"
+    environment:
+      - FLASK_ENV=production
+      - FLASK_DEBUG=0
+    restart: always
+    # For production, we use the default CMD from the Dockerfile (gunicorn)
+
+  # Separate service for database operations and management commands
+  manage:
+    build: .
+    volumes:
+      - .:/app
+    entrypoint: ["./manage.py"]
+    profiles:
+      - tools
+    depends_on:
+      - app-dev

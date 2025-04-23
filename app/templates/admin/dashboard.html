@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Dashboard - Italia CDN Proxy Manager{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="mb-4">
+        <h1 class="display-5 fw-bold">Admin Dashboard</h1>
+        <p class="text-muted">Manage your nodes, clients, and proxy configurations.</p>
+    </div>
+
+    <!-- Stats Overview -->
+    <div class="row g-4 mb-5">
+        <div class="col-md-6 col-lg-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h3 class="card-title h5 text-muted mb-2">Clients</h3>
+                    <p class="display-5 fw-bold text-primary mb-0">{{ user_count }}</p>
+                </div>
+                <div class="card-footer bg-transparent border-0">
+                    <a href="{{ url_for('admin.list_users') }}" class="btn btn-sm btn-outline-primary">Manage Users</a>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-6 col-lg-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h3 class="card-title h5 text-muted mb-2">Nodes</h3>
+                    <p class="display-5 fw-bold text-primary mb-0">{{ node_count }}</p>
+                    <p class="small text-muted">{{ active_node_count }} active</p>
+                </div>
+                <div class="card-footer bg-transparent border-0">
+                    <a href="{{ url_for('admin.list_nodes') }}" class="btn btn-sm btn-outline-primary">Manage Nodes</a>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-6 col-lg-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h3 class="card-title h5 text-muted mb-2">Sites</h3>
+                    <p class="display-5 fw-bold text-primary mb-0">{{ site_count }}</p>
+                    <p class="small text-muted">{{ active_site_count }} active</p>
+                </div>
+                <div class="card-footer bg-transparent border-0">
+                    <a href="{{ url_for('admin.list_sites') }}" class="btn btn-sm btn-outline-primary">View All Sites</a>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-6 col-lg-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h3 class="card-title h5 text-muted mb-2">Quick Links</h3>
+                    <ul class="list-group list-group-flush">
+                        <li class="list-group-item px-0 border-0">
+                            <a href="{{ url_for('admin.list_users') }}" class="text-decoration-none">
+                                <i class="fas fa-users me-2"></i> Manage Users
+                            </a>
+                        </li>
+                        <li class="list-group-item px-0 border-0">
+                            <a href="{{ url_for('admin.list_nodes') }}" class="text-decoration-none">
+                                <i class="fas fa-server me-2"></i> Manage Nodes
+                            </a>
+                        </li>
+                        <li class="list-group-item px-0 border-0">
+                            <a href="{{ url_for('admin.list_sites') }}" class="text-decoration-none">
+                                <i class="fas fa-globe me-2"></i> View All Sites
+                            </a>
+                        </li>
+                        <li class="list-group-item px-0 border-0">
+                            <a href="{{ url_for('admin.deployment_logs') }}" class="text-decoration-none">
+                                <i class="fas fa-history me-2"></i> View All Logs
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recent Logs -->
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-primary text-white">
+            <h2 class="card-title h5 mb-0">Recent Deployment Logs</h2>
+        </div>
+        <div class="card-body">
+            {% if latest_logs %}
+            <div class="table-responsive">
+                <table class="table table-striped table-hover">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Site</th>
+                            <th>Node</th>
+                            <th>Action</th>
+                            <th>Status</th>
+                            <th>Message</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for log in latest_logs %}
+                        <tr class="{% if log.status == 'error' %}table-danger{% endif %}">
+                            <td>{{ log.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                            <td>
+                                <a href="{{ url_for('admin.view_site', site_id=log.site_id) }}" class="text-decoration-none">
+                                    {{ log.site.domain }}
+                                </a>
+                            </td>
+                            <td>{{ log.node.name }}</td>
+                            <td>{{ log.action }}</td>
+                            <td>
+                                <span class="badge {% if log.status == 'success' %}bg-success
+                                {% elif log.status == 'error' %}bg-danger
+                                {% else %}bg-warning{% endif %}">
+                                    {{ log.status }}
+                                </span>
+                            </td>
+                            <td class="text-truncate" style="max-width: 200px;">{{ log.message }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <div class="text-end mt-3">
+                <a href="{{ url_for('admin.deployment_logs') }}" class="btn btn-sm btn-primary">
+                    View all logs <i class="fas fa-arrow-right ms-1"></i>
+                </a>
+            </div>
+            {% else %}
+            <div class="alert alert-info mb-0">
+                <i class="fas fa-info-circle me-2"></i> No recent deployment logs found.
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

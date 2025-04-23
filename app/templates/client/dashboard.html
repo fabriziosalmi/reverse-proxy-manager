@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+
+{% block title %}Client Dashboard - Italia CDN Proxy Manager{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <h1 class="text-3xl font-bold mb-2">My Dashboard</h1>
+    <p class="text-gray-600">Manage your proxy sites from a single location.</p>
+</div>
+
+<!-- Stats Overview -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+    <div class="bg-white p-6 rounded-lg shadow-md">
+        <h3 class="text-lg font-semibold text-gray-700 mb-2">My Sites</h3>
+        <p class="text-3xl font-bold text-blue-600">{{ site_count }}</p>
+        <p class="text-sm text-gray-500">{{ active_site_count }} active</p>
+    </div>
+    
+    <div class="bg-white p-6 rounded-lg shadow-md">
+        <h3 class="text-lg font-semibold text-gray-700 mb-2">Quick Actions</h3>
+        <div class="flex flex-col space-y-2">
+            <a href="{{ url_for('client.new_site') }}" class="text-blue-600 hover:text-blue-800">Add New Site</a>
+            <a href="{{ url_for('client.list_sites') }}" class="text-blue-600 hover:text-blue-800">Manage Sites</a>
+        </div>
+    </div>
+    
+    <div class="bg-white p-6 rounded-lg shadow-md">
+        <h3 class="text-lg font-semibold text-gray-700 mb-2">Need Help?</h3>
+        <p class="text-sm text-gray-600 mb-2">If you need assistance with your proxy configurations, please contact the administrator.</p>
+    </div>
+</div>
+
+<!-- Recent Sites -->
+<div class="bg-white p-6 rounded-lg shadow-md mb-8">
+    <h2 class="text-xl font-semibold mb-4">Recent Sites</h2>
+    
+    {% if sites %}
+    <div class="overflow-x-auto">
+        <table class="w-full text-left border-collapse">
+            <thead>
+                <tr class="bg-gray-100">
+                    <th class="px-4 py-2 border">Name</th>
+                    <th class="px-4 py-2 border">Domain</th>
+                    <th class="px-4 py-2 border">Origin</th>
+                    <th class="px-4 py-2 border">Status</th>
+                    <th class="px-4 py-2 border">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for site in sites %}
+                <tr>
+                    <td class="px-4 py-2 border">{{ site.name }}</td>
+                    <td class="px-4 py-2 border">{{ site.domain }}</td>
+                    <td class="px-4 py-2 border">{{ site.protocol }}://{{ site.origin_address }}:{{ site.origin_port }}</td>
+                    <td class="px-4 py-2 border">
+                        <span class="px-2 py-1 rounded-full text-xs 
+                        {% if site.is_active %}bg-green-100 text-green-800{% else %}bg-red-100 text-red-800{% endif %}">
+                            {{ 'Active' if site.is_active else 'Inactive' }}
+                        </span>
+                    </td>
+                    <td class="px-4 py-2 border">
+                        <a href="{{ url_for('client.view_site', site_id=site.id) }}" class="text-blue-600 hover:text-blue-800 mr-2">View</a>
+                        <a href="{{ url_for('client.edit_site', site_id=site.id) }}" class="text-blue-600 hover:text-blue-800">Edit</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div class="mt-4 text-right">
+        <a href="{{ url_for('client.list_sites') }}" class="text-blue-600 hover:text-blue-800">View all sites →</a>
+    </div>
+    {% else %}
+    <p class="text-gray-600">No sites created yet. 
+        <a href="{{ url_for('client.new_site') }}" class="text-blue-600 hover:text-blue-800">Add your first site</a>.
+    </p>
+    {% endif %}
+</div>
+
+<!-- Recent Logs -->
+<div class="bg-white p-6 rounded-lg shadow-md">
+    <h2 class="text-xl font-semibold mb-4">Recent Deployment Logs</h2>
+    
+    {% if latest_logs %}
+    <div class="overflow-x-auto">
+        <table class="w-full text-left border-collapse">
+            <thead>
+                <tr class="bg-gray-100">
+                    <th class="px-4 py-2 border">Time</th>
+                    <th class="px-4 py-2 border">Site</th>
+                    <th class="px-4 py-2 border">Node</th>
+                    <th class="px-4 py-2 border">Action</th>
+                    <th class="px-4 py-2 border">Status</th>
+                    <th class="px-4 py-2 border">Message</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for log in latest_logs %}
+                <tr class="{% if log.status == 'error' %}bg-red-50{% endif %}">
+                    <td class="px-4 py-2 border">{{ log.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                    <td class="px-4 py-2 border">
+                        <a href="{{ url_for('client.view_site', site_id=log.site_id) }}" class="text-blue-600 hover:text-blue-800">
+                            {{ log.site.domain }}
+                        </a>
+                    </td>
+                    <td class="px-4 py-2 border">{{ log.node.name }}</td>
+                    <td class="px-4 py-2 border">{{ log.action }}</td>
+                    <td class="px-4 py-2 border">
+                        <span class="px-2 py-1 rounded-full text-xs 
+                        {% if log.status == 'success' %}bg-green-100 text-green-800
+                        {% elif log.status == 'error' %}bg-red-100 text-red-800
+                        {% else %}bg-yellow-100 text-yellow-800{% endif %}">
+                            {{ log.status }}
+                        </span>
+                    </td>
+                    <td class="px-4 py-2 border truncate max-w-xs">{{ log.message }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="text-gray-600">No recent deployment logs found.</p>
+    {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,102 @@
+{% extends 'base.html' %}
+
+{% block title %}Edit Node - {{ node.name }} - Italia CDN Proxy{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{{ url_for('admin.dashboard') }}">Dashboard</a></li>
+            <li class="breadcrumb-item"><a href="{{ url_for('admin.list_nodes') }}">Nodes</a></li>
+            <li class="breadcrumb-item active" aria-current="page">Edit Node</li>
+        </ol>
+    </nav>
+
+    <div class="row justify-content-center">
+        <div class="col-lg-8">
+            <div class="card shadow-sm">
+                <div class="card-header bg-primary text-white">
+                    <h3 class="card-title mb-0">Edit Node: {{ node.name }}</h3>
+                </div>
+                <div class="card-body">
+                    {% with messages = get_flashed_messages(with_categories=true) %}
+                        {% if messages %}
+                            {% for category, message in messages %}
+                                <div class="alert alert-{{ category if category != 'error' else 'danger' }} alert-dismissible fade show">
+                                    {{ message }}
+                                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                                </div>
+                            {% endfor %}
+                        {% endif %}
+                    {% endwith %}
+
+                    <form method="POST" action="{{ url_for('admin.edit_node', node_id=node.id) }}">
+                        <div class="mb-3">
+                            <label for="name" class="form-label">Node Name <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="name" name="name" value="{{ node.name }}" required>
+                            <div class="form-text">Unique name to identify this node</div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="ip_address" class="form-label">IP Address <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="ip_address" name="ip_address" value="{{ node.ip_address }}" required>
+                            <div class="form-text">IPv4 or IPv6 address of the node</div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="ssh_port" class="form-label">SSH Port</label>
+                            <input type="number" class="form-control" id="ssh_port" name="ssh_port" value="{{ node.ssh_port }}">
+                            <div class="form-text">SSH port for connecting to the node</div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="ssh_user" class="form-label">SSH Username <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="ssh_user" name="ssh_user" value="{{ node.ssh_user }}" required>
+                            <div class="form-text">Username for SSH authentication</div>
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="ssh_key_path" class="form-label">SSH Key Path</label>
+                                <input type="text" class="form-control" id="ssh_key_path" name="ssh_key_path" value="{{ node.ssh_key_path or '' }}">
+                                <div class="form-text">Path to the SSH private key file</div>
+                            </div>
+                            
+                            <div class="col-md-6 mb-3">
+                                <label for="ssh_password" class="form-label">SSH Password</label>
+                                <input type="password" class="form-control" id="ssh_password" name="ssh_password" placeholder="Leave empty to keep existing password">
+                                <div class="form-text">Leave empty if you don't want to change the password</div>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="nginx_config_path" class="form-label">Nginx Config Path</label>
+                            <input type="text" class="form-control" id="nginx_config_path" name="nginx_config_path" value="{{ node.nginx_config_path }}">
+                            <div class="form-text">Path to Nginx configuration directory on the node</div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="nginx_reload_command" class="form-label">Nginx Reload Command</label>
+                            <input type="text" class="form-control" id="nginx_reload_command" name="nginx_reload_command" value="{{ node.nginx_reload_command }}">
+                            <div class="form-text">Command to reload Nginx configuration on the node</div>
+                        </div>
+                        
+                        <div class="form-check mb-4">
+                            <input class="form-check-input" type="checkbox" value="1" id="is_active" name="is_active" {% if node.is_active %}checked{% endif %}>
+                            <label class="form-check-label" for="is_active">
+                                Active
+                            </label>
+                            <div class="form-text">If unchecked, this node won't be used for new deployments</div>
+                        </div>
+                        
+                        <div class="d-grid gap-2 d-md-flex justify-content-md-end">
+                            <a href="{{ url_for('admin.list_nodes') }}" class="btn btn-secondary me-md-2">Cancel</a>
+                            <button type="submit" class="btn btn-primary">Update Node</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

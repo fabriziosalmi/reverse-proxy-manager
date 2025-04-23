@@ -1,0 +1,17 @@
+Flask==2.3.3
+Flask-Login==0.6.2
+Flask-SQLAlchemy==3.1.1
+Flask-WTF==1.2.1
+Flask-Migrate==4.0.5
+itsdangerous==2.1.2
+Werkzeug==2.3.7
+SQLAlchemy==2.0.23
+paramiko==3.3.1
+python-dotenv==1.0.0
+cryptography==41.0.5
+bcrypt==4.0.1
+PyJWT==2.8.0
+gitpython==3.1.40
+requests==2.31.0
+gunicorn==21.2.0
+email-validator==2.1.0.post1

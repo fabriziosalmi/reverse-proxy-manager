@@ -1,0 +1,116 @@
+{% extends 'base.html' %}
+
+{% block title %}Manage Nodes - Italia CDN Proxy{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1>Node Management</h1>
+        <a href="{{ url_for('admin.new_node') }}" class="btn btn-primary">
+            <i class="fas fa-plus"></i> Add New Node
+        </a>
+    </div>
+    
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert alert-{{ category if category != 'error' else 'danger' }} alert-dismissible fade show">
+                    {{ message }}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+    
+    <div class="card shadow-sm">
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-striped table-hover">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Name</th>
+                            <th>IP Address</th>
+                            <th>SSH User</th>
+                            <th>SSH Port</th>
+                            <th>Status</th>
+                            <th>Added</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for node in nodes %}
+                        <tr>
+                            <td>{{ node.id }}</td>
+                            <td>{{ node.name }}</td>
+                            <td>{{ node.ip_address }}</td>
+                            <td>{{ node.ssh_user }}</td>
+                            <td>{{ node.ssh_port }}</td>
+                            <td><span class="badge bg-{{ 'success' if node.is_active else 'danger' }}">
+                                {{ 'Active' if node.is_active else 'Inactive' }}
+                            </span></td>
+                            <td>{{ node.created_at.strftime('%Y-%m-%d') }}</td>
+                            <td>
+                                <div class="btn-group btn-group-sm">
+                                    <a href="{{ url_for('admin.edit_node', node_id=node.id) }}" class="btn btn-outline-primary">
+                                        <i class="fas fa-edit"></i>
+                                    </a>
+                                    <button type="button" class="btn btn-outline-danger" 
+                                            data-bs-toggle="modal" 
+                                            data-bs-target="#deleteNodeModal" 
+                                            data-node-id="{{ node.id }}"
+                                            data-node-name="{{ node.name }}">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Node Modal -->
+<div class="modal fade" id="deleteNodeModal" tabindex="-1" aria-labelledby="deleteNodeModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="deleteNodeModalLabel">Confirm Deletion</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                Are you sure you want to delete the node <span id="deleteNodeName" class="fw-bold"></span>?
+                This action cannot be undone.
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <form id="deleteNodeForm" method="POST">
+                    <button type="submit" class="btn btn-danger">Delete Node</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const deleteNodeModal = document.getElementById('deleteNodeModal');
+        if (deleteNodeModal) {
+            deleteNodeModal.addEventListener('show.bs.modal', function(event) {
+                const button = event.relatedTarget;
+                const nodeId = button.getAttribute('data-node-id');
+                const nodeName = button.getAttribute('data-node-name');
+                
+                document.getElementById('deleteNodeName').textContent = nodeName;
+                document.getElementById('deleteNodeForm').action = "{{ url_for('admin.delete_node', node_id=0) }}".replace('0', nodeId);
+            });
+        }
+    });
+</script>
+{% endblock %}

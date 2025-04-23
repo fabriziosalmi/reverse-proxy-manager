@@ -1,0 +1,194 @@
+{% extends 'base.html' %}
+
+{% block title %}View Site - {{ site.name }} - Italia CDN Proxy{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{{ url_for('admin.dashboard') }}">Dashboard</a></li>
+            <li class="breadcrumb-item"><a href="{{ url_for('admin.list_sites') }}">Sites</a></li>
+            <li class="breadcrumb-item active" aria-current="page">{{ site.name }}</li>
+        </ol>
+    </nav>
+    
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1>Site Details: {{ site.name }}</h1>
+        <form method="POST" action="{{ url_for('admin.toggle_site_active', site_id=site.id) }}" class="ms-2">
+            <button type="submit" class="btn btn-{{ 'danger' if site.is_active else 'success' }}">
+                {{ 'Deactivate' if site.is_active else 'Activate' }}
+            </button>
+        </form>
+    </div>
+    
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert alert-{{ category if category != 'error' else 'danger' }} alert-dismissible fade show">
+                    {{ message }}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+    
+    <div class="row">
+        <div class="col-md-6">
+            <div class="card shadow-sm mb-4">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="card-title mb-0">Site Information</h5>
+                </div>
+                <div class="card-body">
+                    <table class="table table-borderless">
+                        <tr>
+                            <th style="width: 30%">ID:</th>
+                            <td>{{ site.id }}</td>
+                        </tr>
+                        <tr>
+                            <th>Name:</th>
+                            <td>{{ site.name }}</td>
+                        </tr>
+                        <tr>
+                            <th>Domain:</th>
+                            <td>
+                                <a href="{{ site.protocol }}://{{ site.domain }}" target="_blank" rel="noopener noreferrer">
+                                    {{ site.domain }}
+                                </a>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Protocol:</th>
+                            <td>{{ site.protocol }}</td>
+                        </tr>
+                        <tr>
+                            <th>Origin:</th>
+                            <td>{{ site.origin_address }}:{{ site.origin_port }}</td>
+                        </tr>
+                        <tr>
+                            <th>Owner:</th>
+                            <td>{{ site.owner.username }} ({{ site.owner.email }})</td>
+                        </tr>
+                        <tr>
+                            <th>Status:</th>
+                            <td>
+                                <span class="badge bg-{{ 'success' if site.is_active else 'danger' }}">
+                                    {{ 'Active' if site.is_active else 'Inactive' }}
+                                </span>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>WAF Protection:</th>
+                            <td>
+                                <span class="badge bg-{{ 'success' if site.use_waf else 'secondary' }}">
+                                    {{ 'Enabled' if site.use_waf else 'Disabled' }}
+                                </span>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Created:</th>
+                            <td>{{ site.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                        </tr>
+                        <tr>
+                            <th>Last Updated:</th>
+                            <td>{{ site.updated_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-6">
+            <div class="card shadow-sm mb-4">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="card-title mb-0">Deployed Nodes</h5>
+                </div>
+                <div class="card-body">
+                    {% if site_nodes %}
+                        <div class="table-responsive">
+                            <table class="table table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Node</th>
+                                        <th>Status</th>
+                                        <th>Deployed</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for site_node in site_nodes %}
+                                    <tr>
+                                        <td>{{ site_node.node.name }}</td>
+                                        <td>
+                                            <span class="badge bg-{{ 'success' if site_node.status == 'deployed' else 'warning' if site_node.status == 'pending' else 'danger' }}">
+                                                {{ site_node.status }}
+                                            </span>
+                                        </td>
+                                        <td>{{ site_node.deployed_at.strftime('%Y-%m-%d %H:%M') if site_node.deployed_at else 'Not deployed' }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    {% else %}
+                        <div class="alert alert-info">
+                            This site is not yet deployed to any nodes.
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+            
+            {% if site.custom_config %}
+            <div class="card shadow-sm mb-4">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="card-title mb-0">Custom Configuration</h5>
+                </div>
+                <div class="card-body">
+                    <pre class="bg-light p-3 rounded"><code>{{ site.custom_config }}</code></pre>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-primary text-white">
+            <h5 class="card-title mb-0">Deployment History</h5>
+        </div>
+        <div class="card-body">
+            {% if deployment_logs %}
+                <div class="table-responsive">
+                    <table class="table table-striped">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Node</th>
+                                <th>Action</th>
+                                <th>Status</th>
+                                <th>Message</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for log in deployment_logs %}
+                            <tr>
+                                <td>{{ log.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                                <td>{{ log.node.name }}</td>
+                                <td>{{ log.action }}</td>
+                                <td>
+                                    <span class="badge bg-{{ 'success' if log.status == 'success' else 'danger' }}">
+                                        {{ log.status }}
+                                    </span>
+                                </td>
+                                <td>{{ log.message }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <div class="alert alert-info">
+                    No deployment logs found for this site.
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
