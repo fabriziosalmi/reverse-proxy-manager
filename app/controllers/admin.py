@@ -1811,8 +1811,56 @@ def manage_site_waf(site_id):
 @admin_required
 def analytics_dashboard():
     """Admin analytics dashboard"""
-    analytics_data = AnalyticsService.get_admin_analytics()
-    return render_template('admin/analytics/dashboard.html', **analytics_data)
+    try:
+        # Get analytics data with error handling
+        analytics_data = AnalyticsService.get_admin_analytics()
+        
+        # Ensure we have all the required keys for the template
+        required_keys = [
+            'dates', 'bandwidth_data', 'requests_data', 'node_names', 
+            'node_response_times', 'node_error_rates', 'status_distribution',
+            'geo_distribution', 'total_bandwidth', 'total_requests', 
+            'active_sites', 'total_sites', 'error_rate', 'total_errors',
+            'bandwidth_change', 'requests_change', 'sites', 'top_errors'
+        ]
+        
+        # Initialize missing keys with empty/default values
+        for key in required_keys:
+            if key not in analytics_data:
+                if key in ['dates', 'bandwidth_data', 'requests_data', 'node_names', 
+                          'node_response_times', 'node_error_rates', 'sites', 'top_errors']:
+                    analytics_data[key] = []
+                elif key == 'status_distribution':
+                    analytics_data[key] = [0, 0, 0, 0]  # 2xx, 3xx, 4xx, 5xx
+                elif key == 'geo_distribution':
+                    analytics_data[key] = {}
+                elif key in ['total_bandwidth', 'total_requests', 'active_sites', 
+                            'total_sites', 'error_rate', 'total_errors']:
+                    analytics_data[key] = 0
+                elif key in ['bandwidth_change', 'requests_change']:
+                    analytics_data[key] = 0.0
+        
+        # Use current date for date ranges if not provided
+        if 'start_date' not in analytics_data:
+            analytics_data['start_date'] = datetime.now() - timedelta(days=7)
+        if 'end_date' not in analytics_data:
+            analytics_data['end_date'] = datetime.now()
+            
+        return render_template('admin/analytics/dashboard.html', **analytics_data)
+    
+    except Exception as e:
+        # Log the error
+        from app.services.logger_service import log_activity
+        log_activity(
+            category='error',
+            action='view_analytics',
+            resource_type='analytics',
+            details=f"Error loading analytics dashboard: {str(e)}"
+        )
+        
+        # Show error to admin
+        flash(f"Error loading analytics dashboard: {str(e)}", 'error')
+        return redirect(url_for('admin.dashboard'))
 
 @admin.route('/analytics/data')
 @login_required
