@@ -3,9 +3,11 @@ import os
 import paramiko
 import tempfile
 import git
+import time
 from flask import current_app
 from app.models.models import db, Site, Node, SiteNode, DeploymentLog
 from datetime import datetime
+from app.services.logger_service import log_activity
 
 def generate_nginx_config(site):
     """
