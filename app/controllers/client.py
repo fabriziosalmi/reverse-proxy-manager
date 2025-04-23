@@ -4,6 +4,7 @@ from app.models.models import db, Site, Node, SiteNode, DeploymentLog, SSLCertif
 from app.services.access_control import client_required
 from app.services.nginx_service import generate_nginx_config, deploy_to_node
 from datetime import datetime
+from app.services.analytics_service import AnalyticsService
 
 client = Blueprint('client', __name__)
 
@@ -499,3 +500,32 @@ def api_get_site(site_id):
         return jsonify({'error': 'Unauthorized'}), 403
     
     return jsonify(site.to_dict())
+
+@client.route('/analytics')
+@login_required
+def analytics_dashboard():
+    """Client analytics dashboard"""
+    # Get site_id from query parameter if specified
+    site_id = request.args.get('site_id', None)
+    
+    # Get analytics data for the user's sites
+    analytics_data = AnalyticsService.get_client_analytics(
+        user_id=current_user.id, 
+        site_id=site_id
+    )
+    
+    return render_template('client/analytics/dashboard.html', **analytics_data)
+
+@client.route('/analytics/data')
+@login_required
+def analytics_data():
+    """API endpoint for client analytics data"""
+    site_id = request.args.get('site_id', None)
+    period = request.args.get('period', 'week')
+    
+    data = AnalyticsService.get_api_analytics_data(
+        period=period,
+        site_id=site_id
+    )
+    
+    return jsonify(data)

@@ -1,0 +1,534 @@
+{% extends 'admin/base.html' %}
+
+{% block title %}Analytics Management{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <h1 class="h3 mb-4 text-gray-800">System Analytics</h1>
+    
+    <!-- Date Range Selector -->
+    <div class="card shadow mb-4">
+        <div class="card-header py-3">
+            <h6 class="m-0 font-weight-bold text-primary">Analytics Period</h6>
+        </div>
+        <div class="card-body">
+            <form method="get" action="{{ url_for('admin.analytics_dashboard') }}" class="form-inline">
+                <div class="form-group mb-2 mr-sm-2">
+                    <label for="startDate" class="sr-only">Start Date</label>
+                    <input type="date" class="form-control" id="startDate" name="start_date" 
+                           value="{{ start_date.strftime('%Y-%m-%d') if start_date else '' }}">
+                </div>
+                <div class="form-group mb-2 mr-sm-2">
+                    <label for="endDate" class="sr-only">End Date</label>
+                    <input type="date" class="form-control" id="endDate" name="end_date"
+                           value="{{ end_date.strftime('%Y-%m-%d') if end_date else '' }}">
+                </div>
+                <button type="submit" class="btn btn-primary mb-2">Apply Filter</button>
+                
+                <div class="btn-group ml-3 mb-2">
+                    <a href="{{ url_for('admin.analytics_dashboard', period='day') }}" class="btn btn-outline-secondary">Today</a>
+                    <a href="{{ url_for('admin.analytics_dashboard', period='week') }}" class="btn btn-outline-secondary">Week</a>
+                    <a href="{{ url_for('admin.analytics_dashboard', period='month') }}" class="btn btn-outline-secondary">Month</a>
+                    <a href="{{ url_for('admin.analytics_dashboard', period='year') }}" class="btn btn-outline-secondary">Year</a>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <!-- System Overview -->
+    <div class="row">
+        <!-- Total Bandwidth -->
+        <div class="col-xl-3 col-md-6 mb-4">
+            <div class="card border-left-primary shadow h-100 py-2">
+                <div class="card-body">
+                    <div class="row no-gutters align-items-center">
+                        <div class="col mr-2">
+                            <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
+                                Total Bandwidth
+                            </div>
+                            <div class="h5 mb-0 font-weight-bold text-gray-800">{{ total_bandwidth }}</div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-server fa-2x text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-footer small text-muted">
+                    {{ bandwidth_change }}% from previous period
+                </div>
+            </div>
+        </div>
+
+        <!-- Total Requests -->
+        <div class="col-xl-3 col-md-6 mb-4">
+            <div class="card border-left-success shadow h-100 py-2">
+                <div class="card-body">
+                    <div class="row no-gutters align-items-center">
+                        <div class="col mr-2">
+                            <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
+                                Total Requests
+                            </div>
+                            <div class="h5 mb-0 font-weight-bold text-gray-800">{{ total_requests }}</div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-exchange-alt fa-2x text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-footer small text-muted">
+                    {{ requests_change }}% from previous period
+                </div>
+            </div>
+        </div>
+
+        <!-- Active Sites -->
+        <div class="col-xl-3 col-md-6 mb-4">
+            <div class="card border-left-info shadow h-100 py-2">
+                <div class="card-body">
+                    <div class="row no-gutters align-items-center">
+                        <div class="col mr-2">
+                            <div class="text-xs font-weight-bold text-info text-uppercase mb-1">
+                                Active Sites
+                            </div>
+                            <div class="h5 mb-0 font-weight-bold text-gray-800">{{ active_sites }}</div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-sitemap fa-2x text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-footer small text-muted">
+                    Out of {{ total_sites }} total sites
+                </div>
+            </div>
+        </div>
+
+        <!-- Error Rate -->
+        <div class="col-xl-3 col-md-6 mb-4">
+            <div class="card border-left-warning shadow h-100 py-2">
+                <div class="card-body">
+                    <div class="row no-gutters align-items-center">
+                        <div class="col mr-2">
+                            <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">
+                                Error Rate
+                            </div>
+                            <div class="row no-gutters align-items-center">
+                                <div class="col-auto">
+                                    <div class="h5 mb-0 mr-3 font-weight-bold text-gray-800">{{ error_rate }}%</div>
+                                </div>
+                                <div class="col">
+                                    <div class="progress progress-sm mr-2">
+                                        <div class="progress-bar bg-warning" role="progressbar" 
+                                             style="width: {{ error_rate }}%" aria-valuenow="{{ error_rate }}" 
+                                             aria-valuemin="0" aria-valuemax="100"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-exclamation-triangle fa-2x text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-footer small text-muted">
+                    {{ total_errors }} errors detected
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Traffic Overview -->
+    <div class="row">
+        <!-- Bandwidth Over Time Chart -->
+        <div class="col-xl-8 col-lg-7">
+            <div class="card shadow mb-4">
+                <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
+                    <h6 class="m-0 font-weight-bold text-primary">System Traffic Overview</h6>
+                    <div class="dropdown no-arrow">
+                        <a class="dropdown-toggle" href="#" role="button" id="trafficDropdownMenuLink"
+                            data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                            <i class="fas fa-ellipsis-v fa-sm fa-fw text-gray-400"></i>
+                        </a>
+                        <div class="dropdown-menu dropdown-menu-right shadow animated--fade-in"
+                             aria-labelledby="trafficDropdownMenuLink">
+                            <div class="dropdown-header">View Options:</div>
+                            <a class="dropdown-item" href="#" data-chart-view="bandwidth">Bandwidth</a>
+                            <a class="dropdown-item" href="#" data-chart-view="requests">Requests</a>
+                            <a class="dropdown-item" href="#" data-chart-view="combined">Combined View</a>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <canvas id="trafficChart" style="min-height: 300px;"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Request Distribution -->
+        <div class="col-xl-4 col-lg-5">
+            <div class="card shadow mb-4">
+                <div class="card-header py-3">
+                    <h6 class="m-0 font-weight-bold text-primary">Request Status Distribution</h6>
+                </div>
+                <div class="card-body">
+                    <canvas id="statusDistributionChart" style="min-height: 300px;"></canvas>
+                </div>
+                <div class="card-footer small text-muted">
+                    Based on requests during selected period
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Site Performance -->
+    <div class="row">
+        <div class="col-lg-12">
+            <div class="card shadow mb-4">
+                <div class="card-header py-3">
+                    <h6 class="m-0 font-weight-bold text-primary">Site Performance</h6>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-bordered" id="sitesTable" width="100%" cellspacing="0">
+                            <thead>
+                                <tr>
+                                    <th>Site</th>
+                                    <th>Domain</th>
+                                    <th>Bandwidth</th>
+                                    <th>Requests</th>
+                                    <th>Cache Hit Rate</th>
+                                    <th>Avg. Response Time</th>
+                                    <th>Error Rate</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for site in sites %}
+                                <tr>
+                                    <td>{{ site.name }}</td>
+                                    <td>{{ site.domain }}</td>
+                                    <td>{{ site.bandwidth }}</td>
+                                    <td>{{ site.requests }}</td>
+                                    <td>
+                                        <div class="progress progress-sm">
+                                            <div class="progress-bar bg-success" role="progressbar" 
+                                                 style="width: {{ site.cache_hit_rate }}%" 
+                                                 aria-valuenow="{{ site.cache_hit_rate }}" 
+                                                 aria-valuemin="0" aria-valuemax="100">
+                                                {{ site.cache_hit_rate }}%
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td>{{ site.avg_response_time }} ms</td>
+                                    <td>
+                                        <div class="progress progress-sm">
+                                            <div class="progress-bar bg-danger" role="progressbar" 
+                                                 style="width: {{ site.error_rate }}%" 
+                                                 aria-valuenow="{{ site.error_rate }}" 
+                                                 aria-valuemin="0" aria-valuemax="100">
+                                                {{ site.error_rate }}%
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <a href="{{ url_for('admin.site_analytics', site_id=site.id) }}" 
+                                           class="btn btn-sm btn-primary">
+                                            <i class="fas fa-chart-line fa-sm"></i> Details
+                                        </a>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- System Performance and Errors -->
+    <div class="row">
+        <!-- Node Performance -->
+        <div class="col-lg-6">
+            <div class="card shadow mb-4">
+                <div class="card-header py-3">
+                    <h6 class="m-0 font-weight-bold text-primary">Node Performance</h6>
+                </div>
+                <div class="card-body">
+                    <canvas id="nodePerformanceChart" style="min-height: 300px;"></canvas>
+                </div>
+                <div class="card-footer small text-muted">
+                    Performance metrics across all CDN nodes
+                </div>
+            </div>
+        </div>
+
+        <!-- Top Error Pages -->
+        <div class="col-lg-6">
+            <div class="card shadow mb-4">
+                <div class="card-header py-3">
+                    <h6 class="m-0 font-weight-bold text-primary">Top Error Pages</h6>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-bordered" id="errorsTable" width="100%" cellspacing="0">
+                            <thead>
+                                <tr>
+                                    <th>URL</th>
+                                    <th>Status</th>
+                                    <th>Count</th>
+                                    <th>Site</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for error in top_errors %}
+                                <tr>
+                                    <td>{{ error.url }}</td>
+                                    <td>
+                                        <span class="badge badge-{% if error.status >= 500 %}danger{% else %}warning{% endif %}">
+                                            {{ error.status }}
+                                        </span>
+                                    </td>
+                                    <td>{{ error.count }}</td>
+                                    <td>{{ error.site }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Geographic Distribution -->
+    <div class="row">
+        <div class="col-lg-12">
+            <div class="card shadow mb-4">
+                <div class="card-header py-3">
+                    <h6 class="m-0 font-weight-bold text-primary">Geographic Traffic Distribution</h6>
+                </div>
+                <div class="card-body">
+                    <div id="worldMap" style="height: 400px;"></div>
+                </div>
+                <div class="card-footer small text-muted">
+                    Traffic distribution by country
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@3.7.0"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsvectormap"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsvectormap/dist/maps/world.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dataTables.bootstrap4@1.10.24/js/dataTables.bootstrap4.min.js"></script>
+
+<script>
+    // Traffic chart
+    const trafficCtx = document.getElementById('trafficChart').getContext('2d');
+    const trafficChart = new Chart(trafficCtx, {
+        type: 'line',
+        data: {
+            labels: {{ dates|tojson }},
+            datasets: [
+                {
+                    label: 'Bandwidth (GB)',
+                    data: {{ bandwidth_data|tojson }},
+                    fill: false,
+                    borderColor: 'rgba(78, 115, 223, 1)',
+                    backgroundColor: 'rgba(78, 115, 223, 0.05)',
+                    pointBackgroundColor: 'rgba(78, 115, 223, 1)',
+                    tension: 0.3,
+                    yAxisID: 'y'
+                },
+                {
+                    label: 'Requests (thousands)',
+                    data: {{ requests_data|tojson }},
+                    fill: false,
+                    borderColor: 'rgba(28, 200, 138, 1)',
+                    backgroundColor: 'rgba(28, 200, 138, 0.05)',
+                    pointBackgroundColor: 'rgba(28, 200, 138, 1)',
+                    tension: 0.3,
+                    yAxisID: 'y1',
+                    hidden: true
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            layout: {
+                padding: {
+                    left: 10,
+                    right: 25,
+                    top: 25,
+                    bottom: 0
+                }
+            },
+            scales: {
+                y: {
+                    type: 'linear',
+                    display: true,
+                    position: 'left',
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'Bandwidth (GB)'
+                    }
+                },
+                y1: {
+                    type: 'linear',
+                    display: true,
+                    position: 'right',
+                    beginAtZero: true,
+                    grid: {
+                        drawOnChartArea: false
+                    },
+                    title: {
+                        display: true,
+                        text: 'Requests (thousands)'
+                    }
+                }
+            }
+        }
+    });
+
+    // Status distribution chart
+    const statusCtx = document.getElementById('statusDistributionChart').getContext('2d');
+    const statusDistributionChart = new Chart(statusCtx, {
+        type: 'doughnut',
+        data: {
+            labels: ['2xx Success', '3xx Redirection', '4xx Client Error', '5xx Server Error'],
+            datasets: [{
+                data: {{ status_distribution|tojson }},
+                backgroundColor: [
+                    'rgba(28, 200, 138, 0.8)',
+                    'rgba(54, 185, 204, 0.8)',
+                    'rgba(246, 194, 62, 0.8)',
+                    'rgba(231, 74, 59, 0.8)'
+                ],
+                hoverBackgroundColor: [
+                    'rgba(28, 200, 138, 1)',
+                    'rgba(54, 185, 204, 1)',
+                    'rgba(246, 194, 62, 1)',
+                    'rgba(231, 74, 59, 1)'
+                ],
+                hoverBorderColor: "rgba(234, 236, 244, 1)"
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'bottom'
+                }
+            },
+            cutout: '70%'
+        }
+    });
+
+    // Node performance chart
+    const nodeCtx = document.getElementById('nodePerformanceChart').getContext('2d');
+    const nodePerformanceChart = new Chart(nodeCtx, {
+        type: 'bar',
+        data: {
+            labels: {{ node_names|tojson }},
+            datasets: [
+                {
+                    label: 'Avg. Response Time (ms)',
+                    data: {{ node_response_times|tojson }},
+                    backgroundColor: 'rgba(78, 115, 223, 0.8)'
+                },
+                {
+                    label: 'Error Rate (%)',
+                    data: {{ node_error_rates|tojson }},
+                    backgroundColor: 'rgba(231, 74, 59, 0.8)'
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: {
+                    beginAtZero: true
+                }
+            }
+        }
+    });
+
+    // Geographic distribution map
+    const map = new jsVectorMap({
+        selector: '#worldMap',
+        map: 'world',
+        zoomButtons: true,
+        zoomOnScroll: true,
+        markerStyle: {
+            initial: {
+                r: 5,
+                fill: '#4e73df',
+                stroke: '#fff',
+                strokeWidth: 2
+            }
+        },
+        regionStyle: {
+            initial: {
+                fill: '#e9ecef',
+                stroke: '#fff',
+                strokeWidth: 0.5
+            },
+            hover: {
+                fill: '#b3c0ee'
+            }
+        },
+        series: {
+            regions: [{
+                values: {{ geo_distribution|tojson }},
+                scale: ['#c3cdf4', '#4e73df'],
+                normalizeFunction: 'polynomial'
+            }]
+        },
+        onRegionTipShow: function(e, el, code) {
+            if ({{ geo_distribution|tojson }}[code]) {
+                el.html(el.html() + ': ' + {{ geo_distribution|tojson }}[code] + ' requests');
+            } else {
+                el.html(el.html() + ': No data');
+            }
+        }
+    });
+
+    // Initialize DataTables
+    $(document).ready(function() {
+        $('#sitesTable').DataTable({
+            order: [[2, 'desc']]
+        });
+        
+        $('#errorsTable').DataTable({
+            order: [[2, 'desc']]
+        });
+        
+        // Chart view switching
+        $('[data-chart-view]').on('click', function(e) {
+            e.preventDefault();
+            const view = $(this).data('chart-view');
+            
+            if (view === 'bandwidth') {
+                trafficChart.data.datasets[0].hidden = false;
+                trafficChart.data.datasets[1].hidden = true;
+            } else if (view === 'requests') {
+                trafficChart.data.datasets[0].hidden = true;
+                trafficChart.data.datasets[1].hidden = false;
+            } else if (view === 'combined') {
+                trafficChart.data.datasets[0].hidden = false;
+                trafficChart.data.datasets[1].hidden = false;
+            }
+            
+            trafficChart.update();
+        });
+    });
+</script>
+{% endblock %}

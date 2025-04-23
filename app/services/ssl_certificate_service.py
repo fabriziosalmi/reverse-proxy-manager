@@ -1,4 +1,5 @@
 import os
+import re
 import socket
 import json
 import dns.resolver

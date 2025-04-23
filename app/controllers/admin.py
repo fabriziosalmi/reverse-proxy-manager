@@ -1803,3 +1803,48 @@ def manage_site_waf(site_id):
     return render_template('admin/sites/waf_settings.html', 
                            site=site,
                            rule_levels=rule_levels)
+
+@admin.route('/analytics')
+@login_required
+@admin_required
+def analytics_dashboard():
+    """Admin analytics dashboard"""
+    analytics_data = AnalyticsService.get_admin_analytics()
+    return render_template('admin/analytics/dashboard.html', **analytics_data)
+
+@admin.route('/analytics/data')
+@login_required
+@admin_required
+def analytics_data():
+    """API endpoint for analytics data"""
+    period = request.args.get('period', 'week')
+    real_time = request.args.get('real_time', 'false').lower() == 'true'
+    
+    data = AnalyticsService.get_api_analytics_data(period=period, real_time=real_time)
+    return jsonify(data)
+
+@admin.route('/node-health/refresh')
+@login_required
+@admin_required
+def refresh_node_health():
+    """API endpoint to refresh node health status"""
+    # In a real implementation, this would check each node's health
+    # For now, we'll return sample data
+    
+    nodes = Node.query.filter_by(is_active=True).all()
+    nodes_data = []
+    for node in nodes:
+        import random
+        import datetime
+        node_data = {
+            "id": node.id,
+            "name": node.name,
+            "ip_address": node.ip_address,
+            "health_status": random.choice(["healthy", "unhealthy", "unreachable"]),
+            "cpu_load": random.randint(10, 95),
+            "memory_usage": random.randint(20, 90),
+            "last_check": datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M")
+        }
+        nodes_data.append(node_data)
+    
+    return jsonify({"nodes": nodes_data})

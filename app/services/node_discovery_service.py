@@ -4,6 +4,7 @@ import logging
 from datetime import datetime
 from app.models.models import Node
 from app import db
+import paramiko
 
 logger = logging.getLogger(__name__)
 

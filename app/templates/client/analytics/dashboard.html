@@ -1,0 +1,532 @@
+{% extends 'client/base.html' %}
+
+{% block title %}Analytics Dashboard{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <h1 class="h3 mb-4 text-gray-800">Site Analytics</h1>
+    
+    <div class="card shadow mb-4">
+        <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
+            <h6 class="m-0 font-weight-bold text-primary">Site Selection</h6>
+        </div>
+        <div class="card-body">
+            {% if sites %}
+                <form method="get" action="{{ url_for('client.analytics_dashboard') }}" class="mb-4">
+                    <div class="row align-items-center">
+                        <div class="col-md-6">
+                            <select name="site_id" class="form-control">
+                                <option value="">All Sites</option>
+                                {% for site in sites %}
+                                <option value="{{ site.id }}" {% if selected_site and selected_site.id == site.id %}selected{% endif %}>
+                                    {{ site.name }} ({{ site.domain }})
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <button type="submit" class="btn btn-primary">View Analytics</button>
+                        </div>
+                    </div>
+                </form>
+            {% else %}
+                <div class="alert alert-info">
+                    You don't have any sites configured yet. <a href="{{ url_for('client.add_site') }}">Add a site</a> to start seeing analytics.
+                </div>
+            {% endif %}
+        </div>
+    </div>
+    
+    {% if sites %}
+    <!-- Overview Cards -->
+    <div class="row">
+        <div class="col-xl-4 col-md-6 mb-4">
+            <div class="card border-left-primary shadow h-100 py-2">
+                <div class="card-body">
+                    <div class="row no-gutters align-items-center">
+                        <div class="col mr-2">
+                            <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
+                                Total Traffic (Last 7 Days)
+                            </div>
+                            <div class="h5 mb-0 font-weight-bold text-gray-800">{{ total_traffic }}</div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-chart-line fa-2x text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-footer small text-muted">
+                    {% if traffic_growth > 0 %}
+                        <span class="text-success"><i class="fas fa-arrow-up"></i> {{ traffic_growth }}%</span> from yesterday
+                    {% elif traffic_growth < 0 %}
+                        <span class="text-danger"><i class="fas fa-arrow-down"></i> {{ traffic_growth|abs }}%</span> from yesterday
+                    {% else %}
+                        No change from yesterday
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-xl-4 col-md-6 mb-4">
+            <div class="card border-left-success shadow h-100 py-2">
+                <div class="card-body">
+                    <div class="row no-gutters align-items-center">
+                        <div class="col mr-2">
+                            <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
+                                Total Requests (Last 7 Days)
+                            </div>
+                            <div class="h5 mb-0 font-weight-bold text-gray-800">{{ total_requests }}</div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-server fa-2x text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-footer small text-muted">
+                    Across {% if selected_site %}1{% else %}{{ sites|length }}{% endif %} site{{ sites|length|pluralize }}
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-xl-4 col-md-6 mb-4">
+            <div class="card border-left-info shadow h-100 py-2">
+                <div class="card-body">
+                    <div class="row no-gutters align-items-center">
+                        <div class="col mr-2">
+                            <div class="text-xs font-weight-bold text-info text-uppercase mb-1">
+                                Traffic Trends
+                            </div>
+                            <div class="row no-gutters align-items-center">
+                                <div class="col-auto">
+                                    <div class="h5 mb-0 mr-3 font-weight-bold text-gray-800">
+                                        <span id="trafficTrend">Analyzing</span>
+                                    </div>
+                                </div>
+                                <div class="col">
+                                    <div class="progress progress-sm mr-2" id="trafficTrendProgress">
+                                        <div class="progress-bar bg-info" role="progressbar" style="width: 50%"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-clipboard-list fa-2x text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-footer small text-muted">
+                    Based on weekly patterns
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Content Row -->
+    <div class="row">
+        <!-- Traffic Chart -->
+        <div class="col-xl-8 col-lg-7">
+            <div class="card shadow mb-4">
+                <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
+                    <h6 class="m-0 font-weight-bold text-primary">
+                        {% if selected_site %}
+                        Traffic Overview: {{ selected_site.name }}
+                        {% else %}
+                        Traffic Overview: All Sites
+                        {% endif %}
+                    </h6>
+                    <div class="dropdown no-arrow">
+                        <a class="dropdown-toggle" href="#" role="button" id="periodDropdown" 
+                            data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                            <i class="fas fa-ellipsis-v fa-sm fa-fw text-gray-400"></i>
+                        </a>
+                        <div class="dropdown-menu dropdown-menu-right shadow animated--fade-in" 
+                             aria-labelledby="periodDropdown">
+                            <div class="dropdown-header">Time Periods:</div>
+                            <a class="dropdown-item period-option" href="#" data-period="day">Today</a>
+                            <a class="dropdown-item period-option" href="#" data-period="week">Last Week</a>
+                            <a class="dropdown-item period-option" href="#" data-period="month">Last Month</a>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <canvas id="trafficChart" style="min-height: 300px;"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Response Time and Cache Performance -->
+        <div class="col-xl-4 col-lg-5">
+            <div class="card shadow mb-4">
+                <div class="card-header py-3">
+                    <h6 class="m-0 font-weight-bold text-primary">Performance Metrics</h6>
+                </div>
+                <div class="card-body">
+                    <div class="chart-pie mb-4">
+                        <canvas id="cacheHitRateChart" style="min-height: 200px;"></canvas>
+                    </div>
+                    <div class="mt-4 text-center small">
+                        <span class="mr-2">
+                            <i class="fas fa-circle text-success"></i> Cache Hits
+                        </span>
+                        <span class="mr-2">
+                            <i class="fas fa-circle text-danger"></i> Cache Misses
+                        </span>
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <div id="responseTimes" class="small text-muted">
+                        Average response time: Calculating...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Error Logs and Realtime Monitoring -->
+    <div class="row">
+        <!-- Recent Error Logs -->
+        <div class="col-lg-6 mb-4">
+            <div class="card shadow mb-4">
+                <div class="card-header py-3">
+                    <h6 class="m-0 font-weight-bold text-primary">Recent Errors</h6>
+                </div>
+                <div class="card-body">
+                    {% if recent_errors %}
+                    <div class="table-responsive">
+                        <table class="table table-bordered" width="100%" cellspacing="0">
+                            <thead>
+                                <tr>
+                                    <th>Time</th>
+                                    <th>URL</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for error in recent_errors %}
+                                <tr>
+                                    <td>{{ error.timestamp.strftime('%H:%M:%S %d-%m-%Y') }}</td>
+                                    <td>{{ error.path }}</td>
+                                    <td>
+                                        <span class="badge badge-{% if error.status_code >= 500 %}danger{% else %}warning{% endif %}">
+                                            {{ error.status_code }}
+                                        </span>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <div class="alert alert-success">
+                        No errors reported in the last 7 days!
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Real-time Monitoring -->
+        <div class="col-lg-6 mb-4">
+            <div class="card shadow mb-4">
+                <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
+                    <h6 class="m-0 font-weight-bold text-primary">Real-time Monitoring</h6>
+                    <div>
+                        <button id="startRealtime" class="btn btn-sm btn-success">
+                            <i class="fas fa-play"></i> Start
+                        </button>
+                        <button id="stopRealtime" class="btn btn-sm btn-danger" disabled>
+                            <i class="fas fa-stop"></i> Stop
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <canvas id="realtimeChart" style="min-height: 300px;"></canvas>
+                </div>
+                <div class="card-footer">
+                    <div class="small text-muted">
+                        Last updated: <span id="lastUpdated">Never</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@3.7.0"></script>
+<script>
+    {% if sites %}
+    // Traffic Chart
+    const ctx = document.getElementById('trafficChart').getContext('2d');
+    const trafficChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: {{ chart_labels|tojson }},
+            datasets: [{
+                label: 'Traffic (MB)',
+                data: {{ chart_data|tojson }},
+                fill: false,
+                backgroundColor: 'rgba(78, 115, 223, 0.5)',
+                borderColor: 'rgba(78, 115, 223, 1)',
+                pointBackgroundColor: 'rgba(78, 115, 223, 1)',
+                pointBorderColor: '#fff',
+                pointHoverBackgroundColor: '#fff',
+                pointHoverBorderColor: 'rgba(78, 115, 223, 1)',
+                tension: 0.3
+            }]
+        },
+        options: {
+            maintainAspectRatio: false,
+            layout: {
+                padding: {
+                    left: 10,
+                    right: 25,
+                    top: 25,
+                    bottom: 0
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        maxTicksLimit: 5,
+                        padding: 10
+                    },
+                    grid: {
+                        color: "rgb(234, 236, 244)",
+                        drawBorder: false
+                    }
+                },
+                x: {
+                    grid: {
+                        display: false,
+                        drawBorder: false
+                    },
+                    ticks: {
+                        maxTicksLimit: 7,
+                        padding: 10
+                    }
+                }
+            }
+        }
+    });
+
+    // Cache Hit Rate Chart
+    const pieCtx = document.getElementById('cacheHitRateChart').getContext('2d');
+    
+    // Let's assume 70% cache hit rate for demonstration purposes
+    // In a real app, this would come from your analytics data
+    const cacheHitRate = 70;
+    const cacheMissRate = 100 - cacheHitRate;
+    
+    const cacheHitRateChart = new Chart(pieCtx, {
+        type: 'doughnut',
+        data: {
+            labels: ['Cache Hits', 'Cache Misses'],
+            datasets: [{
+                data: [cacheHitRate, cacheMissRate],
+                backgroundColor: ['#1cc88a', '#e74a3b'],
+                hoverBackgroundColor: ['#17a673', '#be2617'],
+                hoverBorderColor: "rgba(234, 236, 244, 1)"
+            }]
+        },
+        options: {
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return `${context.label}: ${context.raw}%`;
+                        }
+                    }
+                }
+            },
+            cutout: '70%'
+        }
+    });
+
+    // Set traffic trend based on chart data
+    function updateTrafficTrend() {
+        const data = {{ chart_data|tojson }};
+        if (data.length < 2) {
+            return;
+        }
+        
+        // Simple trend analysis
+        let increases = 0;
+        let decreases = 0;
+        
+        for (let i = 1; i < data.length; i++) {
+            if (data[i] > data[i-1]) {
+                increases++;
+            } else if (data[i] < data[i-1]) {
+                decreases++;
+            }
+        }
+        
+        const totalChanges = increases + decreases;
+        if (totalChanges === 0) {
+            document.getElementById('trafficTrend').textContent = 'Stable';
+            document.getElementById('trafficTrendProgress').innerHTML = 
+                '<div class="progress-bar bg-info" role="progressbar" style="width: 50%"></div>';
+            return;
+        }
+        
+        const increasePercentage = (increases / totalChanges) * 100;
+        
+        if (increasePercentage > 75) {
+            document.getElementById('trafficTrend').textContent = 'Strong Growth';
+            document.getElementById('trafficTrendProgress').innerHTML = 
+                '<div class="progress-bar bg-success" role="progressbar" style="width: 90%"></div>';
+        } else if (increasePercentage > 50) {
+            document.getElementById('trafficTrend').textContent = 'Growing';
+            document.getElementById('trafficTrendProgress').innerHTML = 
+                '<div class="progress-bar bg-info" role="progressbar" style="width: 75%"></div>';
+        } else if (increasePercentage > 25) {
+            document.getElementById('trafficTrend').textContent = 'Declining';
+            document.getElementById('trafficTrendProgress').innerHTML = 
+                '<div class="progress-bar bg-warning" role="progressbar" style="width: 40%"></div>';
+        } else {
+            document.getElementById('trafficTrend').textContent = 'Strong Decline';
+            document.getElementById('trafficTrendProgress').innerHTML = 
+                '<div class="progress-bar bg-danger" role="progressbar" style="width: 15%"></div>';
+        }
+    }
+    
+    // Update response times
+    function setAverageResponseTime() {
+        // In a real app, this would come from your analytics data
+        const avgResponseTime = Math.floor(Math.random() * 100) + 50; // Random value between 50-150ms
+        document.getElementById('responseTimes').textContent = 
+            `Average response time: ${avgResponseTime}ms`;
+    }
+    
+    // Realtime Chart Setup
+    const rtCtx = document.getElementById('realtimeChart').getContext('2d');
+    const realtimeData = {
+        labels: Array(30).fill(''),
+        datasets: [{
+            label: 'Requests/sec',
+            data: Array(30).fill(0),
+            borderColor: 'rgba(78, 115, 223, 1)',
+            backgroundColor: 'rgba(78, 115, 223, 0.1)',
+            pointRadius: 0,
+            fill: true,
+            tension: 0.4
+        }]
+    };
+    
+    const realtimeChart = new Chart(rtCtx, {
+        type: 'line',
+        data: realtimeData,
+        options: {
+            maintainAspectRatio: false,
+            responsive: true,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    suggestedMax: 10
+                },
+                x: {
+                    display: false
+                }
+            },
+            animation: {
+                duration: 0
+            },
+            plugins: {
+                tooltip: {
+                    enabled: false
+                }
+            },
+            interaction: {
+                mode: 'nearest',
+                intersect: false
+            }
+        }
+    });
+
+    // Fetch analytics data with period
+    function fetchAnalyticsData(period = 'week') {
+        const url = `{{ url_for('client.analytics_data') }}?period=${period}
+            {%- if selected_site %}&site_id={{ selected_site.id }}{% endif %}`;
+        
+        fetch(url)
+            .then(response => response.json())
+            .then(data => {
+                updateCharts(data);
+            })
+            .catch(error => {
+                console.error('Error fetching analytics data:', error);
+            });
+    }
+    
+    function updateCharts(data) {
+        // Update traffic chart
+        trafficChart.data.labels = data.dates;
+        trafficChart.data.datasets[0].data = data.bandwidth;
+        trafficChart.update();
+        
+        // Update other metrics
+        if (data.cache_hit_rate && data.cache_hit_rate.length > 0) {
+            const avgHitRate = data.cache_hit_rate.reduce((a, b) => a + b, 0) / data.cache_hit_rate.length;
+            cacheHitRateChart.data.datasets[0].data = [avgHitRate, 100 - avgHitRate];
+            cacheHitRateChart.update();
+        }
+        
+        if (data.response_times && data.response_times.length > 0) {
+            const avgResponseTime = data.response_times.reduce((a, b) => a + b, 0) / data.response_times.length;
+            document.getElementById('responseTimes').textContent = 
+                `Average response time: ${avgResponseTime.toFixed(2)}ms`;
+        }
+    }
+    
+    // Change time period for analytics data
+    document.querySelectorAll('.period-option').forEach(option => {
+        option.addEventListener('click', function(e) {
+            e.preventDefault();
+            const period = this.dataset.period;
+            fetchAnalyticsData(period);
+        });
+    });
+    
+    // Realtime monitoring
+    let realtimeInterval;
+    document.getElementById('startRealtime').addEventListener('click', function() {
+        this.disabled = true;
+        document.getElementById('stopRealtime').disabled = false;
+        
+        // Mock realtime data for demonstration
+        // In a real app, this would be a websocket connection or periodic API calls
+        realtimeInterval = setInterval(() => {
+            // Add a new random data point
+            const newValue = Math.floor(Math.random() * 10) + 1;
+            realtimeData.datasets[0].data.push(newValue);
+            realtimeData.datasets[0].data.shift();
+            
+            // Update the chart
+            realtimeChart.update();
+            
+            // Update timestamp
+            document.getElementById('lastUpdated').textContent = new Date().toLocaleTimeString();
+        }, 1000);
+    });
+    
+    document.getElementById('stopRealtime').addEventListener('click', function() {
+        this.disabled = true;
+        document.getElementById('startRealtime').disabled = false;
+        
+        clearInterval(realtimeInterval);
+    });
+    
+    // Initialize
+    updateTrafficTrend();
+    setAverageResponseTime();
+    {% endif %}
+</script>
+{% endblock %}
