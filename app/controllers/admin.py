@@ -492,6 +492,79 @@ def install_nginx(node_id):
     
     return redirect(url_for('admin.view_node', node_id=node_id))
 
+@admin.route('/nodes/<int:node_id>/check-external-ip', methods=['GET'])
+@login_required
+@admin_required
+def check_external_ip(node_id):
+    """Endpoint to check the external IP address of a node"""
+    node = Node.query.get_or_404(node_id)
+    
+    try:
+        # Use SSH to execute a command to check the external IP
+        import paramiko
+        
+        # Create SSH client
+        ssh_client = paramiko.SSHClient()
+        ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        
+        # Connect using key or password
+        if node.ssh_key_path:
+            ssh_client.connect(
+                hostname=node.ip_address,
+                port=node.ssh_port,
+                username=node.ssh_user,
+                key_filename=node.ssh_key_path,
+                timeout=10
+            )
+        else:
+            ssh_client.connect(
+                hostname=node.ip_address,
+                port=node.ssh_port,
+                username=node.ssh_user,
+                password=node.ssh_password,
+                timeout=10
+            )
+        
+        # Try multiple IP checking services in case one fails
+        commands = [
+            "curl -s https://ifconfig.me",
+            "curl -s https://api.ipify.org",
+            "curl -s https://ipinfo.io/ip",
+            "wget -qO- https://ipecho.net/plain"
+        ]
+        
+        external_ip = None
+        for cmd in commands:
+            try:
+                stdin, stdout, stderr = ssh_client.exec_command(cmd, timeout=5)
+                result = stdout.read().decode('utf-8').strip()
+                
+                # Validate that the result looks like an IP address
+                if result and len(result) < 40 and '.' in result:
+                    external_ip = result
+                    break
+            except:
+                continue
+                
+        # Close the SSH connection
+        ssh_client.close()
+        
+        if external_ip:
+            return jsonify({
+                'success': True,
+                'external_ip': external_ip
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Could not determine external IP address'
+            })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 # Site Management (Admin View)
 @admin.route('/sites')
 @login_required

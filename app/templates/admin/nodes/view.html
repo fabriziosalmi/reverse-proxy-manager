@@ -60,21 +60,6 @@
                     </li>
                 </ul>
             </div>
-            
-            <div class="btn-group">
-                <a href="{{ url_for('admin.edit_node', node_id=node.id) }}" class="btn btn-outline-primary">
-                    <i class="fas fa-edit me-1"></i><span class="d-none d-lg-inline">Edit</span>
-                </a>
-                <button type="button" class="btn btn-outline-warning" data-bs-toggle="modal" data-bs-target="#redeployModal">
-                    <i class="fas fa-sync me-1"></i><span class="d-none d-lg-inline">Redeploy</span>
-                </button>
-                <form method="POST" action="{{ url_for('admin.toggle_node_active', node_id=node.id) }}" class="d-inline">
-                    <button type="submit" class="btn btn-outline-{{ 'warning' if node.is_active else 'success' }}">
-                        <i class="fas fa-{{ 'pause-circle' if node.is_active else 'play-circle' }} me-1"></i>
-                        <span class="d-none d-lg-inline">{{ 'Deactivate' if node.is_active else 'Activate' }}</span>
-                    </button>
-                </form>
-            </div>
         </div>
     </div>
 
@@ -254,8 +239,21 @@
                     <table class="table table-borderless">
                         <tbody>
                             <tr>
-                                <th class="w-50">IP Address:</th>
+                                <th class="w-50">Internal IP Address:</th>
                                 <td>{{ node.ip_address }}</td>
+                            </tr>
+                            <tr>
+                                <th>External IP Address:</th>
+                                <td>
+                                    {% if server_stats.external_ip %}
+                                        {{ server_stats.external_ip }}
+                                    {% else %}
+                                        <span class="text-muted">Not available</span>
+                                        <button class="btn btn-sm btn-outline-secondary ms-2" id="checkExternalIP">
+                                            <i class="fas fa-sync-alt me-1"></i> Check
+                                        </button>
+                                    {% endif %}
+                                </td>
                             </tr>
                             <tr>
                                 <th>SSH Port:</th>
@@ -264,6 +262,10 @@
                             <tr>
                                 <th>SSH User:</th>
                                 <td>{{ node.ssh_user }}</td>
+                            </tr>
+                            <tr>
+                                <th>Hostname:</th>
+                                <td>{{ server_stats.hostname|default('Not available') }}</td>
                             </tr>
                         </tbody>
                     </table>
@@ -290,8 +292,84 @@
                                 <th>Nginx Reload Command:</th>
                                 <td>{{ node.nginx_reload_command }}</td>
                             </tr>
+                            <tr>
+                                <th>OS Version:</th>
+                                <td>{{ server_stats.os_version|default('Not available') }}</td>
+                            </tr>
+                            <tr>
+                                <th>Node Discovery:</th>
+                                <td>
+                                    {% if node.is_discovered %}
+                                        <span class="badge bg-info">Auto-discovered</span>
+                                        <span class="ms-2 text-muted">{{ node.discovery_method|default('') }}</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">Manually added</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
                         </tbody>
                     </table>
+                </div>
+            </div>
+            
+            <!-- Network Information -->
+            <div class="mt-4">
+                <h6 class="border-bottom pb-2 mb-3"><i class="fas fa-network-wired me-2"></i>Network Information</h6>
+                <div class="row">
+                    <div class="col-md-4 mb-3">
+                        <div class="card bg-light">
+                            <div class="card-body py-3">
+                                <h6 class="text-muted">Firewall Status</h6>
+                                <p class="mb-0">
+                                    {% if server_stats.firewall_status %}
+                                        <span class="badge {% if server_stats.firewall_status == 'active' %}bg-success{% else %}bg-danger{% endif %}">
+                                            {{ server_stats.firewall_status|capitalize }}
+                                        </span>
+                                    {% else %}
+                                        <span class="text-muted">Unknown</span>
+                                    {% endif %}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <div class="card bg-light">
+                            <div class="card-body py-3">
+                                <h6 class="text-muted">Open Ports</h6>
+                                <p class="mb-0">
+                                    {% if server_stats.open_ports %}
+                                        {% for port in server_stats.open_ports[:5] %}
+                                            <span class="badge bg-secondary me-1">{{ port }}</span>
+                                        {% endfor %}
+                                        {% if server_stats.open_ports|length > 5 %}
+                                            <span class="badge bg-secondary">+{{ server_stats.open_ports|length - 5 }} more</span>
+                                        {% endif %}
+                                    {% else %}
+                                        <span class="text-muted">Not available</span>
+                                    {% endif %}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <div class="card bg-light">
+                            <div class="card-body py-3">
+                                <h6 class="text-muted">DNS Servers</h6>
+                                <p class="mb-0">
+                                    {% if server_stats.dns_servers %}
+                                        {% for dns in server_stats.dns_servers[:2] %}
+                                            <span class="badge bg-info me-1">{{ dns }}</span>
+                                        {% endfor %}
+                                        {% if server_stats.dns_servers|length > 2 %}
+                                            <span class="badge bg-info">+{{ server_stats.dns_servers|length - 2 }} more</span>
+                                        {% endif %}
+                                    {% else %}
+                                        <span class="text-muted">Not available</span>
+                                    {% endif %}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -566,6 +644,35 @@
         let isRefreshing = false;
         const refreshToggle = document.getElementById('toggleRefresh');
         const refreshIndicator = document.getElementById('refreshIndicator');
+        
+        // External IP check functionality
+        const checkExternalIPBtn = document.getElementById('checkExternalIP');
+        if (checkExternalIPBtn) {
+            checkExternalIPBtn.addEventListener('click', function() {
+                const button = this;
+                button.disabled = true;
+                button.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Checking...';
+                
+                fetch(`/admin/nodes/${nodeId}/check-external-ip`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success && data.external_ip) {
+                            const parent = button.parentNode;
+                            parent.innerHTML = data.external_ip;
+                        } else {
+                            button.innerHTML = '<i class="fas fa-sync-alt me-1"></i> Check';
+                            button.disabled = false;
+                            alert('Could not retrieve external IP: ' + (data.error || 'Unknown error'));
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error checking external IP:', error);
+                        button.innerHTML = '<i class="fas fa-sync-alt me-1"></i> Check';
+                        button.disabled = false;
+                        alert('Failed to check external IP. Please try again.');
+                    });
+            });
+        }
         
         if (refreshToggle) {
             refreshToggle.addEventListener('click', function() {
