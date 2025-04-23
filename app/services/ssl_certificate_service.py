@@ -1578,8 +1578,8 @@ subjectAltName = DNS:{domain}, DNS:www.{domain}
                 # Generate all required certificate files in the archive directory
                 ssl_gen_cmd = f"""
                 # Generate private key and certificate
-                openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-                -keyout {archive_dir}/privkey1.pem -out {archive_dir}/cert1.pem \
+                openssl req -x509 -nodes -days 365 -newkey rsa:2048 \\
+                -keyout {archive_dir}/privkey1.pem -out {archive_dir}/cert1.pem \\
                 -config {temp_config_path} -extensions v3_req
                 
                 # Create chain and fullchain
@@ -1941,3 +1941,179 @@ subjectAltName = DNS:{domain}, DNS:www.{domain}
             # Ensure SSH connection is always closed
             if ssh_client:
                 ssh_client.close()
+    
+    @staticmethod
+    def ensure_all_ssl_directories_on_node(node_id):
+        """
+        Ensure SSL directories exist for all configured sites on a node.
+        This helps prevent failures when one site's configuration requires certificates for another domain.
+        
+        Args:
+            node_id: ID of the node
+            
+        Returns:
+            dict: Result of the operation
+        """
+        node = Node.query.get(node_id)
+        
+        if not node:
+            return {"success": False, "message": "Node not found"}
+            
+        try:
+            # Connect to the node
+            ssh_client = paramiko.SSHClient()
+            ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            
+            if node.ssh_key_path:
+                ssh_client.connect(
+                    hostname=node.ip_address,
+                    port=node.ssh_port,
+                    username=node.ssh_user,
+                    key_filename=node.ssh_key_path,
+                    timeout=5
+                )
+            else:
+                ssh_client.connect(
+                    hostname=node.ip_address,
+                    port=node.ssh_port,
+                    username=node.ssh_user,
+                    password=node.ssh_password,
+                    timeout=5
+                )
+            
+            # First, get all active sites that are deployed on this node
+            site_nodes = SiteNode.query.filter_by(node_id=node_id).all()
+            sites = []
+            for site_node in site_nodes:
+                site = Site.query.get(site_node.site_id)
+                if site and site.protocol == 'https':
+                    sites.append(site)
+            
+            # Gather all domain names
+            domains = [site.domain for site in sites]
+            
+            # Also scan Nginx configs to find any extra domains referenced in SSL directives
+            # This helps find cross-domain dependencies
+            stdin, stdout, stderr = ssh_client.exec_command(f"grep -r 'ssl_certificate' {node.nginx_config_path}/*")
+            ssl_cert_lines = stdout.read().decode('utf-8').strip().split('\n')
+            
+            for line in ssl_cert_lines:
+                if 'ssl_certificate' in line and '/etc/letsencrypt/live/' in line:
+                    # Extract domain from path like /etc/letsencrypt/live/example.com/fullchain.pem
+                    domain_match = re.search(r'/etc/letsencrypt/live/([^/]+)/', line)
+                    if domain_match:
+                        domain = domain_match.group(1)
+                        if domain not in domains:
+                            domains.append(domain)
+            
+            # Create directories and dummy certificates for each domain
+            created_domains = []
+            failed_domains = []
+            
+            for domain in domains:
+                # Create all necessary directories with proper permissions
+                base_dir = "/etc/letsencrypt"
+                archive_dir = f"{base_dir}/archive/{domain}"
+                live_dir = f"{base_dir}/live/{domain}"
+                
+                # Create the directory structure with proper permissions
+                mkdir_cmd = f"""
+                mkdir -p {base_dir}
+                mkdir -p {live_dir}
+                mkdir -p {archive_dir}
+                chmod 755 {base_dir}
+                chmod 755 {live_dir}
+                chmod 700 {archive_dir}
+                """
+                stdin, stdout, stderr = ssh_client.exec_command(mkdir_cmd)
+                exit_status = stdout.channel.recv_exit_status()
+                
+                if exit_status != 0:
+                    failed_domains.append(domain)
+                    continue
+                
+                # Check if certificates already exist
+                stdin, stdout, stderr = ssh_client.exec_command(f"ls -la {live_dir}/fullchain.pem 2>/dev/null || echo 'missing'")
+                cert_check = stdout.read().decode('utf-8').strip()
+                cert_exists = 'missing' not in cert_check
+                
+                # If certificates don't exist, create self-signed placeholders
+                if not cert_exists:
+                    # Generate a proper self-signed certificate to prevent Nginx from failing
+                    log_activity('info', f"Creating temporary self-signed certificate for {domain} on node {node.name}")
+                    
+                    # Create a minimal OpenSSL configuration
+                    openssl_config = f"""
+[req]
+distinguished_name = req_distinguished_name
+req_extensions = v3_req
+prompt = no
+
+[req_distinguished_name]
+CN = {domain}
+
+[v3_req]
+keyUsage = keyEncipherment, dataEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName = DNS:{domain}, DNS:www.{domain}
+"""
+                    
+                    # Write the configuration to a temporary file on the node
+                    sftp = ssh_client.open_sftp()
+                    temp_config_path = f"/tmp/{domain}_openssl.cnf"
+                    with sftp.file(temp_config_path, 'w') as f:
+                        f.write(openssl_config)
+                    
+                    # Generate all required certificate files in the archive directory
+                    ssl_gen_cmd = f"""
+                    # Generate private key and certificate
+                    openssl req -x509 -nodes -days 365 -newkey rsa:2048 \\
+                    -keyout {archive_dir}/privkey1.pem -out {archive_dir}/cert1.pem \\
+                    -config {temp_config_path} -extensions v3_req
+                    
+                    # Create chain and fullchain
+                    cp {archive_dir}/cert1.pem {archive_dir}/chain1.pem
+                    cat {archive_dir}/cert1.pem {archive_dir}/chain1.pem > {archive_dir}/fullchain1.pem
+                    
+                    # Set correct permissions
+                    chmod 600 {archive_dir}/privkey1.pem
+                    chmod 644 {archive_dir}/cert1.pem {archive_dir}/chain1.pem {archive_dir}/fullchain1.pem
+                    
+                    # Create symlinks from live to archive
+                    ln -sf {archive_dir}/privkey1.pem {live_dir}/privkey.pem
+                    ln -sf {archive_dir}/cert1.pem {live_dir}/cert.pem
+                    ln -sf {archive_dir}/chain1.pem {live_dir}/chain.pem
+                    ln -sf {archive_dir}/fullchain1.pem {live_dir}/fullchain.pem
+                    
+                    # Clean up temporary file
+                    rm {temp_config_path}
+                    """
+                    
+                    stdin, stdout, stderr = ssh_client.exec_command(ssl_gen_cmd)
+                    exit_status = stdout.channel.recv_exit_status()
+                    
+                    if exit_status == 0:
+                        created_domains.append(domain)
+                    else:
+                        failed_domains.append(domain)
+                else:
+                    # Certificate already exists
+                    created_domains.append(domain)
+            
+            ssh_client.close()
+            
+            # Return the results
+            return {
+                "success": True,
+                "message": f"SSL certificate directories prepared for {len(created_domains)} domains",
+                "domains_processed": domains,
+                "domains_created": created_domains,
+                "domains_failed": failed_domains
+            }
+            
+        except Exception as e:
+            log_activity('error', f"Error ensuring SSL directories on node {node.name}: {str(e)}")
+            return {
+                "success": False,
+                "message": f"Failed to ensure SSL directories: {str(e)}"
+            }

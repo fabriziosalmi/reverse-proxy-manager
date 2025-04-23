@@ -776,49 +776,60 @@ def deploy_to_node(site_id, node_id, nginx_config, test_only=False):
     _, security_warnings = NginxValidationService.validate_security_headers(nginx_config)
     warnings.extend(security_warnings)
     
-    # Ensure SSL directories and placeholder certificates exist if this is an HTTPS site
-    # This prevents Nginx from failing to reload due to missing certificate files
-    if site.protocol == 'https' and not test_only:
-        from app.services.ssl_certificate_service import SSLCertificateService
-        
-        # Try SSL directory setup multiple times with increasing verbosity/debugging
-        ssl_dir_result = SSLCertificateService.ensure_ssl_directories(site_id, node_id)
-        
-        if not ssl_dir_result.get('success', False):
-            log_activity('error', f"Failed to prepare SSL directories for {site.domain} on node {node.name}: {ssl_dir_result.get('message', 'Unknown error')}")
+    # Before deploying a site, prepare all necessary SSL directories on the node
+    from app.services.ssl_certificate_service import SSLCertificateService
+    
+    # First, ensure all SSL directories and certificates exist for any domains
+    # referenced in Nginx configurations, not just for the current domain
+    ssl_dirs_result = SSLCertificateService.ensure_all_ssl_directories_on_node(node_id)
+    
+    if not ssl_dirs_result.get('success', False):
+        log_activity('warning', f"Error preparing SSL directories for node {node.name}: {ssl_dirs_result.get('message', 'Unknown error')}")
+        warnings.append(f"Warning: Failed to prepare all SSL directories: {ssl_dirs_result.get('message', 'Unknown error')}")
+    else:
+        created_domains = ssl_dirs_result.get('domains_created', [])
+        if created_domains:
+            log_activity('info', f"Created temporary certificates for domains: {', '.join(created_domains)}")
+            warnings.append(f"Created temporary certificates for domains referenced in configuration: {', '.join(created_domains)}")
             
-            # If setup didn't succeed, try fallback method - create a simple self-signed certificate directly
-            try:
-                # Connect to the node directly to verify SSL setup
-                ssh_client_direct = paramiko.SSHClient()
-                ssh_client_direct.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                
-                if node.ssh_key_path:
-                    ssh_client_direct.connect(
-                        hostname=node.ip_address,
-                        port=node.ssh_port,
-                        username=node.ssh_user,
-                        key_filename=node.ssh_key_path,
-                        timeout=10
-                    )
-                else:
-                    ssh_client_direct.connect(
-                        hostname=node.ip_address,
-                        port=node.ssh_port,
-                        username=node.ssh_user,
-                        password=node.ssh_password,
-                        timeout=10
-                    )
-                
-                # Check if letsencrypt directory exists, create it if not
-                ssh_client_direct.exec_command("sudo mkdir -p /etc/letsencrypt/live")
-                
-                # Create domain certificate directory
-                domain_dir = f"/etc/letsencrypt/live/{domain}"
-                ssh_client_direct.exec_command(f"sudo mkdir -p {domain_dir}")
-                
-                # Create a minimal self-signed certificate
-                cert_cmd = f"""
+    # Now ensure SSL directories for the current domain specifically
+    ssl_dir_result = SSLCertificateService.ensure_ssl_directories(site_id, node_id)
+    
+    if not ssl_dir_result.get('success', False):
+        log_activity('error', f"Failed to prepare SSL directories for {site.domain} on node {node.name}: {ssl_dir_result.get('message', 'Unknown error')}")
+        
+        # If setup didn't succeed, try fallback method - create a simple self-signed certificate directly
+        try:
+            # Connect to the node directly to verify SSL setup
+            ssh_client_direct = paramiko.SSHClient()
+            ssh_client_direct.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            
+            if node.ssh_key_path:
+                ssh_client_direct.connect(
+                    hostname=node.ip_address,
+                    port=node.ssh_port,
+                    username=node.ssh_user,
+                    key_filename=node.ssh_key_path,
+                    timeout=10
+                )
+            else:
+                ssh_client_direct.connect(
+                    hostname=node.ip_address,
+                    port=node.ssh_port,
+                    username=node.ssh_user,
+                    password=node.ssh_password,
+                    timeout=10
+                )
+            
+            # Check if letsencrypt directory exists, create it if not
+            ssh_client_direct.exec_command("sudo mkdir -p /etc/letsencrypt/live")
+            
+            # Create domain certificate directory
+            domain_dir = f"/etc/letsencrypt/live/{domain}"
+            ssh_client_direct.exec_command(f"sudo mkdir -p {domain_dir}")
+            
+            # Create a minimal self-signed certificate
+            cert_cmd = f"""
 sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \\
   -keyout {domain_dir}/privkey.pem \\
   -out {domain_dir}/fullchain.pem \\
@@ -828,24 +839,24 @@ sudo chmod 644 {domain_dir}/fullchain.pem {domain_dir}/chain.pem && \\
 sudo chmod 600 {domain_dir}/privkey.pem && \\
 echo "success"
 """
-                stdin, stdout, stderr = ssh_client_direct.exec_command(cert_cmd)
-                cert_result = stdout.read().decode('utf-8').strip()
-                
-                if "success" in cert_result:
-                    log_activity('info', f"Created emergency self-signed certificate for {domain} on node {node.name}")
-                    warnings.append("Created emergency self-signed certificate as primary method failed. Please request a real certificate.")
-                else:
-                    error = stderr.read().decode('utf-8')
-                    log_activity('error', f"Failed to create emergency certificate for {domain} on node {node.name}: {error}")
-                    warnings.append(f"Warning: Failed to create SSL certificates: {error}")
-                
-                ssh_client_direct.close()
-                
-            except Exception as e:
-                log_activity('error', f"Failed in emergency certificate creation for {domain} on node {node.name}: {str(e)}")
-                warnings.append(f"Warning: {ssl_dir_result.get('message', 'Failed to prepare SSL directories')}")
-        elif ssl_dir_result.get('certificate_exists', False) == False:
-            warnings.append("Created temporary self-signed certificate. Remember to request a real certificate.")
+            stdin, stdout, stderr = ssh_client_direct.exec_command(cert_cmd)
+            cert_result = stdout.read().decode('utf-8').strip()
+            
+            if "success" in cert_result:
+                log_activity('info', f"Created emergency self-signed certificate for {domain} on node {node.name}")
+                warnings.append("Created emergency self-signed certificate as primary method failed. Please request a real certificate.")
+            else:
+                error = stderr.read().decode('utf-8')
+                log_activity('error', f"Failed to create emergency certificate for {domain} on node {node.name}: {error}")
+                warnings.append(f"Warning: Failed to create SSL certificates: {error}")
+            
+            ssh_client_direct.close()
+            
+        except Exception as e:
+            log_activity('error', f"Failed in emergency certificate creation for {domain} on node {node.name}: {str(e)}")
+            warnings.append(f"Warning: {ssl_dir_result.get('message', 'Failed to prepare SSL directories')}")
+    elif ssl_dir_result.get('certificate_exists', False) == False:
+        warnings.append("Created temporary self-signed certificate. Remember to request a real certificate.")
     
     # Test the configuration
     is_valid, error_message, ssl_details = NginxValidationService.test_config_on_node(node_id, nginx_config, domain)
@@ -1575,3 +1586,27 @@ def get_nginx_info(node):
             'error': str(e),
             'is_running': False
         }
+
+# Test the site on a specific node
+@staticmethod
+def test_deployment(site_id, node_id):
+    """
+    Test deploying a site configuration to a node without actually deploying it
+    
+    Args:
+        site_id: ID of the site
+        node_id: ID of the node to test on
+        
+    Returns:
+        tuple: (is_valid, warnings)
+    """
+    site = Site.query.get(site_id)
+    
+    if not site:
+        return False, ["Site not found"]
+    
+    # Generate Nginx configuration
+    nginx_config = generate_nginx_config(site)
+    
+    # Test the deployment
+    return deploy_to_node(site_id, node_id, nginx_config, test_only=True)
