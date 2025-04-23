@@ -94,9 +94,11 @@ class NginxValidationService:
                     timeout=10
                 )
             
-            # Create a temporary file for testing
+            # Create a temporary file for testing - WRAP SERVER BLOCK IN HTTP CONTEXT
             with tempfile.NamedTemporaryFile(mode='w+', delete=False) as temp:
-                temp.write(config_content)
+                # Wrap the server block in an http block to make it a valid standalone config
+                wrapped_content = "http {\n" + config_content + "\n}"
+                temp.write(wrapped_content)
                 temp_path = temp.name
             
             # Upload the config to a temporary location on the remote server
