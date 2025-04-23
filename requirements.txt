@@ -9,7 +9,7 @@ Werkzeug==2.3.7
 SQLAlchemy==2.0.23
 paramiko==3.3.1
 python-dotenv==1.0.0
-cryptography==41.0.5
+cryptography==44.0.1
 bcrypt==4.0.1
 PyJWT==2.8.0
 gitpython==3.1.40
