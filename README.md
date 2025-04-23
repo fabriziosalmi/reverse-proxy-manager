@@ -5,6 +5,11 @@ A centralized proxy management system for distributed proxy nodes, providing rob
 ![Version](https://img.shields.io/badge/version-1.0.0-blue)
 ![Python](https://img.shields.io/badge/python-3.12+-green)
 ![Flask](https://img.shields.io/badge/flask-2.3+-green)
+![License](https://img.shields.io/badge/license-MIT-yellow)
+
+## Overview
+
+Reverse Proxy Manager is a comprehensive solution for managing multiple Nginx proxy nodes from a centralized interface. It simplifies deployment, configuration, and monitoring of proxy infrastructure at scale, making it ideal for content delivery networks, load balancing, and distributed web hosting environments.
 
 ## Features
 
@@ -21,6 +26,10 @@ A centralized proxy management system for distributed proxy nodes, providing rob
 - **Real-time Monitoring**: Live statistics for nodes including CPU, memory, connections
 - **Deployment Tracking**: Comprehensive logs for all deployments
 - **Automatic Node Discovery**: Add and manage nodes via YAML configuration
+
+## Screenshots
+
+*Coming soon*
 
 ## Docker Setup
 
@@ -414,6 +423,54 @@ API documentation is available at `/api/docs` when in development mode.
 - Deployment logs are stored in the database and viewable in the admin interface
 - System logs can be accessed from the admin dashboard
 
+## Architecture
+
+Reverse Proxy Manager follows a modular architecture with these key components:
+
+- **Web Interface**: Flask-based admin and client panels
+- **Node Connector**: Secure SSH-based deployment system
+- **Configuration Generator**: Templating system for Nginx configs
+- **Database**: SQLite for development, PostgreSQL recommended for production
+- **Task Queue**: Background job processing for deployments and certificate renewals
+
+## Roadmap
+
+Future development plans include:
+
+- **Cloud Integration**: Direct deployment to AWS, GCP, and Azure
+- **Kubernetes Support**: Manage containerized Nginx instances
+- **Advanced Analytics**: Extended metrics and reporting
+- **Multi-factor Authentication**: Enhanced security for admin accounts
+- **Extended API**: Comprehensive programmatic access
+- **Custom Plugins**: Extensible plugin architecture
+
+## Contributing
+
+Contributions are welcome! To contribute:
+
+1. Fork the repository
+2. Create your feature branch: `git checkout -b feature/amazing-feature`
+3. Commit your changes: `git commit -m 'Add some amazing feature'`
+4. Push to the branch: `git push origin feature/amazing-feature`
+5. Open a Pull Request
+
+Please read [CONTRIBUTING.md](CONTRIBUTING.md) for details on our code of conduct and the submission process.
+
+## Support
+
+For support and questions:
+
+- [GitHub Issues](https://github.com/fabriziosalmi/reverse-proxy-manager/issues)
+- [Documentation](https://github.com/fabriziosalmi/reverse-proxy-manager/wiki)
+
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Acknowledgements
+
+- [Nginx](https://nginx.org/) for the amazing web server
+- [Flask](https://flask.palletsprojects.com/) for the web framework
+- [Let's Encrypt](https://letsencrypt.org/) for free SSL certificates
+- [ModSecurity](https://modsecurity.org/) for WAF capabilities
+- [All contributors](https://github.com/fabriziosalmi/reverse-proxy-manager/graphs/contributors) who have helped with the project
