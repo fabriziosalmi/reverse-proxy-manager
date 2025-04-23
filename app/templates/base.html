@@ -13,67 +13,179 @@
     
     <!-- Custom styles -->
     <style>
+        :root {
+            --primary-color: #0066CC;
+            --primary-dark: #0052a3;
+            --success-color: #198754;
+            --info-color: #0dcaf0;
+            --warning-color: #ffc107;
+            --danger-color: #dc3545;
+        }
+        
         body {
             min-height: 100vh;
             display: flex;
             flex-direction: column;
+            background-color: #f8f9fa;
+            color: #343a40;
         }
         
         main {
             flex: 1;
+            padding: 1.5rem 0;
         }
         
         .navbar-brand {
             font-weight: 700;
+            letter-spacing: -0.5px;
         }
         
         .navbar {
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            padding: 0.75rem 1rem;
+        }
+        
+        .nav-link {
+            font-weight: 500;
+            transition: all 0.2s ease;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            margin: 0 0.125rem;
+        }
+        
+        .nav-link:hover {
+            background-color: rgba(255, 255, 255, 0.1);
         }
         
         .card {
-            border-radius: 0.5rem;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
-            margin-bottom: 1.5rem;
+            border-radius: 0.625rem;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+            border: none;
+            margin-bottom: 1.75rem;
+            overflow: hidden;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 15px rgba(0, 0, 0, 0.08);
         }
         
         .card-header {
-            border-top-left-radius: 0.5rem !important;
-            border-top-right-radius: 0.5rem !important;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.075);
+            background-color: #fff;
+            padding: 1rem 1.25rem;
+            font-weight: 600;
+        }
+        
+        .card-body {
+            padding: 1.5rem;
+        }
+        
+        .btn {
+            border-radius: 0.375rem;
+            padding: 0.5rem 1rem;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        
+        .btn-sm {
+            border-radius: 0.25rem;
+            padding: 0.25rem 0.5rem;
         }
         
         .btn-primary {
-            background-color: #0066CC;
-            border-color: #0066CC;
+            background-color: var(--primary-color);
+            border-color: var(--primary-color);
         }
         
         .btn-primary:hover, .btn-primary:focus {
-            background-color: #0052a3;
-            border-color: #0052a3;
+            background-color: var(--primary-dark);
+            border-color: var(--primary-dark);
         }
         
         .bg-primary {
-            background-color: #0066CC !important;
+            background-color: var(--primary-color) !important;
+        }
+        
+        .table {
+            font-size: 0.95rem;
+        }
+        
+        .table th {
+            font-weight: 600;
+            border-top: none;
+        }
+        
+        .table-striped tbody tr:nth-of-type(odd) {
+            background-color: rgba(0, 0, 0, 0.02);
+        }
+        
+        .table-hover tbody tr:hover {
+            background-color: rgba(0, 102, 204, 0.03);
+        }
+        
+        .badge {
+            font-weight: 500;
+            padding: 0.35em 0.65em;
+        }
+        
+        .progress {
+            height: 0.75rem;
+            border-radius: 0.5rem;
+            background-color: #e9ecef;
         }
         
         .nav-link.active {
             font-weight: 600;
+            background-color: rgba(255, 255, 255, 0.15);
         }
         
-        .sidebar {
-            position: fixed;
-            top: 56px;
-            bottom: 0;
-            left: 0;
-            z-index: 100;
-            padding: 48px 0 0;
-            box-shadow: inset -1px 0 0 rgba(0, 0, 0, .1);
+        .form-control, .form-select {
+            border-radius: 0.375rem;
+            padding: 0.5rem 0.75rem;
+            border-color: #dee2e6;
+        }
+        
+        .form-control:focus, .form-select:focus {
+            box-shadow: 0 0 0 0.25rem rgba(0, 102, 204, 0.25);
+        }
+        
+        .dropdown-menu {
+            border-radius: 0.5rem;
+            box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+            padding: 0.5rem 0;
+            border: none;
+        }
+        
+        .dropdown-item {
+            padding: 0.5rem 1.25rem;
+            font-weight: 500;
+        }
+        
+        .dropdown-item:hover {
+            background-color: rgba(0, 102, 204, 0.05);
+        }
+        
+        .alert {
+            border-radius: 0.5rem;
+            border: none;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+        }
+        
+        footer {
+            font-size: 0.9rem;
+            color: #6c757d;
         }
         
         @media (max-width: 767.98px) {
             .sidebar {
                 position: static;
                 padding-top: 20px;
+            }
+            
+            .card-body {
+                padding: 1.25rem;
             }
         }
     </style>
@@ -121,7 +233,7 @@
                                 </li>
                                 <li class="nav-item dropdown">
                                     <a class="nav-link dropdown-toggle" href="#" id="adminToolsDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-                                        <i class="fas fa-tools me-1"></i> Admin Tools
+                                        <i class="fas fa-tools me-1"></i> Tools
                                     </a>
                                     <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="adminToolsDropdown">
                                         <li>
@@ -185,6 +297,37 @@
     </header>
     
     <main>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="container mt-3">
+                    {% for category, message in messages %}
+                        {% set alert_class = 'alert-info' %}
+                        {% if category == 'success' %}
+                            {% set alert_class = 'alert-success' %}
+                        {% elif category == 'error' %}
+                            {% set alert_class = 'alert-danger' %}
+                        {% elif category == 'warning' %}
+                            {% set alert_class = 'alert-warning' %}
+                        {% endif %}
+                        <div class="alert {{ alert_class }} alert-dismissible fade show" role="alert">
+                            <div class="d-flex align-items-center">
+                                {% if category == 'success' %}
+                                    <i class="fas fa-check-circle me-2"></i>
+                                {% elif category == 'error' %}
+                                    <i class="fas fa-exclamation-circle me-2"></i>
+                                {% elif category == 'warning' %}
+                                    <i class="fas fa-exclamation-triangle me-2"></i>
+                                {% else %}
+                                    <i class="fas fa-info-circle me-2"></i>
+                                {% endif %}
+                                <div>{{ message }}</div>
+                            </div>
+                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
         {% block content %}{% endblock %}
     </main>
     
