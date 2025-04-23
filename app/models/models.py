@@ -405,6 +405,16 @@ class Site(db.Model):
     is_blocked = db.Column(db.Boolean, default=False) 
     is_discovered = db.Column(db.Boolean, default=False)  # Whether this site was discovered from node
     use_waf = db.Column(db.Boolean, default=False)
+    # Advanced WAF settings
+    waf_rule_level = db.Column(db.String(10), default='basic')  # basic, medium, strict
+    waf_custom_rules = db.Column(db.Text, nullable=True)  # Custom WAF rules
+    waf_max_request_size = db.Column(db.Integer, default=1)  # Max request size in MB
+    waf_request_timeout = db.Column(db.Integer, default=60)  # Request timeout in seconds
+    waf_block_tor_exit_nodes = db.Column(db.Boolean, default=False)  # Block Tor exit nodes
+    waf_rate_limiting_enabled = db.Column(db.Boolean, default=False)  # Enable rate limiting
+    waf_rate_limiting_requests = db.Column(db.Integer, default=100)  # Requests per minute
+    waf_rate_limiting_burst = db.Column(db.Integer, default=200)  # Burst requests
+    # End of advanced WAF settings
     force_https = db.Column(db.Boolean, default=True)  # New column to force HTTP to HTTPS redirect
     # Cache configuration
     enable_cache = db.Column(db.Boolean, default=True)
@@ -439,9 +449,17 @@ class Site(db.Model):
             'origin_port': self.origin_port,
             'user_id': self.user_id,
             'is_active': self.is_active,
-            'is_blocked': self.is_blocked, 
+            'is_blocked': self.is_blocked,
             'is_discovered': self.is_discovered,
             'use_waf': self.use_waf,
+            'waf_rule_level': self.waf_rule_level,
+            'waf_custom_rules': self.waf_custom_rules,
+            'waf_max_request_size': self.waf_max_request_size,
+            'waf_request_timeout': self.waf_request_timeout,
+            'waf_block_tor_exit_nodes': self.waf_block_tor_exit_nodes,
+            'waf_rate_limiting_enabled': self.waf_rate_limiting_enabled,
+            'waf_rate_limiting_requests': self.waf_rate_limiting_requests,
+            'waf_rate_limiting_burst': self.waf_rate_limiting_burst,
             'force_https': self.force_https,
             'enable_cache': self.enable_cache,
             'cache_time': self.cache_time,

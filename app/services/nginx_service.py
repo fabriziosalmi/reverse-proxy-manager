@@ -380,12 +380,91 @@ server {
     
     # Add WAF configuration if needed
     if site.use_waf:
-        # This is a placeholder for WAF integration (like CrowdSec)
+        # Create WAF configuration based on the advanced settings
         waf_config = """
-    # WAF Configuration (CrowdSec)
-    include /etc/nginx/crowdsec/crowdsec.conf;
+    # WAF Configuration
 """
-        config = config.replace('{{custom_config}}', waf_config + site.custom_config if site.custom_config else waf_config)
+        # Add ModSecurity basic setup
+        waf_config += """
+    # Enable ModSecurity
+    modsecurity on;
+    modsecurity_rules_file /etc/nginx/modsec/main.conf;
+"""
+
+        # Set protection level based on rule_level setting
+        if site.waf_rule_level == 'basic':
+            waf_config += """
+    # Basic WAF Protection Level
+    modsecurity_rules '
+        SecRuleEngine On
+        # Use OWASP Core Rule Set with basic paranoia level
+        SecAction "id:900000,phase:1,pass,nolog,setvar:tx.paranoia_level=1"
+    ';
+"""
+        elif site.waf_rule_level == 'medium':
+            waf_config += """
+    # Medium WAF Protection Level
+    modsecurity_rules '
+        SecRuleEngine On
+        # Use OWASP Core Rule Set with medium paranoia level
+        SecAction "id:900000,phase:1,pass,nolog,setvar:tx.paranoia_level=3"
+    ';
+"""
+        elif site.waf_rule_level == 'strict':
+            waf_config += """
+    # Strict WAF Protection Level
+    modsecurity_rules '
+        SecRuleEngine On
+        # Use OWASP Core Rule Set with high paranoia level
+        SecAction "id:900000,phase:1,pass,nolog,setvar:tx.paranoia_level=4"
+    ';
+"""
+
+        # Add request size limiting if configured
+        waf_config += f"""
+    # Limit request size to {site.waf_max_request_size}MB
+    client_max_body_size {site.waf_max_request_size}m;
+"""
+
+        # Add request timeout if configured
+        waf_config += f"""
+    # Request timeout settings
+    client_body_timeout {site.waf_request_timeout}s;
+    client_header_timeout {site.waf_request_timeout}s;
+    proxy_connect_timeout {site.waf_request_timeout}s;
+    proxy_send_timeout {site.waf_request_timeout}s;
+    proxy_read_timeout {site.waf_request_timeout}s;
+"""
+
+        # Add Tor exit node blocking if enabled
+        if site.waf_block_tor_exit_nodes:
+            waf_config += """
+    # Block Tor exit nodes
+    modsecurity_rules '
+        SecRule REMOTE_ADDR "@ipMatchFromFile /etc/nginx/modsec/tor-exit-nodes.conf" \\
+            "id:10000,phase:1,deny,status:403,log,msg:\'Access from Tor exit node blocked\'"
+    ';
+"""
+
+        # Add rate limiting if enabled
+        if site.waf_rate_limiting_enabled:
+            waf_config += f"""
+    # Rate limiting settings
+    limit_req_zone $binary_remote_addr zone=waf_limit:10m rate={site.waf_rate_limiting_requests}r/m;
+    limit_req zone=waf_limit burst={site.waf_rate_limiting_burst} nodelay;
+"""
+
+        # Add custom WAF rules if provided
+        if site.waf_custom_rules:
+            custom_rules = site.waf_custom_rules.replace("'", "\\'")  # Escape single quotes
+            waf_config += f"""
+    # Custom WAF rules
+    modsecurity_rules '
+{custom_rules}
+    ';
+"""
+
+        config = config.replace('{{custom_config}}', waf_config + (site.custom_config if site.custom_config else ''))
     
     # Save to Git repo
     save_config_to_git(site, config)

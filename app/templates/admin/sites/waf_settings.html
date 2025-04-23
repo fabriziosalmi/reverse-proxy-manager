@@ -1,0 +1,251 @@
+{% extends "base.html" %}
+
+{% block title %}WAF Settings - {{ site.domain }} - Italia CDN Proxy Manager{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="row mb-4">
+        <div class="col-md-8">
+            <h1 class="display-5 fw-bold mb-2">
+                <i class="fas fa-shield-alt me-2"></i>WAF Settings for {{ site.domain }}
+            </h1>
+        </div>
+        <div class="col-md-4 text-md-end">
+            <a href="{{ url_for('admin.view_site', site_id=site.id) }}" class="btn btn-outline-secondary">
+                <i class="fas fa-arrow-left me-1"></i> Back to Site
+            </a>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-lg-12">
+            <div class="card mb-4">
+                <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="fas fa-cogs me-2"></i>Advanced WAF Configuration
+                    </h5>
+                    <span class="badge bg-{{ 'success' if site.use_waf else 'danger' }}">
+                        {{ 'Enabled' if site.use_waf else 'Disabled' }}
+                    </span>
+                </div>
+                <div class="card-body">
+                    <form method="POST">
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" id="use_waf" name="use_waf" {{ 'checked' if site.use_waf else '' }}>
+                            <label class="form-check-label" for="use_waf">Enable Web Application Firewall</label>
+                            <p class="form-text text-muted">
+                                <i class="fas fa-info-circle me-1"></i>
+                                WAF helps protect your site from common web vulnerabilities like SQL injection, XSS, and more.
+                            </p>
+                        </div>
+
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="waf_rule_level" class="form-label">Protection Level</label>
+                                <select class="form-select" id="waf_rule_level" name="waf_rule_level">
+                                    {% for rule in rule_levels %}
+                                    <option value="{{ rule.value }}" {{ 'selected' if site.waf_rule_level == rule.value else '' }}>
+                                        {{ rule.label }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                                <div class="form-text">
+                                    <i class="fas fa-info-circle me-1"></i>
+                                    <span id="rule_level_description">
+                                        {% for rule in rule_levels %}
+                                            {% if site.waf_rule_level == rule.value %}
+                                                {{ rule.description }}
+                                            {% endif %}
+                                        {% endfor %}
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="waf_max_request_size" class="form-label">Maximum Request Size (MB)</label>
+                                <input type="number" class="form-control" id="waf_max_request_size" name="waf_max_request_size" 
+                                    value="{{ site.waf_max_request_size }}" min="1" max="100">
+                                <div class="form-text">
+                                    <i class="fas fa-info-circle me-1"></i>
+                                    Limits the size of incoming requests. Larger values may be needed for file uploads.
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="waf_request_timeout" class="form-label">Request Timeout (seconds)</label>
+                                <input type="number" class="form-control" id="waf_request_timeout" name="waf_request_timeout" 
+                                    value="{{ site.waf_request_timeout }}" min="10" max="300">
+                                <div class="form-text">
+                                    <i class="fas fa-info-circle me-1"></i>
+                                    Maximum time allowed for processing a request.
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-check form-switch mt-4">
+                                    <input class="form-check-input" type="checkbox" id="waf_block_tor_exit_nodes" name="waf_block_tor_exit_nodes" 
+                                        {{ 'checked' if site.waf_block_tor_exit_nodes else '' }}>
+                                    <label class="form-check-label" for="waf_block_tor_exit_nodes">Block Tor Exit Nodes</label>
+                                    <div class="form-text">
+                                        <i class="fas fa-info-circle me-1"></i>
+                                        Block access from known Tor exit nodes (updated daily).
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card mb-3">
+                            <div class="card-header bg-light">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="waf_rate_limiting_enabled" name="waf_rate_limiting_enabled" 
+                                        {{ 'checked' if site.waf_rate_limiting_enabled else '' }}>
+                                    <label class="form-check-label" for="waf_rate_limiting_enabled">Enable Rate Limiting</label>
+                                </div>
+                            </div>
+                            <div class="card-body" id="rate_limiting_options" style="{{ 'display:none;' if not site.waf_rate_limiting_enabled else '' }}">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <label for="waf_rate_limiting_requests" class="form-label">Requests Per Minute</label>
+                                        <input type="number" class="form-control" id="waf_rate_limiting_requests" name="waf_rate_limiting_requests" 
+                                            value="{{ site.waf_rate_limiting_requests }}" min="10" max="10000">
+                                        <div class="form-text">
+                                            <i class="fas fa-info-circle me-1"></i>
+                                            Maximum number of requests allowed per minute per IP.
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label for="waf_rate_limiting_burst" class="form-label">Burst Size</label>
+                                        <input type="number" class="form-control" id="waf_rate_limiting_burst" name="waf_rate_limiting_burst" 
+                                            value="{{ site.waf_rate_limiting_burst }}" min="10" max="20000">
+                                        <div class="form-text">
+                                            <i class="fas fa-info-circle me-1"></i>
+                                            Maximum burst size allowed.
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="waf_custom_rules" class="form-label">Custom WAF Rules</label>
+                            <textarea class="form-control" id="waf_custom_rules" name="waf_custom_rules" rows="8" placeholder="# Add custom ModSecurity rules here">{{ site.waf_custom_rules or '' }}</textarea>
+                            <div class="form-text">
+                                <i class="fas fa-info-circle me-1"></i>
+                                Add custom ModSecurity compatible rules. These will be added to the base rules.
+                            </div>
+                        </div>
+
+                        <div class="d-flex justify-content-between">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-save me-1"></i> Save WAF Settings
+                            </button>
+                            <a href="{{ url_for('admin.view_site', site_id=site.id) }}" class="btn btn-secondary">
+                                <i class="fas fa-times me-1"></i> Cancel
+                            </a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-lg-12">
+            <div class="card">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0"><i class="fas fa-info-circle me-2"></i>About Web Application Firewall</h5>
+                </div>
+                <div class="card-body">
+                    <div class="accordion" id="wafInfoAccordion">
+                        <div class="accordion-item">
+                            <h2 class="accordion-header" id="headingOne">
+                                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseOne" aria-expanded="false" aria-controls="collapseOne">
+                                    What is a WAF?
+                                </button>
+                            </h2>
+                            <div id="collapseOne" class="accordion-collapse collapse" aria-labelledby="headingOne" data-bs-parent="#wafInfoAccordion">
+                                <div class="accordion-body">
+                                    A Web Application Firewall (WAF) helps protect your web applications by filtering and monitoring HTTP traffic between a web application and the Internet. It protects against attacks such as cross-site forgery, cross-site scripting (XSS), file inclusion, and SQL injection, among others.
+                                </div>
+                            </div>
+                        </div>
+                        <div class="accordion-item">
+                            <h2 class="accordion-header" id="headingTwo">
+                                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseTwo" aria-expanded="false" aria-controls="collapseTwo">
+                                    Protection Levels Explained
+                                </button>
+                            </h2>
+                            <div id="collapseTwo" class="accordion-collapse collapse" aria-labelledby="headingTwo" data-bs-parent="#wafInfoAccordion">
+                                <div class="accordion-body">
+                                    <ul>
+                                        <li><strong>Basic Protection:</strong> Provides essential security against the most common web attacks while minimizing false positives. Recommended for most websites.</li>
+                                        <li><strong>Medium Protection:</strong> Adds additional security rules and stricter validation. This level may occasionally trigger false positives for complex applications.</li>
+                                        <li><strong>Strict Protection:</strong> Maximum security with comprehensive rule sets. This level is recommended for high-security applications but may produce more false positives that need to be tuned.</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="accordion-item">
+                            <h2 class="accordion-header" id="headingThree">
+                                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseThree" aria-expanded="false" aria-controls="collapseThree">
+                                    Rate Limiting
+                                </button>
+                            </h2>
+                            <div id="collapseThree" class="accordion-collapse collapse" aria-labelledby="headingThree" data-bs-parent="#wafInfoAccordion">
+                                <div class="accordion-body">
+                                    Rate limiting helps protect your site against brute force attempts, DoS attacks, and other forms of abuse by limiting the number of requests a client can make in a given time period. The burst setting allows for occasional traffic spikes while still enforcing the overall rate limit.
+                                </div>
+                            </div>
+                        </div>
+                        <div class="accordion-item">
+                            <h2 class="accordion-header" id="headingFour">
+                                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseFour" aria-expanded="false" aria-controls="collapseFour">
+                                    Custom Rules Format
+                                </button>
+                            </h2>
+                            <div id="collapseFour" class="accordion-collapse collapse" aria-labelledby="headingFour" data-bs-parent="#wafInfoAccordion">
+                                <div class="accordion-body">
+                                    <p>Custom WAF rules should be written in ModSecurity compatible format. Examples:</p>
+                                    <pre><code># Block specific user agent
+SecRule REQUEST_HEADERS:User-Agent "badbot" "id:1000,phase:1,deny,status:403,log,msg:'Blocked Bad Bot'"
+
+# Block specific IP range
+SecRule REMOTE_ADDR "@ipMatch 192.168.1.0/24" "id:1001,phase:1,deny,status:403,log,msg:'Blocked IP Range'"
+
+# Block specific URI path
+SecRule REQUEST_URI "@contains /admin/backup" "id:1002,phase:1,deny,status:403,log,msg:'Blocked sensitive URI'"</code></pre>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Update rule level description on change
+    const ruleLevelSelect = document.getElementById('waf_rule_level');
+    const ruleLevelDescription = document.getElementById('rule_level_description');
+    const ruleLevels = {
+        {% for rule in rule_levels %}
+        '{{ rule.value }}': '{{ rule.description }}',
+        {% endfor %}
+    };
+    
+    ruleLevelSelect.addEventListener('change', function() {
+        ruleLevelDescription.textContent = ruleLevels[this.value];
+    });
+    
+    // Toggle rate limiting options visibility
+    const rateLimitingEnabled = document.getElementById('waf_rate_limiting_enabled');
+    const rateLimitingOptions = document.getElementById('rate_limiting_options');
+    
+    rateLimitingEnabled.addEventListener('change', function() {
+        rateLimitingOptions.style.display = this.checked ? 'block' : 'none';
+    });
+});
+</script>
+{% endblock %}

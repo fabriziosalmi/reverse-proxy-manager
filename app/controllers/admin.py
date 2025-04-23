@@ -1736,3 +1736,66 @@ def node_country_blocking(node_id):
                            node=node, 
                            blocked_countries=blocked_countries,
                            geoip_status=geoip_status)
+
+@admin.route('/sites/<int:site_id>/waf', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def manage_site_waf(site_id):
+    """Manage advanced WAF settings for a site"""
+    site = Site.query.get_or_404(site_id)
+    
+    if request.method == 'POST':
+        # Update WAF settings
+        site.use_waf = 'use_waf' in request.form
+        site.waf_rule_level = request.form.get('waf_rule_level', 'basic')
+        site.waf_custom_rules = request.form.get('waf_custom_rules')
+        site.waf_max_request_size = int(request.form.get('waf_max_request_size', 1))
+        site.waf_request_timeout = int(request.form.get('waf_request_timeout', 60))
+        site.waf_block_tor_exit_nodes = 'waf_block_tor_exit_nodes' in request.form
+        site.waf_rate_limiting_enabled = 'waf_rate_limiting_enabled' in request.form
+        site.waf_rate_limiting_requests = int(request.form.get('waf_rate_limiting_requests', 100))
+        site.waf_rate_limiting_burst = int(request.form.get('waf_rate_limiting_burst', 200))
+        
+        db.session.commit()
+        
+        # Get all nodes serving this site and update their configurations
+        site_nodes = SiteNode.query.filter_by(site_id=site_id).all()
+        
+        try:
+            from app.services.nginx_service import generate_nginx_config, deploy_to_node
+            
+            # Generate updated Nginx configuration with WAF settings
+            nginx_config = generate_nginx_config(site)
+            
+            # Deploy to each node
+            for site_node in site_nodes:
+                node_id = site_node.node_id
+                deploy_to_node(site.id, node_id, nginx_config)
+                
+                # Log the action
+                log = DeploymentLog(
+                    site_id=site_id,
+                    node_id=node_id,
+                    action="Update WAF settings",
+                    status="success",
+                    message="Advanced WAF settings updated and deployed"
+                )
+                db.session.add(log)
+            
+            db.session.commit()
+            flash('WAF settings updated successfully and configuration deployed', 'success')
+        except Exception as e:
+            flash(f'WAF settings updated but configuration deployment failed: {str(e)}', 'warning')
+        
+        return redirect(url_for('admin.view_site', site_id=site_id))
+    
+    # Prepare WAF rule level options
+    rule_levels = [
+        {'value': 'basic', 'label': 'Basic Protection', 'description': 'Basic protection against common web attacks'},
+        {'value': 'medium', 'label': 'Medium Protection', 'description': 'Enhanced protection with more strict rules'},
+        {'value': 'strict', 'label': 'Strict Protection', 'description': 'Maximum protection with potential false positives'}
+    ]
+    
+    return render_template('admin/sites/waf_settings.html', 
+                           site=site,
+                           rule_levels=rule_levels)
