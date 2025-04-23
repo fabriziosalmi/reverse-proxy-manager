@@ -427,29 +427,95 @@ def save_config_to_git(site, config_content):
     """
     repo_path = current_app.config['NGINX_CONFIG_GIT_REPO']
     
-    # Create repo if it doesn't exist
-    if not os.path.exists(os.path.join(repo_path, '.git')):
-        os.makedirs(repo_path, exist_ok=True)
-        repo = git.Repo.init(repo_path)
-    else:
-        repo = git.Repo(repo_path)
-    
-    # Create site directory if it doesn't exist
-    site_dir = os.path.join(repo_path, 'sites')
-    os.makedirs(site_dir, exist_ok=True)
-    
-    # Write config file
-    file_path = os.path.join(site_dir, f"{site.domain}.conf")
-    with open(file_path, 'w') as f:
-        f.write(config_content)
-    
-    # Add to Git
-    repo.git.add(file_path)
-    
-    # Commit changes
-    message = f"Updated config for {site.domain}"
-    if not repo.head.is_valid() or len(repo.index.diff("HEAD")) > 0:
-        repo.git.commit('-m', message)
+    try:
+        # Create repo if it doesn't exist
+        if not os.path.exists(os.path.join(repo_path, '.git')):
+            os.makedirs(repo_path, exist_ok=True)
+            repo = git.Repo.init(repo_path)
+            # Add a README file for the initial commit
+            readme_path = os.path.join(repo_path, 'README.md')
+            with open(readme_path, 'w') as f:
+                f.write("# Nginx Configuration Repository\n\nStores Nginx configurations managed by the Italia CDN Proxy system.\n")
+            repo.git.add(readme_path)
+            repo.git.commit('-m', 'Initial commit')
+        else:
+            repo = git.Repo(repo_path)
+        
+        # Ensure we have the latest changes
+        try:
+            # Only pull if there's a remote configured
+            if len(repo.remotes) > 0:
+                # Stash any local changes before pulling
+                repo.git.stash('save', 'Auto-stash before pull')
+                repo.git.pull('--rebase')
+                # Try to apply stashed changes
+                try:
+                    repo.git.stash('pop')
+                except git.GitCommandError:
+                    # If there are conflicts, just keep the stashed changes
+                    log_activity('warning', f"Conflicts during git stash pop in save_config_to_git for {site.domain}")
+        except git.GitCommandError as e:
+            # Log but continue, we'll work with the local copy
+            log_activity('warning', f"Failed to pull latest changes: {str(e)}")
+        
+        # Create site directory if it doesn't exist
+        site_dir = os.path.join(repo_path, 'sites')
+        os.makedirs(site_dir, exist_ok=True)
+        
+        # Write config file with atomic operation
+        file_path = os.path.join(site_dir, f"{site.domain}.conf")
+        temp_file_path = f"{file_path}.temp"
+        with open(temp_file_path, 'w') as f:
+            f.write(config_content)
+        os.replace(temp_file_path, file_path)  # Atomic replace operation
+        
+        # Add to Git with proper error handling
+        try:
+            repo.git.add(file_path)
+            
+            # Check if there are changes to commit
+            modified_files = [item.a_path for item in repo.index.diff('HEAD')] if repo.head.is_valid() else []
+            staged_files = [item.a_path for item in repo.index.diff('--cached')]
+            untracked_files = repo.untracked_files
+            has_changes = len(modified_files) > 0 or len(staged_files) > 0 or file_path in untracked_files
+            
+            # Only commit if there are actual changes
+            if has_changes:
+                # Get committer info from app config, fallback to generic values
+                committer_name = current_app.config.get('GIT_COMMITTER_NAME', 'Italia CDN Proxy')
+                committer_email = current_app.config.get('GIT_COMMITTER_EMAIL', 'system@italiacdn.example.com')
+                
+                # Set Git environment variables for commit
+                my_env = os.environ.copy()
+                my_env['GIT_AUTHOR_NAME'] = committer_name
+                my_env['GIT_AUTHOR_EMAIL'] = committer_email
+                my_env['GIT_COMMITTER_NAME'] = committer_name
+                my_env['GIT_COMMITTER_EMAIL'] = committer_email
+                
+                # Format an informative commit message
+                message = f"Updated config for {site.domain}\n\n"
+                message += f"Protocol: {site.protocol}\n"
+                message += f"Origin: {site.origin_protocol}://{site.origin_address}:{site.origin_port}\n"
+                message += f"Cache enabled: {'Yes' if site.enable_cache else 'No'}\n"
+                message += f"Updated at: {datetime.utcnow().isoformat()}"
+                
+                # Commit the changes with the configured identity
+                repo.git.commit('-m', message, env=my_env)
+                
+                # Try to push if a remote is configured
+                if len(repo.remotes) > 0:
+                    try:
+                        repo.git.push()
+                    except git.GitCommandError as e:
+                        # Log but don't fail if push fails
+                        log_activity('warning', f"Failed to push config changes: {str(e)}")
+        except git.GitCommandError as e:
+            # Log the error but don't fail the operation
+            log_activity('warning', f"Git error when saving config for {site.domain}: {str(e)}")
+    except Exception as e:
+        # Log errors but allow the operation to continue
+        log_activity('error', f"Failed to save config to Git for {site.domain}: {str(e)}")
+        # Don't re-raise, as saving to git is not critical for the main functionality
 
 def deploy_to_node(site_id, node_id, nginx_config, test_only=False):
     """
@@ -561,6 +627,12 @@ def deploy_to_node(site_id, node_id, nginx_config, test_only=False):
         
         raise ValueError(f"Configuration validation failed: {error_message}\nSuggestion: {error_analysis['suggestion']}")
     
+    # Variables for proper cleanup in finally block
+    ssh_client = None
+    sftp = None
+    temp_file_path = None
+    config_file_path = None
+    
     try:
         # Connect to the node
         ssh_client = paramiko.SSHClient()
@@ -624,7 +696,6 @@ def deploy_to_node(site_id, node_id, nginx_config, test_only=False):
             )
             db.session.add(log)
             db.session.commit()
-            ssh_client.close()
             raise ValueError(f"Failed to create nginx config directory: {error}")
             
         # Ensure ACME challenge directory exists for Let's Encrypt
@@ -639,8 +710,11 @@ def deploy_to_node(site_id, node_id, nginx_config, test_only=False):
         config_file_path = f"{node.nginx_config_path}/{domain}.conf"
         sftp = ssh_client.open_sftp()
         
+        # Create a unique temporary file name using timestamp to avoid conflicts
+        temp_timestamp = int(time.time())
+        temp_file_path = f"{config_file_path}.{temp_timestamp}.tmp"
+        
         # Write to a temporary file first
-        temp_file_path = f"{config_file_path}.tmp"
         with sftp.file(temp_file_path, 'w') as f:
             f.write(nginx_config)
         
@@ -682,7 +756,6 @@ def deploy_to_node(site_id, node_id, nginx_config, test_only=False):
                     db.session.add(site_node)
                 
                 db.session.commit()
-                ssh_client.close()
                 
                 warning_message = f"Site configuration deployed but Nginx reload had SSL certificate warnings. You need to request SSL certificates for {domain}."
                 warnings.append(warning_message)
@@ -700,7 +773,6 @@ def deploy_to_node(site_id, node_id, nginx_config, test_only=False):
                 )
                 db.session.add(log)
                 db.session.commit()
-                ssh_client.close()
                 raise ValueError(f"Failed to reload nginx: {error}")
         
         # Update or create the site_node relationship
@@ -745,7 +817,6 @@ def deploy_to_node(site_id, node_id, nginx_config, test_only=False):
             # Log but don't fail deployment if versioning fails
             log_activity('warning', f"Failed to save config version for {site.domain}: {str(e)}")
         
-        ssh_client.close()
         return True
         
     except Exception as e:
@@ -762,6 +833,24 @@ def deploy_to_node(site_id, node_id, nginx_config, test_only=False):
         
         # Re-raise the exception
         raise
+    
+    finally:
+        # Clean up resources to prevent leaks
+        try:
+            # Close SFTP connection if open
+            if sftp:
+                sftp.close()
+            
+            # Clean up temporary file if it exists and connection is still active
+            if temp_file_path and ssh_client and ssh_client.get_transport() and ssh_client.get_transport().is_active():
+                ssh_client.exec_command(f"rm -f {temp_file_path}")
+            
+            # Close SSH connection if open
+            if ssh_client:
+                ssh_client.close()
+        except Exception as cleanup_error:
+            # Log cleanup errors but don't fail the deployment
+            log_activity('warning', f"Error during cleanup in deploy_to_node: {str(cleanup_error)}")
 
 def get_node_stats(node):
     """
@@ -808,9 +897,52 @@ def get_node_stats(node):
             stdin, stdout, stderr = ssh_client.exec_command("vmstat 1 2 | tail -1 | awk '{print 100-$15\"%\"}' || echo 'N/A'")
             cpu_usage = stdout.read().decode('utf-8').strip()
         
-        # Get memory usage - fixed command with proper quotes
-        stdin, stdout, stderr = ssh_client.exec_command("free -m | grep 'Mem:' | awk '{printf \"%d/%dMB (%d%%)\", $3, $2, int($3*100/$2)}'")
-        memory_usage = stdout.read().decode('utf-8').strip()
+        # Get memory usage with improved robustness
+        memory_usage = "N/A"
+        try:
+            # Try the standard free command first
+            stdin, stdout, stderr = ssh_client.exec_command("free -m | grep 'Mem:' | awk '{printf \"%d/%dMB (%d%%)\", $3, $2, int($3*100/$2)}'")
+            memory_output = stdout.read().decode('utf-8').strip()
+            
+            # Verify it has the expected format (numbers/numbers with percentage)
+            if re.match(r'\d+/\d+MB \(\d+%\)', memory_output):
+                memory_usage = memory_output
+            else:
+                # Fallback to parsing free output manually
+                stdin, stdout, stderr = ssh_client.exec_command("free -m | grep 'Mem:'")
+                free_output = stdout.read().decode('utf-8').strip()
+                if free_output:
+                    parts = free_output.split()
+                    if len(parts) >= 3:
+                        try:
+                            total = int(parts[1])
+                            used = int(parts[2])
+                            if total > 0:  # Avoid division by zero
+                                percent = int((used * 100) / total)
+                                memory_usage = f"{used}/{total}MB ({percent}%)"
+                        except (ValueError, IndexError):
+                            # If conversion fails, try another approach
+                            pass
+            
+            # If all else fails, try vmstat
+            if memory_usage == "N/A":
+                stdin, stdout, stderr = ssh_client.exec_command("vmstat -s | grep 'used memory' | awk '{print $1}' && vmstat -s | grep 'total memory' | awk '{print $1}'")
+                vm_output = stdout.read().decode('utf-8').strip().split('\n')
+                if len(vm_output) >= 2:
+                    try:
+                        used_kb = int(vm_output[0])
+                        total_kb = int(vm_output[1])
+                        used_mb = used_kb // 1024
+                        total_mb = total_kb // 1024
+                        if total_mb > 0:  # Avoid division by zero
+                            percent = int((used_mb * 100) / total_mb)
+                            memory_usage = f"{used_mb}/{total_mb}MB ({percent}%)"
+                    except (ValueError, IndexError):
+                        # Keep default N/A value
+                        pass
+        except Exception as e:
+            log_activity('warning', f"Error parsing memory usage on node {node.name}: {str(e)}")
+            memory_usage = "N/A"
         
         # Get disk usage - fixed command with proper quotes
         stdin, stdout, stderr = ssh_client.exec_command("df -h / | grep -v Filesystem | awk '{printf \"%s/%s (%s)\", $3, $2, $5}'")

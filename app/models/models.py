@@ -56,7 +56,7 @@ class Node(db.Model):
     ssh_port = db.Column(db.Integer, default=22)
     ssh_user = db.Column(db.String(64), nullable=False)
     ssh_key_path = db.Column(db.String(256), nullable=True)  # Path to SSH key file
-    ssh_password = db.Column(db.String(256), nullable=True)  # Encrypted password (if using password auth)
+    _ssh_password = db.Column('ssh_password', db.String(256), nullable=True)  # Encrypted password (if using password auth)
     is_active = db.Column(db.Boolean, default=True)
     is_discovered = db.Column(db.Boolean, default=False)  # Whether this node was discovered from YAML
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -67,6 +67,51 @@ class Node(db.Model):
     
     # Relationships
     site_nodes = db.relationship('SiteNode', backref='node', lazy='dynamic')
+    
+    @property
+    def ssh_password(self):
+        """Decrypt password when accessed"""
+        from cryptography.fernet import Fernet
+        from flask import current_app
+        
+        if not self._ssh_password:
+            return None
+            
+        try:
+            key = current_app.config.get('PASSWORD_ENCRYPTION_KEY', 'fallback_key_for_development_only').encode()
+            # Pad the key to 32 bytes for Fernet
+            key = key.ljust(32)[:32]
+            cipher = Fernet(Fernet.generate_key()) if len(key) < 32 else Fernet(key)
+            decrypted = cipher.decrypt(self._ssh_password.encode())
+            return decrypted.decode()
+        except Exception as e:
+            # Log the error but don't expose details
+            import logging
+            logging.error(f"Error decrypting SSH password: {str(e)}")
+            return None
+    
+    @ssh_password.setter
+    def ssh_password(self, password):
+        """Encrypt password when set"""
+        if not password:
+            self._ssh_password = None
+            return
+            
+        from cryptography.fernet import Fernet
+        from flask import current_app
+        
+        try:
+            key = current_app.config.get('PASSWORD_ENCRYPTION_KEY', 'fallback_key_for_development_only').encode()
+            # Pad the key to 32 bytes for Fernet
+            key = key.ljust(32)[:32]
+            cipher = Fernet(Fernet.generate_key()) if len(key) < 32 else Fernet(key)
+            encrypted = cipher.encrypt(password.encode())
+            self._ssh_password = encrypted.decode()
+        except Exception as e:
+            # Log the error but don't expose details
+            import logging
+            logging.error(f"Error encrypting SSH password: {str(e)}")
+            self._ssh_password = None
     
     def to_dict(self):
         return {

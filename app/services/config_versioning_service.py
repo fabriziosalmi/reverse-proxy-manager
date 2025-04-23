@@ -58,45 +58,118 @@ def save_config_version(site, config_content, message=None, author=None):
     site_dir = os.path.join(repo_path, 'sites')
     os.makedirs(site_dir, exist_ok=True)
     
-    # Write config file
+    # Ensure we have the latest changes
+    try:
+        # Only pull if there's a remote configured
+        if len(repo.remotes) > 0:
+            # Stash any local changes before pulling
+            repo.git.stash('save', 'Auto-stash before pull')
+            repo.git.pull('--rebase')
+            # Try to apply stashed changes
+            try:
+                repo.git.stash('pop')
+            except git.GitCommandError:
+                # If there are conflicts, just keep the stashed changes
+                log_activity('warning', f"Conflicts during git stash pop in save_config_version for {site.domain}")
+    except git.GitCommandError as e:
+        # Log but continue, we'll work with the local copy
+        log_activity('warning', f"Failed to pull latest changes: {str(e)}")
+    
+    # Write config file - use atomic write to avoid corruption
     file_path = os.path.join(site_dir, f"{site.domain}.conf")
-    with open(file_path, 'w') as f:
-        f.write(config_content)
+    temp_file_path = f"{file_path}.{datetime.now().timestamp()}.tmp"
     
-    # Add to Git
-    repo.git.add(file_path)
+    try:
+        # Write to temporary file first
+        with open(temp_file_path, 'w') as f:
+            f.write(config_content)
+        
+        # Use atomic rename to replace the original file
+        os.replace(temp_file_path, file_path)
+    except Exception as e:
+        # Clean up temp file if there was an error
+        if os.path.exists(temp_file_path):
+            try:
+                os.remove(temp_file_path)
+            except:
+                pass
+        log_activity('error', f"Failed to write config file: {str(e)}")
+        raise
     
-    # Commit message
-    if not message:
-        message = f"Updated configuration for {site.domain}"
-    
-    # Add author info if provided
-    if author:
-        author_info = f"{author} <{author}@italiacdn-proxy.local>"
-        repo.git.commit('-m', message, '--author', author_info)
-    else:
-        repo.git.commit('-m', message)
-    
-    # Get commit details
-    commit = repo.head.commit
-    commit_hash = commit.hexsha
-    commit_date = datetime.fromtimestamp(commit.committed_date)
-    commit_message = commit.message
-    
-    # Save version to database
-    config_version = ConfigVersion(
-        site_id=site.id,
-        commit_hash=commit_hash,
-        message=commit_message,
-        author=author or 'system',
-        created_at=commit_date
-    )
-    db.session.add(config_version)
-    db.session.commit()
-    
-    log_activity('info', f"Saved new configuration version for {site.domain}: {commit_hash[:8]}")
-    
-    return config_version
+    # Add to Git with error handling
+    try:
+        repo.git.add(file_path)
+        
+        # Check if there are actual changes
+        if not repo.is_dirty():
+            log_activity('info', f"No changes detected for {site.domain, skipping version creation}")
+            return None
+        
+        # Commit message
+        if not message:
+            message = f"Updated configuration for {site.domain}"
+        
+        # Set up environment for the commit
+        my_env = os.environ.copy()
+        
+        if author:
+            # Format author information
+            if '@' not in author:
+                author_email = f"{author.lower().replace(' ', '.')}@italiacdn-proxy.local"
+            else:
+                author_email = author
+                author = author.split('@')[0]
+            
+            # Set author environment variables
+            my_env['GIT_AUTHOR_NAME'] = author
+            my_env['GIT_AUTHOR_EMAIL'] = author_email
+            my_env['GIT_COMMITTER_NAME'] = author
+            my_env['GIT_COMMITTER_EMAIL'] = author_email
+            
+            # Make the commit with author info
+            repo.git.commit('-m', message, env=my_env)
+        else:
+            # Use system defaults
+            repo.git.commit('-m', message)
+        
+        # Get commit details
+        commit = repo.head.commit
+        commit_hash = commit.hexsha
+        commit_date = datetime.fromtimestamp(commit.committed_date)
+        commit_message = commit.message
+        commit_author = commit.author.name
+        
+        # Try to push if a remote is configured
+        if len(repo.remotes) > 0:
+            try:
+                repo.git.push()
+            except git.GitCommandError as e:
+                # Log but don't fail if push fails
+                log_activity('warning', f"Failed to push config changes: {str(e)}")
+        
+        # Save version to database
+        config_version = ConfigVersion(
+            site_id=site.id,
+            commit_hash=commit_hash,
+            message=commit_message,
+            author=commit_author,
+            created_at=commit_date
+        )
+        db.session.add(config_version)
+        db.session.commit()
+        
+        log_activity('info', f"Saved new configuration version for {site.domain}: {commit_hash[:8]}")
+        
+        return config_version
+        
+    except git.GitCommandError as e:
+        log_activity('error', f"Git error in save_config_version for {site.domain}: {str(e)}")
+        db.session.rollback()
+        raise
+    except Exception as e:
+        log_activity('error', f"Error in save_config_version for {site.domain}: {str(e)}")
+        db.session.rollback()
+        raise
 
 def get_config_versions(site):
     """

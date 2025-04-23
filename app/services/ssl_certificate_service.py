@@ -1807,3 +1807,101 @@ subjectAltName = DNS:{domain}, DNS:www.{domain}
                 dashboard['renewal_status']['not_configured'] += 1
                 
         return dashboard
+    
+    @staticmethod
+    def cleanup_dummy_certificates(node_id):
+        """
+        Clean up any temporary dummy certificates created for testing
+        
+        Args:
+            node_id: ID of the node to clean up certificates on
+            
+        Returns:
+            bool: Success indicator
+        """
+        node = Node.query.get(node_id)
+        if not node:
+            log_activity('error', f"Cannot clean up dummy certificates: Node {node_id} not found")
+            return False
+        
+        ssh_client = None
+        try:
+            # Connect to the node
+            ssh_client = paramiko.SSHClient()
+            ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            
+            # Connect using key or password with proper error handling
+            try:
+                if node.ssh_key_path:
+                    ssh_client.connect(
+                        hostname=node.ip_address,
+                        port=node.ssh_port,
+                        username=node.ssh_user,
+                        key_filename=node.ssh_key_path,
+                        timeout=10
+                    )
+                else:
+                    ssh_client.connect(
+                        hostname=node.ip_address,
+                        port=node.ssh_port,
+                        username=node.ssh_user,
+                        password=node.ssh_password,
+                        timeout=10
+                    )
+            except Exception as conn_error:
+                log_activity('error', f"Failed to connect to node {node.name} for dummy certificate cleanup: {str(conn_error)}")
+                return False
+            
+            # Check if the dummy certificate directory exists
+            dummy_dir = "/etc/nginx/ssl"
+            stdin, stdout, stderr = ssh_client.exec_command(f"test -d {dummy_dir} && echo 'exists' || echo 'not found'")
+            dir_exists = stdout.read().decode('utf-8').strip() == 'exists'
+            
+            if not dir_exists:
+                # Nothing to clean up
+                return True
+            
+            # Check for dummy certificate files
+            dummy_files = [
+                "dummy.crt", 
+                "dummy.key", 
+                "dummy-ca.crt", 
+                "dummy-ca.key", 
+                "dummy.csr",
+                "dummy-chain.pem", 
+                "dummy-fullchain.pem"
+            ]
+            
+            # First, check if any of these files actually exist
+            files_to_delete = []
+            for file in dummy_files:
+                file_path = f"{dummy_dir}/{file}"
+                stdin, stdout, stderr = ssh_client.exec_command(f"test -f {file_path} && echo 'exists' || echo 'not found'")
+                if stdout.read().decode('utf-8').strip() == 'exists':
+                    files_to_delete.append(file_path)
+            
+            if not files_to_delete:
+                # No files to clean up
+                return True
+            
+            # Delete the dummy certificate files
+            delete_cmd = f"sudo rm -f {' '.join(files_to_delete)}"
+            stdin, stdout, stderr = ssh_client.exec_command(delete_cmd)
+            exit_status = stdout.channel.recv_exit_status()
+            
+            if exit_status != 0:
+                error = stderr.read().decode('utf-8')
+                log_activity('warning', f"Error removing dummy certificate files on node {node.name}: {error}")
+                return False
+            
+            log_activity('info', f"Successfully cleaned up {len(files_to_delete)} dummy certificate files on node {node.name}")
+            return True
+            
+        except Exception as e:
+            log_activity('error', f"Error cleaning up dummy certificates on node {node.name}: {str(e)}")
+            return False
+        
+        finally:
+            # Ensure SSH connection is always closed
+            if ssh_client:
+                ssh_client.close()
