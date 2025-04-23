@@ -84,7 +84,12 @@ def new_site():
             cache_time=int(request.form.get('cache_time', 3600)),
             cache_static_time=int(request.form.get('cache_static_time', 86400)),
             cache_browser_time=int(request.form.get('cache_browser_time', 3600)),
-            custom_cache_rules=request.form.get('custom_cache_rules')
+            custom_cache_rules=request.form.get('custom_cache_rules'),
+            # GeoIP configuration
+            use_geoip='use_geoip' in request.form,
+            geoip_mode=request.form.get('geoip_mode', 'blacklist'),
+            geoip_level='nginx',  # Force nginx-level for clients
+            geoip_countries=request.form.get('geoip_countries', '').strip()
         )
         
         db.session.add(site)
@@ -165,7 +170,7 @@ def edit_site(site_id):
         # GeoIP configuration
         use_geoip = 'use_geoip' in request.form
         geoip_mode = request.form.get('geoip_mode', 'blacklist')
-        geoip_level = request.form.get('geoip_level', 'nginx')
+        geoip_level = 'nginx'  # Force nginx-level for clients
         geoip_countries = request.form.get('geoip_countries', '').strip()
         
         # Update site in database

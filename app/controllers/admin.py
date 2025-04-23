@@ -1666,3 +1666,73 @@ def apply_preset(preset_name, site_id):
         return redirect(url_for('admin.view_site', site_id=site_id))
     else:
         return redirect(url_for('admin.view_preset', preset_name=preset_name))
+
+# Country Blocking Management (Admin Level - iptables)
+@admin.route('/nodes/<int:node_id>/country-blocking', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def node_country_blocking(node_id):
+    """Manage iptables-level country blocking for a node (admin only)"""
+    node = Node.query.get_or_404(node_id)
+    
+    from app.services.iptables_country_blocking_service import IptablesCountryBlockingService
+    
+    # Check if GeoIP module is installed and available
+    geoip_status = IptablesCountryBlockingService.check_geoip_module(node)
+    
+    # Get current blocked countries
+    blocked_countries = IptablesCountryBlockingService.get_blocked_countries(node)
+    
+    if request.method == 'POST':
+        action = request.form.get('action')
+        
+        if action == 'block':
+            # Get countries to block
+            countries = [c.strip() for c in request.form.get('countries', '').split(',') if c.strip()]
+            
+            if countries:
+                success, message = IptablesCountryBlockingService.block_countries(node, countries, current_user.id)
+                
+                if success:
+                    # Save rules to persist after reboot
+                    IptablesCountryBlockingService.save_iptables_rules(node)
+                    flash(message, 'success')
+                else:
+                    flash(message, 'error')
+            else:
+                flash('No countries specified', 'error')
+                
+        elif action == 'unblock':
+            # Get countries to unblock
+            countries = request.form.getlist('blocked_countries')
+            
+            if countries:
+                success, message = IptablesCountryBlockingService.unblock_countries(node, countries, current_user.id)
+                
+                if success:
+                    # Save rules to persist after reboot
+                    IptablesCountryBlockingService.save_iptables_rules(node)
+                    flash(message, 'success')
+                else:
+                    flash(message, 'error')
+            else:
+                flash('No countries selected for unblocking', 'error')
+                
+        elif action == 'install_geoip':
+            # Install GeoIP module
+            success, message = IptablesCountryBlockingService.install_geoip_module(node, current_user.id)
+            
+            if success:
+                flash(message, 'success')
+                # Refresh the GeoIP status
+                geoip_status = IptablesCountryBlockingService.check_geoip_module(node)
+            else:
+                flash(message, 'error')
+                
+        # Refresh the blocked countries list
+        blocked_countries = IptablesCountryBlockingService.get_blocked_countries(node)
+        
+    return render_template('admin/nodes/country_blocking.html', 
+                           node=node, 
+                           blocked_countries=blocked_countries,
+                           geoip_status=geoip_status)

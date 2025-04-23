@@ -166,18 +166,12 @@
                                 
                                 <div class="col-md-6">
                                     <label class="form-label">Implementation Level</label>
-                                    <div class="form-check">
-                                        <input class="form-check-input" type="radio" name="geoip_level" id="geoip_level_nginx" value="nginx" {{ 'checked' if not site.geoip_level or site.geoip_level == 'nginx' else '' }}>
-                                        <label class="form-check-label" for="geoip_level_nginx">
-                                            <strong>Nginx Level</strong> - More flexible, supports custom error pages
-                                        </label>
+                                    <div class="alert alert-info">
+                                        Geographic filtering will be implemented at the Nginx level. 
+                                        <br>
+                                        <small>Note: IP-level (iptables) filtering can only be configured by administrators</small>
                                     </div>
-                                    <div class="form-check">
-                                        <input class="form-check-input" type="radio" name="geoip_level" id="geoip_level_iptables" value="iptables" {{ 'checked' if site.geoip_level == 'iptables' else '' }}>
-                                        <label class="form-check-label" for="geoip_level_iptables">
-                                            <strong>Iptables Level</strong> - More secure, connection rejected at firewall level
-                                        </label>
-                                    </div>
+                                    <input type="hidden" name="geoip_level" value="nginx">
                                 </div>
                             </div>
                             
