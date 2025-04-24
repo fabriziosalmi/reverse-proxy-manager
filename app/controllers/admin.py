@@ -2219,9 +2219,16 @@ def settings():
             app_settings['debug_mode'] = 'debug_mode' in request.form
             app_settings['maintenance_mode'] = 'maintenance_mode' in request.form
             app_settings['allow_registration'] = 'allow_registration' in request.form
-            app_settings['max_upload_size'] = int(request.form.get('max_upload_size', 50))
-            app_settings['session_timeout'] = int(request.form.get('session_timeout', 30))
-            app_settings['log_retention_days'] = int(request.form.get('log_retention_days', 30))
+            
+            # Handle potentially empty form values with proper defaults
+            max_upload_size = request.form.get('max_upload_size', '')
+            app_settings['max_upload_size'] = int(max_upload_size) if max_upload_size.strip() else 50
+            
+            session_timeout = request.form.get('session_timeout', '')
+            app_settings['session_timeout'] = int(session_timeout) if session_timeout.strip() else 30
+            
+            log_retention_days = request.form.get('log_retention_days', '')
+            app_settings['log_retention_days'] = int(log_retention_days) if log_retention_days.strip() else 30
             
             # Update config in database
             try:
