@@ -224,24 +224,10 @@
                             </div>
                         </div>
 
-                        <!-- Nginx Configuration Section -->
-                        <div class="form-section">
-                            <h4 class="form-section-title">
-                                <i class="fas fa-cogs"></i>Nginx Configuration
-                            </h4>
-
-                            <div class="mb-3">
-                                <label for="nginx_config_path" class="form-label">Nginx Config Path</label>
-                                <input type="text" class="form-control" id="nginx_config_path" name="nginx_config_path" value="/etc/nginx/conf.d">
-                                <div class="form-text">Path to the directory where site configuration files will be placed on the node (e.g., <code>/etc/nginx/sites-available</code> or <code>/etc/nginx/conf.d</code>).</div>
-                            </div>
-
-                            <div class="mb-3">
-                                <label for="nginx_reload_command" class="form-label">Nginx Reload Command</label>
-                                <input type="text" class="form-control" id="nginx_reload_command" name="nginx_reload_command" value="sudo systemctl reload nginx">
-                                <div class="form-text">Command executed on the node to reload Nginx after configuration changes (e.g., <code>sudo systemctl reload nginx</code> or <code>sudo service nginx reload</code>).</div>
-                            </div>
-                        </div>
+                        <!-- Hidden default values for proxy configuration -->
+                        <input type="hidden" name="proxy_type" value="nginx">
+                        <input type="hidden" name="proxy_config_path" value="/etc/nginx/conf.d">
+                        <input type="hidden" name="proxy_reload_command" value="sudo systemctl reload nginx">
 
                         <div class="d-flex justify-content-between align-items-center mt-4 pt-3 border-top"> <!-- Added top border -->
                             <a href="{{ url_for('admin.list_nodes') }}" class="btn btn-outline-secondary btn-custom">
@@ -256,7 +242,7 @@
             </div>
 
             <div class="text-center mt-3">
-                <small class="text-muted">After adding a node, you can check its connectivity and manage it from the Nodes list.</small>
+                <small class="text-muted">After adding a node, you can configure the proxy software (Nginx, Caddy, or Traefik) later.</small>
             </div>
         </div>
     </div>
