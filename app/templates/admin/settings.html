@@ -33,6 +33,11 @@
                 <i class="fas fa-shield-alt me-2"></i>Security
             </button>
         </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="system-tab" data-bs-toggle="tab" data-bs-target="#system" type="button" role="tab" aria-controls="system" aria-selected="false">
+                <i class="fas fa-server me-2"></i>System
+            </button>
+        </li>
     </ul>
 
     <!-- Settings Content -->
@@ -381,6 +386,134 @@
                             </button>
                         </div>
                     </form>
+                </div>
+            </div>
+        </div>
+        
+        <!-- System Tab -->
+        <div class="tab-pane fade" id="system" role="tabpanel" aria-labelledby="system-tab">
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-primary text-white">
+                    <h3 class="card-title h5 mb-0">System Operations</h3>
+                </div>
+                <div class="card-body">
+                    <div class="row mb-4">
+                        <div class="col-md-6">
+                            <div class="card shadow-sm border-0 h-100">
+                                <div class="card-header bg-light">
+                                    <h4 class="card-title h6 mb-0"><i class="fas fa-sync me-2"></i>System Information</h4>
+                                </div>
+                                <div class="card-body">
+                                    <p>View critical system information and status.</p>
+                                    <div class="mb-4">
+                                        <div class="d-flex justify-content-between align-items-center mb-2">
+                                            <span>Database Size:</span>
+                                            <span class="badge bg-primary">{{ "%.2f"|format(database_size|default(24.5)) }} MB</span>
+                                        </div>
+                                        <div class="d-flex justify-content-between align-items-center mb-2">
+                                            <span>Config Files:</span>
+                                            <span class="badge bg-primary">{{ config_files_count|default(42) }}</span>
+                                        </div>
+                                        <div class="d-flex justify-content-between align-items-center mb-2">
+                                            <span>System Logs:</span>
+                                            <span class="badge bg-primary">{{ log_files_count|default(156) }}</span>
+                                        </div>
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <span>Disk Usage:</span>
+                                            <span class="badge bg-primary">{{ disk_usage|default('128 MB') }}</span>
+                                        </div>
+                                    </div>
+                                    <a href="{{ url_for('admin.system_logs') }}" class="btn btn-outline-primary w-100">
+                                        <i class="fas fa-list-alt me-1"></i> View System Logs
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="card shadow-sm border-0 h-100">
+                                <div class="card-header bg-danger text-white">
+                                    <h4 class="card-title h6 mb-0"><i class="fas fa-exclamation-triangle me-2"></i>System Reset</h4>
+                                </div>
+                                <div class="card-body">
+                                    <div class="alert alert-warning">
+                                        <i class="fas fa-exclamation-triangle me-2"></i>
+                                        <strong>Warning:</strong> System reset is a destructive operation that will delete data from your system.
+                                    </div>
+                                    
+                                    <p>Use system reset to delete sites, nodes, or all system data for testing or setup purposes. This operation cannot be undone.</p>
+                                    
+                                    <div class="text-center">
+                                        <a href="{{ url_for('admin.system_reset') }}" class="btn btn-danger">
+                                            <i class="fas fa-trash-alt me-1"></i> Proceed to System Reset
+                                        </a>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="card shadow-sm border-0 h-100">
+                                <div class="card-header bg-light">
+                                    <h4 class="card-title h6 mb-0"><i class="fas fa-database me-2"></i>Database Maintenance</h4>
+                                </div>
+                                <div class="card-body">
+                                    <p>Perform database maintenance operations to optimize performance.</p>
+                                    <form method="POST" action="{{ url_for('admin.settings') }}">
+                                        <input type="hidden" name="section" value="database">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        
+                                        <div class="d-grid gap-2">
+                                            <button type="submit" name="action" value="vacuum" class="btn btn-outline-primary">
+                                                <i class="fas fa-broom me-1"></i> Vacuum Database
+                                            </button>
+                                            <button type="submit" name="action" value="reindex" class="btn btn-outline-primary">
+                                                <i class="fas fa-sort-amount-up me-1"></i> Reindex Database
+                                            </button>
+                                            <button type="submit" name="action" value="optimize" class="btn btn-outline-primary">
+                                                <i class="fas fa-bolt me-1"></i> Optimize Database
+                                            </button>
+                                        </div>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="card shadow-sm border-0 h-100">
+                                <div class="card-header bg-light">
+                                    <h4 class="card-title h6 mb-0"><i class="fas fa-file-archive me-2"></i>Export System Data</h4>
+                                </div>
+                                <div class="card-body">
+                                    <p>Export system data for backup or migration purposes.</p>
+                                    <form method="POST" action="{{ url_for('admin.settings') }}">
+                                        <input type="hidden" name="section" value="export">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        
+                                        <div class="mb-3">
+                                            <label class="form-label">Select what to export:</label>
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" id="export_config" name="export_config" checked>
+                                                <label class="form-check-label" for="export_config">System Configuration</label>
+                                            </div>
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" id="export_sites" name="export_sites" checked>
+                                                <label class="form-check-label" for="export_sites">Sites Data</label>
+                                            </div>
+                                            <div class="form-check mb-3">
+                                                <input class="form-check-input" type="checkbox" id="export_users" name="export_users" checked>
+                                                <label class="form-check-label" for="export_users">User Data</label>
+                                            </div>
+                                        </div>
+                                        
+                                        <button type="submit" name="action" value="export" class="btn btn-outline-primary w-100">
+                                            <i class="fas fa-download me-1"></i> Export System Data
+                                        </button>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
