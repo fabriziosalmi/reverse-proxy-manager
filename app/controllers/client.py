@@ -2,7 +2,7 @@ from flask import Blueprint, render_template, request, flash, redirect, url_for,
 from flask_login import login_required, current_user
 from app.models.models import db, Site, Node, SiteNode, DeploymentLog, SSLCertificate
 from app.services.access_control import client_required
-from app.services.nginx_service import generate_nginx_config, deploy_to_node
+from app.services.proxy_service_factory import ProxyServiceFactory
 from datetime import datetime
 from app.services.analytics_service import AnalyticsService
 
@@ -50,6 +50,7 @@ def new_site():
         name = request.form.get('name')
         domain = request.form.get('domain')
         protocol = request.form.get('protocol', 'https')
+        origin_protocol = request.form.get('origin_protocol', 'http')
         origin_address = request.form.get('origin_address')
         origin_port = request.form.get('origin_port')
         use_waf = 'use_waf' in request.form
@@ -74,6 +75,7 @@ def new_site():
             name=name,
             domain=domain,
             protocol=protocol,
+            origin_protocol=origin_protocol,
             origin_address=origin_address,
             origin_port=origin_port,
             user_id=current_user.id,
@@ -89,7 +91,7 @@ def new_site():
             # GeoIP configuration
             use_geoip='use_geoip' in request.form,
             geoip_mode=request.form.get('geoip_mode', 'blacklist'),
-            geoip_level='nginx',  # Force nginx-level for clients
+            geoip_level=request.form.get('geoip_level', 'nginx'),
             geoip_countries=request.form.get('geoip_countries', '').strip()
         )
         
@@ -112,12 +114,20 @@ def new_site():
         # Initiate deployment process for the new site on all selected nodes
         # This would typically be done asynchronously in a real application
         try:
-            # Generate Nginx configuration
-            nginx_config = generate_nginx_config(site)
-            
-            # Deploy to each node
+            # Deploy to each node using the appropriate proxy service
             for node_id in node_ids:
-                deploy_to_node(site.id, node_id, nginx_config)
+                node = Node.query.get(node_id)
+                if not node:
+                    continue
+                
+                # Get the appropriate proxy service for this node
+                proxy_service = ProxyServiceFactory.create_service(node.proxy_type)
+                
+                # Generate configuration for the specific proxy type
+                config = proxy_service.generate_config(site)
+                
+                # Deploy to the node
+                proxy_service.deploy_config(site.id, node.id, config)
             
             flash('Site created and deployment initiated', 'success')
         except Exception as e:
@@ -155,6 +165,7 @@ def edit_site(site_id):
         # Extract data from form
         name = request.form.get('name')
         protocol = request.form.get('protocol')
+        origin_protocol = request.form.get('origin_protocol', site.origin_protocol)
         origin_address = request.form.get('origin_address')
         origin_port = request.form.get('origin_port')
         use_waf = 'use_waf' in request.form
@@ -171,12 +182,13 @@ def edit_site(site_id):
         # GeoIP configuration
         use_geoip = 'use_geoip' in request.form
         geoip_mode = request.form.get('geoip_mode', 'blacklist')
-        geoip_level = 'nginx'  # Force nginx-level for clients
+        geoip_level = request.form.get('geoip_level', 'nginx')
         geoip_countries = request.form.get('geoip_countries', '').strip()
         
         # Update site in database
         site.name = name
         site.protocol = protocol
+        site.origin_protocol = origin_protocol
         site.origin_address = origin_address
         site.origin_port = origin_port
         site.use_waf = use_waf
@@ -213,14 +225,22 @@ def edit_site(site_id):
         
         db.session.commit()
         
-        # Regenerate Nginx configuration and redeploy to all nodes
+        # Generate configurations and deploy to all nodes
         try:
-            # Generate updated Nginx configuration
-            nginx_config = generate_nginx_config(site)
-            
-            # Deploy to each node
+            # Deploy to each node using the appropriate proxy service
             for node_id in node_ids:
-                deploy_to_node(site.id, int(node_id), nginx_config)
+                node = Node.query.get(int(node_id))
+                if not node:
+                    continue
+                
+                # Get the appropriate proxy service for this node
+                proxy_service = ProxyServiceFactory.create_service(node.proxy_type)
+                
+                # Generate configuration for the specific proxy type
+                config = proxy_service.generate_config(site)
+                
+                # Deploy to the node
+                proxy_service.deploy_config(site.id, node.id, config)
             
             flash('Site updated and redeployment initiated', 'success')
         except Exception as e:

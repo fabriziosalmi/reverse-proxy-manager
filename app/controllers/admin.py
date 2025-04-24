@@ -211,7 +211,10 @@ def list_nodes():
 @admin_required
 def new_node():
     if request.method == 'GET':
-        return render_template('admin/nodes/new.html')
+        # Get supported proxy types for the form
+        from app.services.proxy_service_factory import ProxyServiceFactory
+        proxy_types = ProxyServiceFactory.get_supported_proxy_types()
+        return render_template('admin/nodes/new.html', proxy_types=proxy_types)
     
     if request.method == 'POST':
         name = request.form.get('name')
@@ -220,8 +223,23 @@ def new_node():
         ssh_user = request.form.get('ssh_user')
         ssh_key_path = request.form.get('ssh_key_path')
         ssh_password = request.form.get('ssh_password')
-        nginx_config_path = request.form.get('nginx_config_path', '/etc/nginx/conf.d')
-        nginx_reload_command = request.form.get('nginx_reload_command', 'sudo systemctl reload nginx')
+        proxy_type = request.form.get('proxy_type', 'nginx')
+        
+        # Get proxy-specific configuration paths
+        if proxy_type == 'nginx':
+            proxy_config_path = request.form.get('proxy_config_path', '/etc/nginx/conf.d')
+            proxy_reload_command = request.form.get('proxy_reload_command', 'sudo systemctl reload nginx')
+        elif proxy_type == 'caddy':
+            proxy_config_path = request.form.get('proxy_config_path', '/etc/caddy')
+            proxy_reload_command = request.form.get('proxy_reload_command', 'sudo systemctl reload caddy')
+        elif proxy_type == 'traefik':
+            proxy_config_path = request.form.get('proxy_config_path', '/etc/traefik/dynamic')
+            proxy_reload_command = request.form.get('proxy_reload_command', 'sudo systemctl reload traefik')
+        else:
+            # Default to nginx if unsupported proxy type somehow got through
+            proxy_type = 'nginx'
+            proxy_config_path = request.form.get('proxy_config_path', '/etc/nginx/conf.d')
+            proxy_reload_command = request.form.get('proxy_reload_command', 'sudo systemctl reload nginx')
         
         # Validation
         errors = []
@@ -264,7 +282,9 @@ def new_node():
         if errors:
             for error in errors:
                 flash(error, 'error')
-            return render_template('admin/nodes/new.html')
+            from app.services.proxy_service_factory import ProxyServiceFactory
+            proxy_types = ProxyServiceFactory.get_supported_proxy_types()
+            return render_template('admin/nodes/new.html', proxy_types=proxy_types)
         
         # Create new node
         node = Node(
@@ -274,8 +294,9 @@ def new_node():
             ssh_user=ssh_user,
             ssh_key_path=ssh_key_path,
             ssh_password=ssh_password,
-            nginx_config_path=nginx_config_path,
-            nginx_reload_command=nginx_reload_command,
+            proxy_type=proxy_type,
+            proxy_config_path=proxy_config_path,
+            proxy_reload_command=proxy_reload_command,
             is_active=True
         )
         
@@ -292,7 +313,10 @@ def edit_node(node_id):
     node = Node.query.get_or_404(node_id)
     
     if request.method == 'GET':
-        return render_template('admin/nodes/edit.html', node=node)
+        # Get supported proxy types for the form
+        from app.services.proxy_service_factory import ProxyServiceFactory
+        proxy_types = ProxyServiceFactory.get_supported_proxy_types()
+        return render_template('admin/nodes/edit.html', node=node, proxy_types=proxy_types)
     
     if request.method == 'POST':
         name = request.form.get('name')
@@ -301,8 +325,9 @@ def edit_node(node_id):
         ssh_user = request.form.get('ssh_user')
         ssh_key_path = request.form.get('ssh_key_path')
         ssh_password = request.form.get('ssh_password')
-        nginx_config_path = request.form.get('nginx_config_path')
-        nginx_reload_command = request.form.get('nginx_reload_command')
+        proxy_type = request.form.get('proxy_type', node.proxy_type)  # Use existing type if not provided
+        proxy_config_path = request.form.get('proxy_config_path')
+        proxy_reload_command = request.form.get('proxy_reload_command')
         is_active = 'is_active' in request.form
         
         # Validation
@@ -314,7 +339,6 @@ def edit_node(node_id):
             errors.append('Node name already exists')
         
         # Validate IP address format
-        import re
         ip_pattern = re.compile(r'^(\d{1,3}\.){3}\d{1,3}$')
         if not ip_address or not ip_pattern.match(ip_address):
             errors.append('Invalid IP address format')
@@ -338,15 +362,14 @@ def edit_node(node_id):
         if not ssh_user or not ssh_user.strip():
             errors.append('SSH username is required')
         
-        # Validate auth method - at least one of SSH key or password must be provided
-        if not ssh_key_path and not ssh_password:
-            errors.append('Either SSH key path or password must be provided')
-        
         # Display errors if any
         if errors:
             for error in errors:
                 flash(error, 'error')
-            return render_template('admin/nodes/edit.html', node=node)
+            # Get proxy types again for the form
+            from app.services.proxy_service_factory import ProxyServiceFactory
+            proxy_types = ProxyServiceFactory.get_supported_proxy_types()
+            return render_template('admin/nodes/edit.html', node=node, proxy_types=proxy_types)
         
         # Update node
         node.name = name
@@ -359,9 +382,11 @@ def edit_node(node_id):
             
         if ssh_password:
             node.ssh_password = ssh_password
-            
-        node.nginx_config_path = nginx_config_path
-        node.nginx_reload_command = nginx_reload_command
+        
+        # Update proxy type and related fields    
+        node.proxy_type = proxy_type
+        node.proxy_config_path = proxy_config_path
+        node.proxy_reload_command = proxy_reload_command
         node.is_active = is_active
         node.updated_at = datetime.utcnow()
         
@@ -534,7 +559,7 @@ def get_node_stats_ajax(node_id):
 @login_required
 @admin_required
 def redeploy_all_sites(node_id):
-    """Redeploy all sites on a specific node"""
+    """Redeploy all sites on a specific node using the appropriate proxy service"""
     node = Node.query.get_or_404(node_id)
     
     # Get all sites deployed on this node
@@ -544,8 +569,11 @@ def redeploy_all_sites(node_id):
         flash('No sites are currently deployed on this node', 'info')
         return redirect(url_for('admin.view_node', node_id=node_id))
     
-    # Import needed functions
-    from app.services.nginx_service import generate_nginx_config, deploy_to_node
+    # Import the proxy service factory
+    from app.services.proxy_service_factory import ProxyServiceFactory
+    
+    # Create the appropriate proxy service based on the node's proxy type
+    proxy_service = ProxyServiceFactory.create_service(node.proxy_type)
     
     success_count = 0
     error_count = 0
@@ -556,19 +584,20 @@ def redeploy_all_sites(node_id):
             continue
         
         try:
-            # Generate updated Nginx configuration
-            nginx_config = generate_nginx_config(site)
+            # Generate config using the appropriate proxy service
+            config_content = proxy_service.generate_config(site)
             
             # Deploy to the node
-            deploy_to_node(site.id, node_id, nginx_config)
+            proxy_service.deploy_config(site.id, node_id, config_content)
             
             # Log the successful deployment
             log = DeploymentLog(
                 site_id=site.id,
                 node_id=node_id,
+                user_id=current_user.id,
                 action="redeploy",
                 status="success",
-                message=f"Successfully redeployed site during bulk operation"
+                message=f"Successfully redeployed site during bulk operation using {node.proxy_type} proxy"
             )
             db.session.add(log)
             success_count += 1
@@ -579,6 +608,7 @@ def redeploy_all_sites(node_id):
             log = DeploymentLog(
                 site_id=site.id,
                 node_id=node_id,
+                user_id=current_user.id,
                 action="redeploy",
                 status="error",
                 message=f"Failed to redeploy: {str(e)}"
@@ -2631,3 +2661,193 @@ def settings():
                           config_files_count=config_files_count,
                           log_files_count=log_files_count,
                           disk_usage=disk_usage)
+
+@admin.route('/nodes/<int:node_id>/install-proxy', methods=['POST'])
+@login_required
+@admin_required
+def install_proxy(node_id):
+    """Install the appropriate proxy service on a node based on its proxy_type"""
+    node = Node.query.get_or_404(node_id)
+    
+    # Import the proxy service factory
+    from app.services.proxy_service_factory import ProxyServiceFactory
+    
+    # Create the appropriate proxy service based on the node's proxy type
+    proxy_service = ProxyServiceFactory.create_service(node.proxy_type)
+    
+    # Install the service on the node
+    success, message = proxy_service.install_service(node, user_id=current_user.id)
+    
+    if success:
+        flash(message, 'success')
+    else:
+        flash(message, 'error')
+    
+    return redirect(url_for('admin.view_node', node_id=node_id))
+
+@admin.route('/nodes/<int:node_id>/change-proxy-type', methods=['POST'])
+@login_required
+@admin_required
+def change_node_proxy_type(node_id):
+    """Change a node's proxy type and redeploy all sites with the new proxy type"""
+    node = Node.query.get_or_404(node_id)
+    
+    # Get the new proxy type
+    new_proxy_type = request.form.get('proxy_type')
+    if not new_proxy_type or new_proxy_type == node.proxy_type:
+        flash('No change in proxy type', 'info')
+        return redirect(url_for('admin.view_node', node_id=node_id))
+    
+    # Get the available proxy types for validation
+    from app.services.proxy_service_factory import ProxyServiceFactory
+    available_types = ProxyServiceFactory.get_supported_proxy_types()
+    
+    if new_proxy_type not in available_types:
+        flash(f'Invalid proxy type: {new_proxy_type}', 'error')
+        return redirect(url_for('admin.view_node', node_id=node_id))
+    
+    # Update proxy configuration paths based on the new type
+    if new_proxy_type == 'nginx':
+        proxy_config_path = request.form.get('proxy_config_path', '/etc/nginx/conf.d')
+        proxy_reload_command = request.form.get('proxy_reload_command', 'sudo systemctl reload nginx')
+    elif new_proxy_type == 'caddy':
+        proxy_config_path = request.form.get('proxy_config_path', '/etc/caddy')
+        proxy_reload_command = request.form.get('proxy_reload_command', 'sudo systemctl reload caddy')
+    elif new_proxy_type == 'traefik':
+        proxy_config_path = request.form.get('proxy_config_path', '/etc/traefik/dynamic')
+        proxy_reload_command = request.form.get('proxy_reload_command', 'sudo systemctl reload traefik')
+    else:
+        proxy_config_path = request.form.get('proxy_config_path')
+        proxy_reload_command = request.form.get('proxy_reload_command')
+    
+    # Save the old proxy type for logging
+    old_proxy_type = node.proxy_type
+    
+    # Update the node
+    node.proxy_type = new_proxy_type
+    node.proxy_config_path = proxy_config_path
+    node.proxy_reload_command = proxy_reload_command
+    
+    # Save the changes
+    db.session.commit()
+    
+    # Optional: Redeploy sites if requested
+    should_redeploy = request.form.get('redeploy', 'false').lower() == 'true'
+    
+    if should_redeploy:
+        # Get all sites deployed on this node
+        site_nodes = SiteNode.query.filter_by(node_id=node_id).all()
+        
+        if not site_nodes:
+            flash(f'Node proxy type changed from {old_proxy_type} to {new_proxy_type}. No sites to redeploy.', 'success')
+            return redirect(url_for('admin.view_node', node_id=node_id))
+        
+        # Create the appropriate proxy service
+        proxy_service = ProxyServiceFactory.create_service(new_proxy_type)
+        
+        success_count = 0
+        error_count = 0
+        
+        for site_node in site_nodes:
+            site = Site.query.get(site_node.site_id)
+            if not site:
+                continue
+            
+            try:
+                # Generate config using the new proxy service
+                config_content = proxy_service.generate_config(site)
+                
+                # Deploy to the node
+                proxy_service.deploy_config(site.id, node_id, config_content)
+                
+                # Log the successful deployment
+                log = DeploymentLog(
+                    site_id=site.id,
+                    node_id=node_id,
+                    user_id=current_user.id,
+                    action="redeploy_after_proxy_change",
+                    status="success",
+                    message=f"Successfully redeployed site after changing node proxy type from {old_proxy_type} to {new_proxy_type}"
+                )
+                db.session.add(log)
+                success_count += 1
+                
+            except Exception as e:
+                # Log the error
+                error_count += 1
+                log = DeploymentLog(
+                    site_id=site.id,
+                    node_id=node_id,
+                    user_id=current_user.id,
+                    action="redeploy_after_proxy_change",
+                    status="error",
+                    message=f"Failed to redeploy after proxy type change: {str(e)}"
+                )
+                db.session.add(log)
+        
+        db.session.commit()
+        
+        if error_count > 0:
+            flash(f'Node proxy type changed from {old_proxy_type} to {new_proxy_type}. Redeployment completed with {success_count} successes and {error_count} failures. Check the logs for details.', 'warning')
+        else:
+            flash(f'Node proxy type changed from {old_proxy_type} to {new_proxy_type}. Successfully redeployed all {success_count} sites.', 'success')
+    else:
+        flash(f'Node proxy type changed from {old_proxy_type} to {new_proxy_type}. Sites were not redeployed.', 'info')
+    
+    return redirect(url_for('admin.view_node', node_id=node_id))
+
+@admin.route('/sites/<int:site_id>/nodes/<int:node_id>/deploy', methods=['POST'])
+@login_required
+@admin_required
+def deploy_site_to_node(site_id, node_id):
+    """Deploy a site to a node using the appropriate proxy service based on node type"""
+    site = Site.query.get_or_404(site_id)
+    node = Node.query.get_or_404(node_id)
+    
+    # Import the proxy service factory
+    from app.services.proxy_service_factory import ProxyServiceFactory
+    
+    try:
+        # Create the appropriate proxy service based on the node's proxy type
+        proxy_service = ProxyServiceFactory.create_service(node.proxy_type)
+        
+        # Generate configuration for the site
+        config_content = proxy_service.generate_config(site)
+        
+        # Deploy the configuration to the node
+        proxy_service.deploy_config(site_id, node_id, config_content)
+        
+        # Record the deployment in the log
+        log = DeploymentLog(
+            site_id=site_id,
+            node_id=node_id,
+            user_id=current_user.id,
+            action=f"deploy_using_{node.proxy_type}",
+            status="success",
+            message=f"Successfully deployed site to node using {node.proxy_type} proxy"
+        )
+        db.session.add(log)
+        db.session.commit()
+        
+        flash(f'Site successfully deployed to {node.name} using {node.proxy_type} proxy', 'success')
+    except Exception as e:
+        # Log the error
+        log = DeploymentLog(
+            site_id=site_id,
+            node_id=node_id,
+            user_id=current_user.id,
+            action=f"deploy_using_{node.proxy_type}",
+            status="error",
+            message=f"Deployment failed: {str(e)}"
+        )
+        db.session.add(log)
+        db.session.commit()
+        
+        flash(f'Deployment failed: {str(e)}', 'error')
+    
+    # Redirect to the appropriate page based on referrer
+    referrer = request.referrer
+    if referrer and 'view_site' in referrer:
+        return redirect(url_for('admin.view_site', site_id=site_id))
+    else:
+        return redirect(url_for('admin.view_node', node_id=node_id))

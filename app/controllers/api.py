@@ -345,10 +345,7 @@ def update_site_waf(site_id):
     # If auto-deploy is requested, update configs on all nodes
     if data.get('deploy', False):
         try:
-            from app.services.nginx_service import generate_nginx_config, deploy_to_node
-            
-            # Generate updated Nginx configuration with WAF settings
-            nginx_config = generate_nginx_config(site)
+            from app.services.proxy_service_factory import ProxyServiceFactory
             
             # Deploy to each node
             site_nodes = SiteNode.query.filter_by(site_id=site_id).all()
@@ -356,7 +353,20 @@ def update_site_waf(site_id):
             
             for site_node in site_nodes:
                 try:
-                    deploy_to_node(site.id, site_node.node_id, nginx_config)
+                    # Get the node
+                    node = Node.query.get(site_node.node_id)
+                    if not node:
+                        continue
+                    
+                    # Get the appropriate proxy service based on node type
+                    proxy_service = ProxyServiceFactory.create_service(node.proxy_type)
+                    
+                    # Generate config for the specific proxy service
+                    config_content = proxy_service.generate_config(site)
+                    
+                    # Deploy to node
+                    proxy_service.deploy_config(site.id, node.id, config_content)
+                    
                     deployment_results.append({
                         'node_id': site_node.node_id,
                         'success': True

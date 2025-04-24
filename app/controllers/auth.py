@@ -1,4 +1,4 @@
-from flask import Blueprint, flash, render_template, redirect, url_for, request, session
+from flask import Blueprint, flash, render_template, redirect, url_for, request, session, current_app
 from flask_login import login_user, logout_user, login_required, current_user
 from app.models.models import User, db, ActivityLog
 from datetime import datetime
@@ -40,7 +40,7 @@ def login():
         # Validate login credentials
         user = User.query.filter_by(username=username).first()
         
-        if user and user.verify_password(password):
+        if user and user.check_password(password):
             # Successfully authenticated
             login_user(user, remember=remember)
             
@@ -231,7 +231,7 @@ def profile():
         
         # Update password if provided
         if current_password and new_password:
-            if not current_user.verify_password(current_password):
+            if not current_user.check_password(current_password):
                 error = 'Current password is incorrect.'
             elif new_password != confirm_password:
                 error = 'New passwords do not match.'

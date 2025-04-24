@@ -100,9 +100,13 @@ class Node(db.Model):
     is_discovered = db.Column(db.Boolean, default=False)  # Whether this node was discovered from YAML
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    nginx_config_path = db.Column(db.String(256), default='/etc/nginx/conf.d')
-    nginx_reload_command = db.Column(db.String(256), default='sudo systemctl reload nginx')
-    detected_nginx_path = db.Column(db.String(256), nullable=True)  # Store detected nginx path
+    
+    # Proxy type and configuration
+    proxy_type = db.Column(db.String(20), default='nginx')  # 'nginx', 'caddy', 'traefik'
+    proxy_config_path = db.Column(db.String(256), default='/etc/nginx/conf.d')  # Path to proxy config directory
+    proxy_reload_command = db.Column(db.String(256), default='sudo systemctl reload nginx')  # Command to reload proxy
+    proxy_binary_path = db.Column(db.String(256), nullable=True)  # Path to proxy binary
+    detected_binary_path = db.Column(db.String(256), nullable=True)  # Store detected proxy binary path
     
     # Container-related fields
     is_container_node = db.Column(db.Boolean, default=False)  # Whether this node is a container
@@ -121,6 +125,31 @@ class Node(db.Model):
     
     # Relationships
     site_nodes = db.relationship('SiteNode', backref='node', lazy='dynamic')
+    
+    # For backward compatibility
+    @property
+    def nginx_config_path(self):
+        return self.proxy_config_path
+        
+    @nginx_config_path.setter
+    def nginx_config_path(self, value):
+        self.proxy_config_path = value
+        
+    @property
+    def nginx_reload_command(self):
+        return self.proxy_reload_command
+        
+    @nginx_reload_command.setter
+    def nginx_reload_command(self, value):
+        self.proxy_reload_command = value
+        
+    @property
+    def detected_nginx_path(self):
+        return self.detected_binary_path
+        
+    @detected_nginx_path.setter
+    def detected_nginx_path(self, value):
+        self.detected_binary_path = value
     
     @property
     def ssh_password(self):

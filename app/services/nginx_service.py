@@ -8,6 +8,569 @@ from flask import current_app
 from app.models.models import db, Site, Node, SiteNode, DeploymentLog
 from datetime import datetime
 from app.services.logger_service import log_activity
+from app.services.proxy_service_base import ProxyServiceBase
+
+class NginxService(ProxyServiceBase):
+    """
+    Nginx proxy service implementation
+    """
+    
+    def generate_config(self, site):
+        """
+        Generate Nginx configuration for a site
+        
+        Args:
+            site: Site object containing configuration details
+            
+        Returns:
+            str: Nginx configuration file content
+        """
+        # Load the appropriate template based on protocol
+        template_file = 'https.conf' if site.protocol == 'https' else 'http.conf'
+        nginx_template_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 
+                                        'nginx_templates', template_file)
+        
+        try:
+            with open(nginx_template_path, 'r') as f:
+                template = f.read()
+        except FileNotFoundError:
+            raise Exception(f"Nginx template {template_file} not found")
+        
+        # Replace placeholders with site values
+        config = template.replace('{{SERVER_NAME}}', site.domain)
+        config = config.replace('{{ORIGIN_PROTOCOL}}', site.origin_protocol)
+        config = config.replace('{{ORIGIN_ADDRESS}}', site.origin_address)
+        config = config.replace('{{ORIGIN_PORT}}', str(site.origin_port))
+        
+        # Handle WAF settings
+        if site.use_waf:
+            waf_config = self._generate_waf_config(site)
+            config = config.replace('{{WAF_CONFIG}}', waf_config)
+        else:
+            config = config.replace('{{WAF_CONFIG}}', '# WAF not enabled for this site')
+        
+        # Handle caching settings
+        if site.enable_cache:
+            cache_config = self._generate_cache_config(site)
+            config = config.replace('{{CACHE_CONFIG}}', cache_config)
+        else:
+            config = config.replace('{{CACHE_CONFIG}}', '# Caching not enabled for this site')
+        
+        # Handle GeoIP settings
+        if site.use_geoip:
+            geoip_config = self._generate_geoip_config(site)
+            config = config.replace('{{GEOIP_CONFIG}}', geoip_config)
+        else:
+            config = config.replace('{{GEOIP_CONFIG}}', '# GeoIP filtering not enabled for this site')
+        
+        # Add any custom configuration
+        if site.custom_config:
+            config = config.replace('{{CUSTOM_CONFIG}}', site.custom_config)
+        else:
+            config = config.replace('{{CUSTOM_CONFIG}}', '# No custom configuration')
+        
+        # Add blocked site notice if blocked
+        if site.is_blocked:
+            config = config.replace('{{IS_BLOCKED}}', 'return 403 "This site has been blocked by the administrator.";')
+        else:
+            config = config.replace('{{IS_BLOCKED}}', '# Site is not blocked')
+        
+        # Force HTTPS if enabled
+        if site.force_https and site.protocol == 'https':
+            https_redirect = 'if ($scheme != "https") { return 301 https://$host$request_uri; }'
+            config = config.replace('{{FORCE_HTTPS}}', https_redirect)
+        else:
+            config = config.replace('{{FORCE_HTTPS}}', '# HTTPS redirect not enabled')
+        
+        return config
+    
+    def deploy_config(self, site_id, node_id, config_content, test_only=False):
+        """
+        Deploy Nginx configuration to a node
+        
+        Args:
+            site_id: ID of the site
+            node_id: ID of the node to deploy to
+            config_content: The Nginx configuration content
+            test_only: If True, only test the configuration without deploying
+            
+        Returns:
+            If test_only=True: tuple (is_valid, warnings)
+            Otherwise: True on success or raises an exception
+        """
+        site = Site.query.get(site_id)
+        node = Node.query.get(node_id)
+        
+        if not site or not node:
+            raise ValueError("Site or Node not found")
+        
+        # Create a backup of the existing configuration
+        if not test_only:
+            backup_path = self.create_backup_config(site_id, node_id)
+        
+        try:
+            # Create SSH connection to the node
+            ssh_client = paramiko.SSHClient()
+            ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            
+            # Connect using key or password
+            if node.ssh_key_path:
+                ssh_client.connect(
+                    hostname=node.ip_address,
+                    port=node.ssh_port,
+                    username=node.ssh_user,
+                    key_filename=node.ssh_key_path,
+                    timeout=10
+                )
+            else:
+                ssh_client.connect(
+                    hostname=node.ip_address,
+                    port=node.ssh_port,
+                    username=node.ssh_user,
+                    password=node.ssh_password,
+                    timeout=10
+                )
+            
+            # Upload the configuration to a temporary file for testing
+            sftp = ssh_client.open_sftp()
+            with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                tmp_path = tmp.name
+                tmp.write(config_content.encode('utf-8'))
+            
+            remote_temp_path = f"/tmp/{site.domain}_nginx_test.conf"
+            sftp.put(tmp_path, remote_temp_path)
+            os.unlink(tmp_path)  # Clean up local temp file
+            
+            # Test the configuration
+            test_cmd = f"nginx -t -c {remote_temp_path}"
+            stdin, stdout, stderr = ssh_client.exec_command(test_cmd)
+            exit_code = stdout.channel.recv_exit_status()
+            
+            stderr_output = stderr.read().decode('utf-8')
+            warnings = []
+            
+            if 'warning' in stderr_output.lower():
+                warnings = [line for line in stderr_output.split('\n') if 'warning' in line.lower()]
+            
+            if exit_code != 0:
+                # Configuration test failed
+                error_message = stderr_output
+                
+                # Log the failure
+                log = DeploymentLog(
+                    site_id=site_id,
+                    node_id=node_id,
+                    action="test_config" if test_only else "deploy",
+                    status="error",
+                    message=f"Nginx configuration test failed: {error_message}"
+                )
+                db.session.add(log)
+                db.session.commit()
+                
+                if test_only:
+                    # Return the validation result
+                    return False, error_message
+                else:
+                    # Restore from backup if deployment was attempted
+                    if backup_path:
+                        self.restore_from_backup(backup_path, site_id, node_id)
+                    
+                    raise Exception(f"Nginx configuration test failed: {error_message}")
+            
+            # If we're only testing, return success and any warnings
+            if test_only:
+                return True, warnings
+            
+            # Deploy the valid configuration
+            config_path = f"{node.nginx_config_path}/{site.domain}.conf"
+            sftp.put(remote_temp_path, config_path)
+            
+            # Reload Nginx to apply the new configuration
+            reload_cmd = node.nginx_reload_command
+            stdin, stdout, stderr = ssh_client.exec_command(reload_cmd)
+            exit_code = stdout.channel.recv_exit_status()
+            
+            if exit_code != 0:
+                # Reload failed
+                error_message = stderr.read().decode('utf-8')
+                
+                # Log the failure
+                log = DeploymentLog(
+                    site_id=site_id,
+                    node_id=node_id,
+                    action="deploy",
+                    status="error",
+                    message=f"Nginx reload failed: {error_message}"
+                )
+                db.session.add(log)
+                db.session.commit()
+                
+                # Restore from backup
+                if backup_path:
+                    self.restore_from_backup(backup_path, site_id, node_id)
+                
+                raise Exception(f"Nginx reload failed: {error_message}")
+            
+            # Update the site node status
+            site_node = SiteNode.query.filter_by(site_id=site_id, node_id=node_id).first()
+            if site_node:
+                site_node.status = 'active'
+                site_node.last_deployed = datetime.utcnow()
+                db.session.commit()
+            
+            # Log the successful deployment
+            log = DeploymentLog(
+                site_id=site_id,
+                node_id=node_id,
+                action="deploy",
+                status="success",
+                message="Nginx configuration deployed successfully"
+            )
+            db.session.add(log)
+            db.session.commit()
+            
+            # Clean up
+            ssh_client.exec_command(f"rm -f {remote_temp_path}")
+            sftp.close()
+            ssh_client.close()
+            
+            return True
+            
+        except Exception as e:
+            # Log the error
+            log = DeploymentLog(
+                site_id=site_id,
+                node_id=node_id,
+                action="deploy",
+                status="error",
+                message=f"Deployment error: {str(e)}"
+            )
+            db.session.add(log)
+            db.session.commit()
+            
+            # Restore from backup if it exists
+            if not test_only and backup_path:
+                self.restore_from_backup(backup_path, site_id, node_id)
+            
+            raise
+    
+    def validate_config(self, config_content):
+        """
+        Validate the Nginx configuration syntax
+        
+        Args:
+            config_content: String containing the Nginx configuration
+            
+        Returns:
+            tuple: (is_valid, error_message)
+        """
+        # Local validation of basic syntax
+        # This is a simple check and not a complete validation
+        invalid_patterns = [
+            r'location[^{]*{[^}]*{[^}]*}[^}]*}',  # Nested location blocks
+            r'server[^{]*{[^}]*{[^}]*{',          # Too many nested blocks
+            r'[^#]server_name\s*;'                # Empty server_name
+        ]
+        
+        for pattern in invalid_patterns:
+            if re.search(pattern, config_content):
+                return False, f"Invalid Nginx configuration pattern detected: {pattern}"
+        
+        return True, ""
+    
+    def get_service_info(self, node):
+        """
+        Get detailed Nginx information from a node
+        
+        Args:
+            node: Node object to retrieve info from
+            
+        Returns:
+            dict: A dictionary containing Nginx information
+        """
+        try:
+            ssh_client = paramiko.SSHClient()
+            ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            
+            # Connect using key or password
+            if node.ssh_key_path:
+                ssh_client.connect(
+                    hostname=node.ip_address,
+                    port=node.ssh_port,
+                    username=node.ssh_user,
+                    key_filename=node.ssh_key_path,
+                    timeout=10
+                )
+            else:
+                ssh_client.connect(
+                    hostname=node.ip_address,
+                    port=node.ssh_port,
+                    username=node.ssh_user,
+                    password=node.ssh_password,
+                    timeout=10
+                )
+            
+            # Get Nginx version
+            stdin, stdout, stderr = ssh_client.exec_command("nginx -v 2>&1")
+            version_output = stdout.read().decode('utf-8') + stderr.read().decode('utf-8')
+            
+            # Check if Nginx is running
+            stdin, stdout, stderr = ssh_client.exec_command("pgrep nginx")
+            is_running = len(stdout.read().decode('utf-8').strip()) > 0
+            
+            # Get Nginx modules
+            stdin, stdout, stderr = ssh_client.exec_command("nginx -V 2>&1")
+            modules_output = stdout.read().decode('utf-8') + stderr.read().decode('utf-8')
+            
+            # Extract version
+            version_match = re.search(r'nginx/(\d+\.\d+\.\d+)', version_output)
+            version = version_match.group(1) if version_match else "Unknown"
+            
+            # Extract modules
+            modules = []
+            if '--with' in modules_output:
+                for module in re.findall(r'--with-([a-zA-Z0-9_-]+)', modules_output):
+                    modules.append(module)
+            
+            # Get site count
+            stdin, stdout, stderr = ssh_client.exec_command(f"ls -1 {node.nginx_config_path}/*.conf 2>/dev/null | wc -l")
+            site_count = int(stdout.read().decode('utf-8').strip())
+            
+            ssh_client.close()
+            
+            return {
+                'version': version,
+                'is_running': is_running,
+                'modules': modules,
+                'site_count': site_count
+            }
+            
+        except Exception as e:
+            return {
+                'version': "Unknown",
+                'is_running': False,
+                'modules': [],
+                'site_count': 0,
+                'error': str(e)
+            }
+    
+    def install_service(self, node, user_id=None):
+        """
+        Install Nginx on a node
+        
+        Args:
+            node: Node object to install Nginx on
+            user_id: Optional ID of the user performing the installation
+            
+        Returns:
+            tuple: (success, message)
+        """
+        try:
+            ssh_client = paramiko.SSHClient()
+            ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            
+            # Connect using key or password
+            if node.ssh_key_path:
+                ssh_client.connect(
+                    hostname=node.ip_address,
+                    port=node.ssh_port,
+                    username=node.ssh_user,
+                    key_filename=node.ssh_key_path,
+                    timeout=10
+                )
+            else:
+                ssh_client.connect(
+                    hostname=node.ip_address,
+                    port=node.ssh_port,
+                    username=node.ssh_user,
+                    password=node.ssh_password,
+                    timeout=10
+                )
+            
+            # Check if Nginx is already installed
+            stdin, stdout, stderr = ssh_client.exec_command("which nginx")
+            nginx_path = stdout.read().decode('utf-8').strip()
+            
+            if nginx_path:
+                return True, f"Nginx is already installed at {nginx_path}"
+            
+            # Check the Linux distribution
+            stdin, stdout, stderr = ssh_client.exec_command("cat /etc/os-release")
+            os_info = stdout.read().decode('utf-8')
+            
+            if "Ubuntu" in os_info or "Debian" in os_info:
+                # Debian/Ubuntu installation
+                commands = [
+                    "sudo apt-get update",
+                    "sudo apt-get install -y nginx",
+                    "sudo systemctl enable nginx",
+                    "sudo systemctl start nginx"
+                ]
+            elif "CentOS" in os_info or "Red Hat" in os_info or "Fedora" in os_info:
+                # RHEL/CentOS/Fedora installation
+                commands = [
+                    "sudo yum install -y epel-release",
+                    "sudo yum install -y nginx",
+                    "sudo systemctl enable nginx",
+                    "sudo systemctl start nginx"
+                ]
+            else:
+                return False, "Unsupported Linux distribution"
+            
+            # Run installation commands
+            for cmd in commands:
+                stdin, stdout, stderr = ssh_client.exec_command(cmd)
+                exit_code = stdout.channel.recv_exit_status()
+                if exit_code != 0:
+                    error = stderr.read().decode('utf-8')
+                    return False, f"Installation failed: {error}"
+            
+            # Verify installation
+            stdin, stdout, stderr = ssh_client.exec_command("which nginx")
+            nginx_path = stdout.read().decode('utf-8').strip()
+            
+            if nginx_path:
+                # Update the node with detected Nginx path
+                node.detected_nginx_path = nginx_path
+                db.session.commit()
+                
+                # Log the installation
+                if user_id:
+                    from app.services.logger_service import log_activity
+                    log_activity(
+                        category='admin',
+                        action='install_nginx',
+                        resource_type='node',
+                        resource_id=node.id,
+                        user_id=user_id,
+                        details=f"Installed Nginx on node {node.name}"
+                    )
+                
+                return True, f"Nginx successfully installed at {nginx_path}"
+            else:
+                return False, "Nginx installation failed: Nginx binary not found after installation"
+                
+        except Exception as e:
+            return False, f"Nginx installation failed: {str(e)}"
+            
+    def _generate_waf_config(self, site):
+        """
+        Generate WAF configuration for a site
+        
+        Args:
+            site: Site object
+            
+        Returns:
+            str: WAF configuration section
+        """
+        if not site.use_waf:
+            return "# WAF not enabled for this site"
+        
+        waf_config = [
+            "# WAF Configuration",
+            "location / {",
+            "    modsecurity on;",
+            "    modsecurity_rules_file /etc/nginx/modsec/main.conf;"
+        ]
+        
+        # Add rule level settings
+        if site.waf_rule_level == 'strict':
+            waf_config.append("    # Strict WAF rules")
+            waf_config.append("    modsecurity_rules 'SecRuleEngine On';")
+            waf_config.append("    modsecurity_rules 'SecAuditLogParts ABIJDEFHZ';")
+        elif site.waf_rule_level == 'medium':
+            waf_config.append("    # Medium WAF rules")
+            waf_config.append("    modsecurity_rules 'SecRuleEngine On';")
+            waf_config.append("    modsecurity_rules 'SecAuditLogParts ABIJDEFHZ';")
+        else:
+            waf_config.append("    # Basic WAF rules")
+            waf_config.append("    modsecurity_rules 'SecRuleEngine On';")
+            waf_config.append("    modsecurity_rules 'SecAuditLogParts ABIJDZ';")
+        
+        # Add custom rules if provided
+        if hasattr(site, 'waf_custom_rules') and site.waf_custom_rules:
+            waf_config.append("    # Custom WAF rules")
+            for rule in site.waf_custom_rules.split("\n"):
+                waf_config.append(f"    modsecurity_rules '{rule}';")
+        
+        waf_config.append("    proxy_pass http://backend;")
+        waf_config.append("}")
+        
+        return "\n".join(waf_config)
+    
+    def _generate_cache_config(self, site):
+        """
+        Generate caching configuration for a site
+        
+        Args:
+            site: Site object
+            
+        Returns:
+            str: Caching configuration section
+        """
+        if not site.enable_cache:
+            return "# Caching not enabled for this site"
+        
+        cache_config = [
+            "# Caching Configuration",
+            f"proxy_cache_path /var/cache/nginx/{site.domain} levels=1:2 keys_zone={site.domain}_cache:10m max_size=100m inactive=60m use_temp_path=off;",
+            "",
+            "server {",
+            "    location / {",
+            f"        proxy_cache {site.domain}_cache;",
+            f"        proxy_cache_valid 200 {site.cache_time}s;",
+            f"        proxy_cache_valid 404 {site.cache_time // 10}s;",
+            "        proxy_cache_use_stale error timeout invalid_header updating http_500 http_502 http_503 http_504;",
+            "        add_header X-Cache-Status $upstream_cache_status;",
+            "    }",
+            "",
+            "    # Static files caching",
+            "    location ~* \\.(jpg|jpeg|png|gif|ico|css|js)$ {",
+            f"        expires {site.cache_static_time}s;",
+            f"        add_header Cache-Control \"public, max-age={site.cache_static_time}\";",
+            "    }",
+            "}"
+        ]
+        
+        # Add custom cache rules if provided
+        if hasattr(site, 'custom_cache_rules') and site.custom_cache_rules:
+            cache_config.append("# Custom cache rules")
+            cache_config.extend(site.custom_cache_rules.split("\n"))
+        
+        return "\n".join(cache_config)
+    
+    def _generate_geoip_config(self, site):
+        """
+        Generate GeoIP configuration for a site
+        
+        Args:
+            site: Site object
+            
+        Returns:
+            str: GeoIP configuration section
+        """
+        if not site.use_geoip:
+            return "# GeoIP filtering not enabled for this site"
+        
+        geoip_config = [
+            "# GeoIP Configuration"
+        ]
+        
+        if site.geoip_level == 'nginx':
+            countries = site.geoip_countries.replace(' ', '').split(',') if site.geoip_countries else []
+            
+            if site.geoip_mode == 'blacklist':
+                if countries:
+                    geoip_config.append("if ($geoip_country_code ~ '^(" + "|".join(countries) + ")$') {")
+                    geoip_config.append("    return 403 'Access denied by geographic restriction';")
+                    geoip_config.append("}")
+            else:  # whitelist
+                if countries:
+                    geoip_config.append("if ($geoip_country_code !~ '^(" + "|".join(countries) + ")$') {")
+                    geoip_config.append("    return 403 'Access denied by geographic restriction';")
+                    geoip_config.append("}")
+        
+        return "\n".join(geoip_config)
 
 def generate_nginx_config(site):
     """
@@ -1129,7 +1692,7 @@ echo "success"
                             raise ValueError(f"{error_message}\nAutomatic rollback was attempted but failed: {rollback_result['message']}")
                     except Exception as rollback_error:
                         # If the rollback process itself fails, just report the original error
-                        raise ValueError(f"{error_message}\nAutomatic rollback failed: {str(rollback_error)}")
+                        raise ValueError(error_message)
                 else:
                     # No backup available, just raise the original error
                     raise ValueError(error_message)
