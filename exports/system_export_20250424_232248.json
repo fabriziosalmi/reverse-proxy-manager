@@ -1,0 +1,50 @@
+{
+  "config": {
+    "app_app_name": "Reverse Proxy Manager",
+    "app_app_version": "1.0.0",
+    "app_debug_mode": "False",
+    "app_maintenance_mode": "False",
+    "app_allow_registration": "False",
+    "app_max_upload_size": "50",
+    "app_session_timeout": "30",
+    "app_log_retention_days": "30",
+    "email_smtp_server": "",
+    "email_smtp_port": "587",
+    "email_smtp_username": "",
+    "email_smtp_from_address": "",
+    "email_enable_ssl": "True",
+    "email_enable_notifications": "False",
+    "email_notification_events": "",
+    "backup_backup_enabled": "False",
+    "backup_backup_frequency": "daily",
+    "backup_backup_retention": "7",
+    "backup_backup_destination": "local",
+    "backup_backup_path": "/var/backups/proxy-manager",
+    "backup_include_certificates": "True",
+    "backup_include_logs": "False",
+    "security_failed_login_limit": "5",
+    "security_password_expiry_days": "90",
+    "security_enforce_password_complexity": "True",
+    "security_allowed_ip_ranges": "",
+    "security_api_rate_limit": "100"
+  },
+  "sites": [],
+  "users": [
+    {
+      "id": 1,
+      "username": "fab",
+      "email": "fabrizio.salmi@gmail.com",
+      "role": "admin",
+      "is_active": true,
+      "created_at": "2025-04-23T19:04:59.164577"
+    },
+    {
+      "id": 2,
+      "username": "fabriziosalmi",
+      "email": "fabrizio.salmi+test@gmail.com",
+      "role": "client",
+      "is_active": true,
+      "created_at": "2025-04-23T19:47:15.037111"
+    }
+  ]
+}

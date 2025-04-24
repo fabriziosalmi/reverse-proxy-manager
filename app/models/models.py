@@ -238,9 +238,9 @@ class Node(db.Model):
             'nginx_config_path': self.nginx_config_path
         }
         
-    def install_nginx(self, user_id=None):
+    def install_proxy(self, user_id=None):
         """
-        Install Nginx on the remote node
+        Install the appropriate proxy server on the remote node
         
         Args:
             user_id: Optional ID of the user performing the installation
@@ -282,62 +282,189 @@ class Node(db.Model):
             )
             os_info = stdout.read().decode('utf-8').strip()
             
-            # Set up installation commands based on OS
+            # Set up installation commands based on OS and proxy type
             install_commands = []
             
-            if "Ubuntu" in os_info or "Debian" in os_info:
-                # Ubuntu/Debian installation
-                install_commands = [
-                    "sudo apt update -y",
-                    "sudo apt install -y nginx",
-                    # Install GeoIP modules and databases
-                    "sudo apt install -y nginx-module-geoip geoip-database libgeoip-dev",
-                    # Download and prepare latest GeoIP databases
-                    "sudo mkdir -p /usr/share/GeoIP",
-                    "cd /tmp && sudo wget -q https://dl.miyuru.lk/geoip/maxmind/country/maxmind4.dat.gz && sudo gunzip -f maxmind4.dat.gz && sudo mv maxmind4.dat /usr/share/GeoIP/GeoIP.dat",
-                    "cd /tmp && sudo wget -q https://dl.miyuru.lk/geoip/maxmind/country/maxmind6.dat.gz && sudo gunzip -f maxmind6.dat.gz && sudo mv maxmind6.dat /usr/share/GeoIP/GeoIPv6.dat",
-                    "sudo systemctl enable nginx",
-                    "sudo systemctl start nginx",
-                    "sudo mkdir -p /var/www/letsencrypt",  # Create directory for ACME challenges
-                    "sudo mkdir -p /var/cache/nginx"  # Create cache directory
-                ]
-            elif "CentOS" in os_info or "Red Hat" in os_info or "Fedora" in os_info:
-                # CentOS/RHEL/Fedora installation
-                install_commands = [
-                    "sudo yum -y update",
-                    "sudo yum -y install epel-release",
-                    "sudo yum -y install nginx",
-                    # Install GeoIP modules and databases
-                    "sudo yum -y install nginx-module-geoip GeoIP GeoIP-devel",
-                    # Download and prepare latest GeoIP databases
-                    "sudo mkdir -p /usr/share/GeoIP",
-                    "cd /tmp && sudo wget -q https://dl.miyuru.lk/geoip/maxmind/country/maxmind4.dat.gz && sudo gunzip -f maxmind4.dat.gz && sudo mv maxmind4.dat /usr/share/GeoIP/GeoIP.dat",
-                    "cd /tmp && sudo wget -q https://dl.miyuru.lk/geoip/maxmind/country/maxmind6.dat.gz && sudo gunzip -f maxmind6.dat.gz && sudo mv maxmind6.dat /usr/share/GeoIP/GeoIPv6.dat",
-                    "sudo systemctl enable nginx",
-                    "sudo systemctl start nginx",
-                    "sudo mkdir -p /var/www/letsencrypt",
-                    "sudo mkdir -p /var/cache/nginx",
-                    "sudo setsebool -P httpd_can_network_connect 1"  # Allow proxy connections
-                ]
-            elif "Alpine" in os_info:
-                # Alpine Linux installation
-                install_commands = [
-                    "sudo apk update",
-                    "sudo apk add nginx",
-                    # Install GeoIP modules and databases
-                    "sudo apk add nginx-mod-http-geoip geoip",
-                    # Download and prepare latest GeoIP databases
-                    "sudo mkdir -p /usr/share/GeoIP",
-                    "cd /tmp && sudo wget -q https://dl.miyuru.lk/geoip/maxmind/country/maxmind4.dat.gz && sudo gunzip -f maxmind4.dat.gz && sudo mv maxmind4.dat /usr/share/GeoIP/GeoIP.dat",
-                    "cd /tmp && sudo wget -q https://dl.miyuru.lk/geoip/maxmind/country/maxmind6.dat.gz && sudo gunzip -f maxmind6.dat.gz && sudo mv maxmind6.dat /usr/share/GeoIP/GeoIPv6.dat",
-                    "sudo rc-update add nginx default",
-                    "sudo service nginx start",
-                    "sudo mkdir -p /var/www/letsencrypt",
-                    "sudo mkdir -p /var/cache/nginx"
-                ]
+            if self.proxy_type == 'nginx':
+                if "Ubuntu" in os_info or "Debian" in os_info:
+                    # Ubuntu/Debian installation for Nginx
+                    install_commands = [
+                        "sudo apt update -y",
+                        "sudo apt install -y nginx",
+                        # Install GeoIP modules and databases
+                        "sudo apt install -y nginx-module-geoip geoip-database libgeoip-dev",
+                        # Download and prepare latest GeoIP databases
+                        "sudo mkdir -p /usr/share/GeoIP",
+                        "cd /tmp && sudo wget -q https://dl.miyuru.lk/geoip/maxmind/country/maxmind4.dat.gz && sudo gunzip -f maxmind4.dat.gz && sudo mv maxmind4.dat /usr/share/GeoIP/GeoIP.dat",
+                        "cd /tmp && sudo wget -q https://dl.miyuru.lk/geoip/maxmind/country/maxmind6.dat.gz && sudo gunzip -f maxmind6.dat.gz && sudo mv maxmind6.dat /usr/share/GeoIP/GeoIPv6.dat",
+                        "sudo systemctl enable nginx",
+                        "sudo systemctl start nginx",
+                        "sudo mkdir -p /var/www/letsencrypt",  # Create directory for ACME challenges
+                        "sudo mkdir -p /var/cache/nginx"  # Create cache directory
+                    ]
+                elif "CentOS" in os_info or "Red Hat" in os_info or "Fedora" in os_info:
+                    # CentOS/RHEL/Fedora installation for Nginx
+                    install_commands = [
+                        "sudo yum -y update",
+                        "sudo yum -y install epel-release",
+                        "sudo yum -y install nginx",
+                        # Install GeoIP modules and databases
+                        "sudo yum -y install nginx-module-geoip GeoIP GeoIP-devel",
+                        # Download and prepare latest GeoIP databases
+                        "sudo mkdir -p /usr/share/GeoIP",
+                        "cd /tmp && sudo wget -q https://dl.miyuru.lk/geoip/maxmind/country/maxmind4.dat.gz && sudo gunzip -f maxmind4.dat.gz && sudo mv maxmind4.dat /usr/share/GeoIP/GeoIP.dat",
+                        "cd /tmp && sudo wget -q https://dl.miyuru.lk/geoip/maxmind/country/maxmind6.dat.gz && sudo gunzip -f maxmind6.dat.gz && sudo mv maxmind6.dat /usr/share/GeoIP/GeoIPv6.dat",
+                        "sudo systemctl enable nginx",
+                        "sudo systemctl start nginx",
+                        "sudo mkdir -p /var/www/letsencrypt",
+                        "sudo mkdir -p /var/cache/nginx",
+                        "sudo setsebool -P httpd_can_network_connect 1"  # Allow proxy connections
+                    ]
+                elif "Alpine" in os_info:
+                    # Alpine Linux installation for Nginx
+                    install_commands = [
+                        "sudo apk update",
+                        "sudo apk add nginx",
+                        # Install GeoIP modules and databases
+                        "sudo apk add nginx-mod-http-geoip geoip",
+                        # Download and prepare latest GeoIP databases
+                        "sudo mkdir -p /usr/share/GeoIP",
+                        "cd /tmp && sudo wget -q https://dl.miyuru.lk/geoip/maxmind/country/maxmind4.dat.gz && sudo gunzip -f maxmind4.dat.gz && sudo mv maxmind4.dat /usr/share/GeoIP/GeoIP.dat",
+                        "cd /tmp && sudo wget -q https://dl.miyuru.lk/geoip/maxmind/country/maxmind6.dat.gz && sudo gunzip -f maxmind6.dat.gz && sudo mv maxmind6.dat /usr/share/GeoIP/GeoIPv6.dat",
+                        "sudo rc-update add nginx default",
+                        "sudo service nginx start",
+                        "sudo mkdir -p /var/www/letsencrypt",
+                        "sudo mkdir -p /var/cache/nginx"
+                    ]
+            elif self.proxy_type == 'caddy':
+                if "Ubuntu" in os_info or "Debian" in os_info:
+                    # Ubuntu/Debian installation for Caddy
+                    install_commands = [
+                        "sudo apt update -y",
+                        # Install dependencies
+                        "sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https curl",
+                        # Add Caddy official repository
+                        "curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg",
+                        "curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list",
+                        "sudo apt update -y",
+                        "sudo apt install -y caddy",
+                        # Create directories
+                        "sudo mkdir -p /etc/caddy/sites",
+                        "sudo mkdir -p /var/www/letsencrypt",
+                        # Set permissions
+                        "sudo chown -R caddy:caddy /etc/caddy",
+                        # Start and enable service
+                        "sudo systemctl enable caddy",
+                        "sudo systemctl start caddy"
+                    ]
+                elif "CentOS" in os_info or "Red Hat" in os_info or "Fedora" in os_info:
+                    # CentOS/RHEL/Fedora installation for Caddy
+                    install_commands = [
+                        "sudo yum -y update",
+                        # Install EPEL repository
+                        "sudo yum -y install epel-release",
+                        # Install dependencies
+                        "sudo yum -y install yum-utils",
+                        # Add Caddy repo
+                        "sudo dnf copr enable @caddy/caddy -y",
+                        "sudo yum -y install caddy",
+                        # Create directories
+                        "sudo mkdir -p /etc/caddy/sites",
+                        "sudo mkdir -p /var/www/letsencrypt",
+                        # Set permissions
+                        "sudo chown -R caddy:caddy /etc/caddy",
+                        # Start and enable service
+                        "sudo systemctl enable caddy",
+                        "sudo systemctl start caddy"
+                    ]
+                elif "Alpine" in os_info:
+                    # Alpine Linux installation for Caddy
+                    install_commands = [
+                        "sudo apk update",
+                        "sudo apk add caddy",
+                        # Create directories
+                        "sudo mkdir -p /etc/caddy/sites",
+                        "sudo mkdir -p /var/www/letsencrypt",
+                        # Set permissions
+                        "sudo chown -R caddy:caddy /etc/caddy",
+                        # Start and enable service
+                        "sudo rc-update add caddy default",
+                        "sudo service caddy start"
+                    ]
+            elif self.proxy_type == 'traefik':
+                if "Ubuntu" in os_info or "Debian" in os_info:
+                    # Ubuntu/Debian installation for Traefik
+                    install_commands = [
+                        "sudo apt update -y",
+                        # Install dependencies
+                        "sudo apt install -y curl",
+                        # Download Traefik binary
+                        "sudo curl -L https://github.com/traefik/traefik/releases/download/v2.10.1/traefik_v2.10.1_linux_amd64.tar.gz -o /tmp/traefik.tar.gz",
+                        "sudo tar -zxvf /tmp/traefik.tar.gz -C /tmp",
+                        "sudo mv /tmp/traefik /usr/local/bin/",
+                        "sudo chmod +x /usr/local/bin/traefik",
+                        # Create directories
+                        "sudo mkdir -p /etc/traefik/providers",
+                        "sudo mkdir -p /var/www/letsencrypt",
+                        # Create minimal configuration file
+                        "echo 'providers:\n  file:\n    directory: /etc/traefik/providers\n    watch: true\napi:\n  dashboard: true\n  insecure: true\nentryPoints:\n  web:\n    address: :80\n  websecure:\n    address: :443\ncertificatesResolvers:\n  letsencrypt:\n    acme:\n      email: admin@example.com\n      storage: /etc/traefik/acme.json\n      httpChallenge:\n        entryPoint: web' | sudo tee /etc/traefik/traefik.yml",
+                        # Create systemd service
+                        "echo '[Unit]\nDescription=Traefik\nDocumentation=https://docs.traefik.io\nAfter=network-online.target\n[Service]\nUser=root\nGroup=root\nExecStart=/usr/local/bin/traefik --configfile=/etc/traefik/traefik.yml\nRestart=on-failure\n[Install]\nWantedBy=multi-user.target' | sudo tee /etc/systemd/system/traefik.service",
+                        "sudo systemctl daemon-reload",
+                        "sudo systemctl enable traefik",
+                        "sudo systemctl start traefik"
+                    ]
+                elif "CentOS" in os_info or "Red Hat" in os_info or "Fedora" in os_info:
+                    # CentOS/RHEL/Fedora installation for Traefik
+                    install_commands = [
+                        "sudo yum -y update",
+                        # Install dependencies
+                        "sudo yum -y install curl",
+                        # Download Traefik binary
+                        "sudo curl -L https://github.com/traefik/traefik/releases/download/v2.10.1/traefik_v2.10.1_linux_amd64.tar.gz -o /tmp/traefik.tar.gz",
+                        "sudo tar -zxvf /tmp/traefik.tar.gz -C /tmp",
+                        "sudo mv /tmp/traefik /usr/local/bin/",
+                        "sudo chmod +x /usr/local/bin/traefik",
+                        # Create directories
+                        "sudo mkdir -p /etc/traefik/providers",
+                        "sudo mkdir -p /var/www/letsencrypt",
+                        # Create minimal configuration file
+                        "echo 'providers:\n  file:\n    directory: /etc/traefik/providers\n    watch: true\napi:\n  dashboard: true\n  insecure: true\nentryPoints:\n  web:\n    address: :80\n  websecure:\n    address: :443\ncertificatesResolvers:\n  letsencrypt:\n    acme:\n      email: admin@example.com\n      storage: /etc/traefik/acme.json\n      httpChallenge:\n        entryPoint: web' | sudo tee /etc/traefik/traefik.yml",
+                        # Create systemd service
+                        "echo '[Unit]\nDescription=Traefik\nDocumentation=https://docs.traefik.io\nAfter=network-online.target\n[Service]\nUser=root\nGroup=root\nExecStart=/usr/local/bin/traefik --configfile=/etc/traefik/traefik.yml\nRestart=on-failure\n[Install]\nWantedBy=multi-user.target' | sudo tee /etc/systemd/system/traefik.service",
+                        "sudo systemctl daemon-reload",
+                        "sudo systemctl enable traefik",
+                        "sudo systemctl start traefik"
+                    ]
+                elif "Alpine" in os_info:
+                    # Alpine Linux installation for Traefik
+                    install_commands = [
+                        "sudo apk update",
+                        # Install dependencies
+                        "sudo apk add curl",
+                        # Download Traefik binary
+                        "sudo curl -L https://github.com/traefik/traefik/releases/download/v2.10.1/traefik_v2.10.1_linux_amd64.tar.gz -o /tmp/traefik.tar.gz",
+                        "sudo tar -zxvf /tmp/traefik.tar.gz -C /tmp",
+                        "sudo mv /tmp/traefik /usr/local/bin/",
+                        "sudo chmod +x /usr/local/bin/traefik",
+                        # Create directories
+                        "sudo mkdir -p /etc/traefik/providers",
+                        "sudo mkdir -p /var/www/letsencrypt",
+                        # Create minimal configuration file
+                        "echo 'providers:\n  file:\n    directory: /etc/traefik/providers\n    watch: true\napi:\n  dashboard: true\n  insecure: true\nentryPoints:\n  web:\n    address: :80\n  websecure:\n    address: :443\ncertificatesResolvers:\n  letsencrypt:\n    acme:\n      email: admin@example.com\n      storage: /etc/traefik/acme.json\n      httpChallenge:\n        entryPoint: web' | sudo tee /etc/traefik/traefik.yml",
+                        # Create init.d script
+                        "echo '#!/sbin/openrc-run\ndescription=\"Traefik reverse proxy\"\ncommand=\"/usr/local/bin/traefik\"\ncommand_args=\"--configfile=/etc/traefik/traefik.yml\"\ndepend() {\n    need net\n}\n' | sudo tee /etc/init.d/traefik",
+                        "sudo chmod +x /etc/init.d/traefik",
+                        "sudo rc-update add traefik default",
+                        "sudo service traefik start"
+                    ]
             else:
                 ssh_client.close()
-                return False, f"Unsupported OS detected: {os_info}. Please install Nginx manually."
+                return False, f"Unsupported proxy type: {self.proxy_type}. Supported types are: nginx, caddy, traefik"
+                
+            if not install_commands:
+                ssh_client.close()
+                return False, f"Unsupported OS detected: {os_info}. Please install {self.proxy_type} manually."
             
             # Execute installation commands
             all_output = []
@@ -352,49 +479,59 @@ class Node(db.Model):
                     all_output.append(f"Error: {stderr_output}")
                 all_output.append("---")
             
-            # Verify installation
-            stdin, stdout, stderr = ssh_client.exec_command("nginx -v 2>&1")
+            # Verify installation based on proxy type
+            version_command = ""
+            if self.proxy_type == 'nginx':
+                version_command = "nginx -v 2>&1"
+            elif self.proxy_type == 'caddy':
+                version_command = "caddy version"
+            elif self.proxy_type == 'traefik':
+                version_command = "traefik version"
+                
+            stdin, stdout, stderr = ssh_client.exec_command(version_command)
             version_output = stdout.read().decode('utf-8').strip() + stderr.read().decode('utf-8').strip()
             
-            # Create Nginx config directory if it doesn't exist
-            stdin, stdout, stderr = ssh_client.exec_command(f"sudo mkdir -p {self.nginx_config_path}")
+            # Create proxy config directory if it doesn't exist
+            stdin, stdout, stderr = ssh_client.exec_command(f"sudo mkdir -p {self.proxy_config_path}")
             
-            # Configure GeoIP module in nginx.conf if not already configured
-            stdin, stdout, stderr = ssh_client.exec_command("grep -q 'load_module.*ngx_http_geoip_module.so' /etc/nginx/nginx.conf || echo 'not_found'")
-            if stdout.read().decode('utf-8').strip() == 'not_found':
-                # Find the path to the GeoIP module on different systems
-                stdin, stdout, stderr = ssh_client.exec_command("find /usr/lib -name '*ngx_http_geoip_module.so' | head -1")
-                module_path = stdout.read().decode('utf-8').strip()
-                
-                if not module_path:
-                    stdin, stdout, stderr = ssh_client.exec_command("find /usr/share -name '*ngx_http_geoip_module.so' | head -1")
+            # Additional proxy-specific configuration
+            if self.proxy_type == 'nginx':
+                # Configure GeoIP module in nginx.conf if not already configured
+                stdin, stdout, stderr = ssh_client.exec_command("grep -q 'load_module.*ngx_http_geoip_module.so' /etc/nginx/nginx.conf || echo 'not_found'")
+                if stdout.read().decode('utf-8').strip() == 'not_found':
+                    # Find the path to the GeoIP module on different systems
+                    stdin, stdout, stderr = ssh_client.exec_command("find /usr/lib -name '*ngx_http_geoip_module.so' | head -1")
                     module_path = stdout.read().decode('utf-8').strip()
-                
-                if module_path:
-                    # Add the load_module directive to nginx.conf
-                    stdin, stdout, stderr = ssh_client.exec_command(f"sudo sed -i '1i load_module {module_path};' /etc/nginx/nginx.conf")
                     
-                    # Verify if the module was added correctly
-                    stdin, stdout, stderr = ssh_client.exec_command("grep -q 'load_module.*ngx_http_geoip_module.so' /etc/nginx/nginx.conf && echo 'added' || echo 'failed'")
-                    if stdout.read().decode('utf-8').strip() != 'added':
-                        all_output.append("Warning: Could not add GeoIP module automatically to nginx.conf")
-                else:
-                    all_output.append("Warning: Could not find GeoIP module path")
-            
-            # Add GeoIP configuration to http section if not already present
-            geoip_config = r"""
+                    if not module_path:
+                        stdin, stdout, stderr = ssh_client.exec_command("find /usr/share -name '*ngx_http_geoip_module.so' | head -1")
+                        module_path = stdout.read().decode('utf-8').strip()
+                    
+                    if module_path:
+                        # Add the load_module directive to nginx.conf
+                        stdin, stdout, stderr = ssh_client.exec_command(f"sudo sed -i '1i load_module {module_path};' /etc/nginx/nginx.conf")
+                        
+                        # Verify if the module was added correctly
+                        stdin, stdout, stderr = ssh_client.exec_command("grep -q 'load_module.*ngx_http_geoip_module.so' /etc/nginx/nginx.conf && echo 'added' || echo 'failed'")
+                        if stdout.read().decode('utf-8').strip() != 'added':
+                            all_output.append("Warning: Could not add GeoIP module automatically to nginx.conf")
+                    else:
+                        all_output.append("Warning: Could not find GeoIP module path")
+                
+                # Add GeoIP configuration to http section if not already present
+                geoip_config = r"""
     # GeoIP configuration
     geoip_country /usr/share/GeoIP/GeoIP.dat;
     geoip_city /usr/share/GeoIP/GeoIPCity.dat;
 """
-            stdin, stdout, stderr = ssh_client.exec_command("grep -q 'geoip_country' /etc/nginx/nginx.conf || echo 'not_found'")
-            if stdout.read().decode('utf-8').strip() == 'not_found':
-                # Add GeoIP config to the http section
-                stdin, stdout, stderr = ssh_client.exec_command(f"sudo sed -i '/http {{/a{geoip_config}' /etc/nginx/nginx.conf")
-                all_output.append("Added GeoIP configuration to nginx.conf")
-            
-            # Create a test GeoIP config to verify it works
-            test_geoip_config = """
+                stdin, stdout, stderr = ssh_client.exec_command("grep -q 'geoip_country' /etc/nginx/nginx.conf || echo 'not_found'")
+                if stdout.read().decode('utf-8').strip() == 'not_found':
+                    # Add GeoIP config to the http section
+                    stdin, stdout, stderr = ssh_client.exec_command(f"sudo sed -i '/http {{/a{geoip_config}' /etc/nginx/nginx.conf")
+                    all_output.append("Added GeoIP configuration to nginx.conf")
+                
+                # Create a test GeoIP config to verify it works
+                test_geoip_config = """
 server {
     listen 80;
     server_name geoip-test.local;
@@ -405,48 +542,61 @@ server {
     }
 }
 """
-            stdin, stdout, stderr = ssh_client.exec_command(f"echo '{test_geoip_config}' | sudo tee {self.nginx_config_path}/geoip-test.conf > /dev/null")
-            
-            # Test if Nginx config is valid with GeoIP
-            stdin, stdout, stderr = ssh_client.exec_command("sudo nginx -t")
-            test_output = stdout.read().decode('utf-8').strip() + stderr.read().decode('utf-8').strip()
-            
-            # If Nginx test failed, remove the test file to prevent issues
-            if "failed" in test_output or "error" in test_output.lower():
-                ssh_client.exec_command(f"sudo rm -f {self.nginx_config_path}/geoip-test.conf")
-                all_output.append(f"Warning: GeoIP test config failed: {test_output}")
-            else:
-                all_output.append("GeoIP configuration test successful")
-                # Reload Nginx to apply changes
-                ssh_client.exec_command("sudo systemctl reload nginx || sudo service nginx reload")
+                stdin, stdout, stderr = ssh_client.exec_command(f"echo '{test_geoip_config}' | sudo tee {self.proxy_config_path}/geoip-test.conf > /dev/null")
+                
+                # Test if Nginx config is valid with GeoIP
+                stdin, stdout, stderr = ssh_client.exec_command("sudo nginx -t")
+                test_output = stdout.read().decode('utf-8').strip() + stderr.read().decode('utf-8').strip()
+                
+                # If Nginx test failed, remove the test file to prevent issues
+                if "failed" in test_output or "error" in test_output.lower():
+                    ssh_client.exec_command(f"sudo rm -f {self.proxy_config_path}/geoip-test.conf")
+                    all_output.append(f"Warning: GeoIP test config failed: {test_output}")
+                else:
+                    all_output.append("GeoIP configuration test successful")
+                    # Reload Nginx to apply changes
+                    ssh_client.exec_command("sudo systemctl reload nginx || sudo service nginx reload")
             
             # Close the SSH connection
             ssh_client.close()
             
-            if "nginx version" in version_output.lower():
+            # Check if installation was successful based on version output
+            success = False
+            success_message = ""
+            
+            if self.proxy_type == 'nginx' and "nginx version" in version_output.lower():
+                success = True
+                success_message = f"Nginx installed successfully on {self.name} ({self.ip_address}) with GeoIP support"
+            elif self.proxy_type == 'caddy' and "v2." in version_output.lower():
+                success = True
+                success_message = f"Caddy installed successfully on {self.name} ({self.ip_address})"
+            elif self.proxy_type == 'traefik' and "version" in version_output.lower():
+                success = True
+                success_message = f"Traefik installed successfully on {self.name} ({self.ip_address})"
+            
+            if success:
                 # Installation was successful
                 installation_output = "\n".join(all_output)
-                success_message = f"Nginx installed successfully on {self.name} ({self.ip_address}) with GeoIP support"
                 
                 # Log the successful installation
                 log_details = {
                     'node_id': self.id,
                     'user_id': user_id,
                     'output': installation_output,
-                    'nginx_version': version_output
+                    'proxy_version': version_output
                 }
                 # Convert log_details to a string to store in the database
-                details_str = f"Nginx installed successfully. Version: {version_output}. Command output stored in system logs."
-                log_activity('info', f"Nginx installed on node {self.name}", 'node', self.id, details_str, user_id)
+                details_str = f"{self.proxy_type.capitalize()} installed successfully. Version: {version_output}. Command output stored in system logs."
+                log_activity('info', f"{self.proxy_type.capitalize()} installed on node {self.name}", 'node', self.id, details_str, user_id)
                 
                 # Create a system log entry
                 system_log = SystemLog(
                     user_id=user_id,
                     category='admin',
-                    action='install_nginx',
+                    action=f'install_{self.proxy_type}',
                     resource_type='node',
                     resource_id=self.id,
-                    details=f"Nginx installed successfully: {version_output}"
+                    details=f"{self.proxy_type.capitalize()} installed successfully: {version_output}"
                 )
                 db.session.add(system_log)
                 db.session.commit()
@@ -454,7 +604,7 @@ server {
                 return True, success_message
             else:
                 # Installation failed
-                error_msg = f"Nginx installation failed on {self.name}. Commands executed but Nginx not found."
+                error_msg = f"{self.proxy_type.capitalize()} installation failed on {self.name}. Commands executed but {self.proxy_type} not found."
                 
                 # Log the failure
                 log_details = {
@@ -463,17 +613,17 @@ server {
                     'output': "\n".join(all_output)
                 }
                 # Convert log_details to a string for the database
-                error_details = f"Commands executed, but Nginx not found. Installation failed on {self.name}."
-                log_activity('error', f"Failed to install Nginx on node {self.name}", 'node', self.id, error_details, user_id)
+                error_details = f"Commands executed, but {self.proxy_type} not found. Installation failed on {self.name}."
+                log_activity('error', f"Failed to install {self.proxy_type} on node {self.name}", 'node', self.id, error_details, user_id)
                 
                 # Create a system log entry for the failure
                 system_log = SystemLog(
                     user_id=user_id,
                     category='admin',
-                    action='install_nginx',
+                    action=f'install_{self.proxy_type}',
                     resource_type='node',
                     resource_id=self.id,
-                    details=f"Nginx installation failed: {error_msg}"
+                    details=f"{self.proxy_type.capitalize()} installation failed: {error_msg}"
                 )
                 db.session.add(system_log)
                 db.session.commit()
@@ -481,16 +631,16 @@ server {
                 return False, error_msg
                 
         except Exception as e:
-            error_msg = f"Failed to install Nginx: {str(e)}"
+            error_msg = f"Failed to install {self.proxy_type}: {str(e)}"
             
             # Log the exception
-            log_activity('error', f"Exception during Nginx installation on node {self.name}", 'node', self.id, f"Error: {str(e)}", user_id)
+            log_activity('error', f"Exception during {self.proxy_type} installation on node {self.name}", 'node', self.id, f"Error: {str(e)}", user_id)
             
             # Create a system log entry for the error
             system_log = SystemLog(
                 user_id=user_id,
                 category='admin',
-                action='install_nginx',
+                action=f'install_{self.proxy_type}',
                 resource_type='node',
                 resource_id=self.id,
                 details=error_msg
