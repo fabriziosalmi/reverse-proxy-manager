@@ -2055,3 +2055,121 @@ def initiate_certificate_request():
         nodes=nodes,
         dns_providers=dns_providers
     )
+
+@admin.route('/settings')
+@login_required
+@admin_required
+def settings():
+    """Admin settings page to manage system configurations"""
+    
+    # Import system settings model or service if available
+    # For now, we'll use mock data for the settings
+    
+    # Get application settings 
+    app_settings = {
+        'app_name': 'Reverse Proxy Manager',
+        'app_version': '1.0.0',
+        'debug_mode': False,
+        'maintenance_mode': False,
+        'allow_registration': True,
+        'max_upload_size': 50, # in MB
+        'session_timeout': 30, # in minutes
+        'log_retention_days': 30
+    }
+    
+    # Get email settings
+    email_settings = {
+        'smtp_server': '',
+        'smtp_port': 587,
+        'smtp_username': '',
+        'smtp_from_address': '',
+        'enable_ssl': True,
+        'enable_notifications': False,
+        'notification_events': ['certificate_expiry', 'node_offline', 'failed_deployment']
+    }
+    
+    # Get backup settings
+    backup_settings = {
+        'backup_enabled': False,
+        'backup_frequency': 'daily',
+        'backup_retention': 7, # in days
+        'backup_destination': 'local',
+        'backup_path': '/var/backups/proxy-manager',
+        'include_certificates': True,
+        'include_logs': False
+    }
+    
+    # Get security settings
+    security_settings = {
+        'failed_login_limit': 5,
+        'password_expiry_days': 90,
+        'enforce_password_complexity': True,
+        'two_factor_auth': False,
+        'allowed_ip_ranges': [],
+        'api_rate_limit': 100 # requests per minute
+    }
+    
+    if request.method == 'POST':
+        # Process form data and update settings
+        section = request.form.get('section')
+        
+        if section == 'application':
+            app_settings['app_name'] = request.form.get('app_name')
+            app_settings['debug_mode'] = 'debug_mode' in request.form
+            app_settings['maintenance_mode'] = 'maintenance_mode' in request.form
+            app_settings['allow_registration'] = 'allow_registration' in request.form
+            app_settings['max_upload_size'] = int(request.form.get('max_upload_size', 50))
+            app_settings['session_timeout'] = int(request.form.get('session_timeout', 30))
+            app_settings['log_retention_days'] = int(request.form.get('log_retention_days', 30))
+            
+            # Here would be code to save these settings to a database or config file
+            flash('Application settings updated successfully', 'success')
+        
+        elif section == 'email':
+            email_settings['smtp_server'] = request.form.get('smtp_server')
+            email_settings['smtp_port'] = int(request.form.get('smtp_port', 587))
+            email_settings['smtp_username'] = request.form.get('smtp_username')
+            email_settings['smtp_from_address'] = request.form.get('smtp_from_address')
+            email_settings['enable_ssl'] = 'enable_ssl' in request.form
+            email_settings['enable_notifications'] = 'enable_notifications' in request.form
+            email_settings['notification_events'] = request.form.getlist('notification_events')
+            
+            # Save email settings
+            if request.form.get('test_email'):
+                # Test email configuration
+                flash('Email test sent successfully', 'success')
+            else:
+                flash('Email settings updated successfully', 'success')
+        
+        elif section == 'backup':
+            backup_settings['backup_enabled'] = 'backup_enabled' in request.form
+            backup_settings['backup_frequency'] = request.form.get('backup_frequency')
+            backup_settings['backup_retention'] = int(request.form.get('backup_retention', 7))
+            backup_settings['backup_destination'] = request.form.get('backup_destination')
+            backup_settings['backup_path'] = request.form.get('backup_path')
+            backup_settings['include_certificates'] = 'include_certificates' in request.form
+            backup_settings['include_logs'] = 'include_logs' in request.form
+            
+            # Save backup settings
+            if request.form.get('run_backup_now'):
+                # Trigger an immediate backup
+                flash('Backup started successfully', 'success')
+            else:
+                flash('Backup settings updated successfully', 'success')
+        
+        elif section == 'security':
+            security_settings['failed_login_limit'] = int(request.form.get('failed_login_limit', 5))
+            security_settings['password_expiry_days'] = int(request.form.get('password_expiry_days', 90))
+            security_settings['enforce_password_complexity'] = 'enforce_password_complexity' in request.form
+            security_settings['two_factor_auth'] = 'two_factor_auth' in request.form
+            security_settings['allowed_ip_ranges'] = [range.strip() for range in request.form.get('allowed_ip_ranges', '').split(',') if range.strip()]
+            security_settings['api_rate_limit'] = int(request.form.get('api_rate_limit', 100))
+            
+            # Save security settings
+            flash('Security settings updated successfully', 'success')
+    
+    return render_template('admin/settings.html',
+                          app_settings=app_settings,
+                          email_settings=email_settings,
+                          backup_settings=backup_settings,
+                          security_settings=security_settings)

@@ -1,0 +1,460 @@
+{% extends "base.html" %}
+
+{% block title %}Settings - Reverse Proxy Manager{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h1 class="display-5 fw-bold">System Settings</h1>
+            <p class="text-muted">Configure application settings, email notifications, backups, and security options.</p>
+        </div>
+    </div>
+
+    <!-- Settings Navigation Tabs -->
+    <ul class="nav nav-tabs mb-4" id="settingsTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="application-tab" data-bs-toggle="tab" data-bs-target="#application" type="button" role="tab" aria-controls="application" aria-selected="true">
+                <i class="fas fa-cogs me-2"></i>Application
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="email-tab" data-bs-toggle="tab" data-bs-target="#email" type="button" role="tab" aria-controls="email" aria-selected="false">
+                <i class="fas fa-envelope me-2"></i>Email
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="backup-tab" data-bs-toggle="tab" data-bs-target="#backup" type="button" role="tab" aria-controls="backup" aria-selected="false">
+                <i class="fas fa-database me-2"></i>Backup
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="security-tab" data-bs-toggle="tab" data-bs-target="#security" type="button" role="tab" aria-controls="security" aria-selected="false">
+                <i class="fas fa-shield-alt me-2"></i>Security
+            </button>
+        </li>
+    </ul>
+
+    <!-- Settings Content -->
+    <div class="tab-content" id="settingsTabContent">
+        <!-- Application Settings -->
+        <div class="tab-pane fade show active" id="application" role="tabpanel" aria-labelledby="application-tab">
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-primary text-white">
+                    <h3 class="card-title h5 mb-0">Application Settings</h3>
+                </div>
+                <div class="card-body">
+                    <form method="POST" action="{{ url_for('admin.settings') }}">
+                        <input type="hidden" name="section" value="application">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        
+                        <div class="row mb-4">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="app_name" class="form-label">Application Name</label>
+                                    <input type="text" class="form-control" id="app_name" name="app_name" value="{{ app_settings.app_name }}" required>
+                                    <div class="form-text">The name displayed in the UI and emails</div>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label class="form-label">Current Version</label>
+                                    <input type="text" class="form-control" value="{{ app_settings.app_version }}" readonly>
+                                    <div class="form-text">Current installed version of the application</div>
+                                </div>
+                            </div>
+                            
+                            <div class="col-md-6">
+                                <div class="mb-3 form-check">
+                                    <input type="checkbox" class="form-check-input" id="debug_mode" name="debug_mode" {% if app_settings.debug_mode %}checked{% endif %}>
+                                    <label class="form-check-label" for="debug_mode">Enable Debug Mode</label>
+                                    <div class="form-text">Shows detailed error messages and debug info (not recommended for production)</div>
+                                </div>
+                                
+                                <div class="mb-3 form-check">
+                                    <input type="checkbox" class="form-check-input" id="maintenance_mode" name="maintenance_mode" {% if app_settings.maintenance_mode %}checked{% endif %}>
+                                    <label class="form-check-label" for="maintenance_mode">Maintenance Mode</label>
+                                    <div class="form-text">Temporarily limit access to the application while performing maintenance</div>
+                                </div>
+                                
+                                <div class="mb-3 form-check">
+                                    <input type="checkbox" class="form-check-input" id="allow_registration" name="allow_registration" {% if app_settings.allow_registration %}checked{% endif %}>
+                                    <label class="form-check-label" for="allow_registration">Allow User Registration</label>
+                                    <div class="form-text">If enabled, new users can register accounts</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <h4 class="mb-3">System Limits</h4>
+                        <div class="row mb-4">
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label for="max_upload_size" class="form-label">Max Upload Size (MB)</label>
+                                    <input type="number" class="form-control" id="max_upload_size" name="max_upload_size" value="{{ app_settings.max_upload_size }}" min="1" max="1000">
+                                    <div class="form-text">Maximum size for file uploads</div>
+                                </div>
+                            </div>
+                            
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label for="session_timeout" class="form-label">Session Timeout (minutes)</label>
+                                    <input type="number" class="form-control" id="session_timeout" name="session_timeout" value="{{ app_settings.session_timeout }}" min="5" max="1440">
+                                    <div class="form-text">Time before users are automatically logged out</div>
+                                </div>
+                            </div>
+                            
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label for="log_retention_days" class="form-label">Log Retention (days)</label>
+                                    <input type="number" class="form-control" id="log_retention_days" name="log_retention_days" value="{{ app_settings.log_retention_days }}" min="1" max="365">
+                                    <div class="form-text">Number of days to keep system logs</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="d-flex justify-content-end">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-save me-1"></i> Save Application Settings
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Email Settings -->
+        <div class="tab-pane fade" id="email" role="tabpanel" aria-labelledby="email-tab">
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-primary text-white">
+                    <h3 class="card-title h5 mb-0">Email Configuration</h3>
+                </div>
+                <div class="card-body">
+                    <form method="POST" action="{{ url_for('admin.settings') }}">
+                        <input type="hidden" name="section" value="email">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        
+                        <div class="row mb-4">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="smtp_server" class="form-label">SMTP Server</label>
+                                    <input type="text" class="form-control" id="smtp_server" name="smtp_server" value="{{ email_settings.smtp_server }}">
+                                    <div class="form-text">Hostname or IP of your SMTP server (e.g., smtp.gmail.com)</div>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label for="smtp_port" class="form-label">SMTP Port</label>
+                                    <input type="number" class="form-control" id="smtp_port" name="smtp_port" value="{{ email_settings.smtp_port }}" min="1" max="65535">
+                                    <div class="form-text">Port for SMTP connection (usually 587 for TLS, 465 for SSL)</div>
+                                </div>
+                                
+                                <div class="mb-3 form-check">
+                                    <input type="checkbox" class="form-check-input" id="enable_ssl" name="enable_ssl" {% if email_settings.enable_ssl %}checked{% endif %}>
+                                    <label class="form-check-label" for="enable_ssl">Use SSL/TLS</label>
+                                    <div class="form-text">Enable secure connection to SMTP server</div>
+                                </div>
+                            </div>
+                            
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="smtp_username" class="form-label">SMTP Username</label>
+                                    <input type="text" class="form-control" id="smtp_username" name="smtp_username" value="{{ email_settings.smtp_username }}">
+                                    <div class="form-text">Username for authenticating with SMTP server</div>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label for="smtp_password" class="form-label">SMTP Password</label>
+                                    <input type="password" class="form-control" id="smtp_password" name="smtp_password" placeholder="•••••••••••••">
+                                    <div class="form-text">Leave blank to keep the existing password</div>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label for="smtp_from_address" class="form-label">From Email Address</label>
+                                    <input type="email" class="form-control" id="smtp_from_address" name="smtp_from_address" value="{{ email_settings.smtp_from_address }}">
+                                    <div class="form-text">Email address that will appear in the From field</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <h4 class="mb-3">Notification Settings</h4>
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="enable_notifications" name="enable_notifications" {% if email_settings.enable_notifications %}checked{% endif %}>
+                            <label class="form-check-label" for="enable_notifications">Enable Email Notifications</label>
+                            <div class="form-text">Send automated email notifications for important system events</div>
+                        </div>
+                        
+                        <div id="notification_events" class="mb-4 ps-4 border-start">
+                            <div class="mb-2">Select events that should trigger email notifications:</div>
+                            
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="notification_events" value="certificate_expiry" id="notify_certificate_expiry" 
+                                    {% if "certificate_expiry" in email_settings.notification_events %}checked{% endif %}>
+                                <label class="form-check-label" for="notify_certificate_expiry">
+                                    SSL Certificate Expiry
+                                </label>
+                            </div>
+                            
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="notification_events" value="node_offline" id="notify_node_offline"
+                                    {% if "node_offline" in email_settings.notification_events %}checked{% endif %}>
+                                <label class="form-check-label" for="notify_node_offline">
+                                    Node Goes Offline
+                                </label>
+                            </div>
+                            
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="notification_events" value="failed_deployment" id="notify_failed_deployment"
+                                    {% if "failed_deployment" in email_settings.notification_events %}checked{% endif %}>
+                                <label class="form-check-label" for="notify_failed_deployment">
+                                    Failed Deployments
+                                </label>
+                            </div>
+                            
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="notification_events" value="security_alerts" id="notify_security_alerts"
+                                    {% if "security_alerts" in email_settings.notification_events %}checked{% endif %}>
+                                <label class="form-check-label" for="notify_security_alerts">
+                                    Security Alerts
+                                </label>
+                            </div>
+                        </div>
+                        
+                        <div class="d-flex justify-content-between">
+                            <button type="submit" name="test_email" value="true" class="btn btn-outline-primary">
+                                <i class="fas fa-paper-plane me-1"></i> Test Email Configuration
+                            </button>
+                            
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-save me-1"></i> Save Email Settings
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Backup Settings -->
+        <div class="tab-pane fade" id="backup" role="tabpanel" aria-labelledby="backup-tab">
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-primary text-white">
+                    <h3 class="card-title h5 mb-0">Backup Configuration</h3>
+                </div>
+                <div class="card-body">
+                    <form method="POST" action="{{ url_for('admin.settings') }}">
+                        <input type="hidden" name="section" value="backup">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="backup_enabled" name="backup_enabled" {% if backup_settings.backup_enabled %}checked{% endif %}>
+                            <label class="form-check-label" for="backup_enabled">Enable Automated Backups</label>
+                            <div class="form-text">Automatically backup system configuration and data</div>
+                        </div>
+                        
+                        <div class="row mb-4">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="backup_frequency" class="form-label">Backup Frequency</label>
+                                    <select class="form-select" id="backup_frequency" name="backup_frequency">
+                                        <option value="hourly" {% if backup_settings.backup_frequency == "hourly" %}selected{% endif %}>Hourly</option>
+                                        <option value="daily" {% if backup_settings.backup_frequency == "daily" %}selected{% endif %}>Daily</option>
+                                        <option value="weekly" {% if backup_settings.backup_frequency == "weekly" %}selected{% endif %}>Weekly</option>
+                                        <option value="monthly" {% if backup_settings.backup_frequency == "monthly" %}selected{% endif %}>Monthly</option>
+                                    </select>
+                                    <div class="form-text">How frequently backups should be created</div>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label for="backup_retention" class="form-label">Backup Retention (days)</label>
+                                    <input type="number" class="form-control" id="backup_retention" name="backup_retention" value="{{ backup_settings.backup_retention }}" min="1" max="365">
+                                    <div class="form-text">Number of days to keep backups before deletion</div>
+                                </div>
+                            </div>
+                            
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="backup_destination" class="form-label">Backup Destination</label>
+                                    <select class="form-select" id="backup_destination" name="backup_destination">
+                                        <option value="local" {% if backup_settings.backup_destination == "local" %}selected{% endif %}>Local Storage</option>
+                                        <option value="s3" {% if backup_settings.backup_destination == "s3" %}selected{% endif %}>Amazon S3</option>
+                                        <option value="ftp" {% if backup_settings.backup_destination == "ftp" %}selected{% endif %}>FTP Server</option>
+                                    </select>
+                                    <div class="form-text">Where to store backup files</div>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label for="backup_path" class="form-label">Backup Path</label>
+                                    <input type="text" class="form-control" id="backup_path" name="backup_path" value="{{ backup_settings.backup_path }}">
+                                    <div class="form-text">Directory path for local backups or bucket name for S3</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <h4 class="mb-3">Backup Options</h4>
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="include_certificates" name="include_certificates" {% if backup_settings.include_certificates %}checked{% endif %}>
+                            <label class="form-check-label" for="include_certificates">Include SSL Certificates</label>
+                            <div class="form-text">Include SSL certificates in backups (recommended)</div>
+                        </div>
+                        
+                        <div class="mb-4 form-check">
+                            <input type="checkbox" class="form-check-input" id="include_logs" name="include_logs" {% if backup_settings.include_logs %}checked{% endif %}>
+                            <label class="form-check-label" for="include_logs">Include System Logs</label>
+                            <div class="form-text">Include system logs in backups (increases backup size)</div>
+                        </div>
+                        
+                        <div class="d-flex justify-content-between">
+                            <button type="submit" name="run_backup_now" value="true" class="btn btn-outline-primary">
+                                <i class="fas fa-download me-1"></i> Run Backup Now
+                            </button>
+                            
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-save me-1"></i> Save Backup Settings
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Security Settings -->
+        <div class="tab-pane fade" id="security" role="tabpanel" aria-labelledby="security-tab">
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-primary text-white">
+                    <h3 class="card-title h5 mb-0">Security Settings</h3>
+                </div>
+                <div class="card-body">
+                    <form method="POST" action="{{ url_for('admin.settings') }}">
+                        <input type="hidden" name="section" value="security">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        
+                        <h4 class="mb-3">Authentication</h4>
+                        <div class="row mb-4">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="failed_login_limit" class="form-label">Failed Login Attempt Limit</label>
+                                    <input type="number" class="form-control" id="failed_login_limit" name="failed_login_limit" value="{{ security_settings.failed_login_limit }}" min="1" max="20">
+                                    <div class="form-text">Number of login attempts before temporary lockout</div>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label for="password_expiry_days" class="form-label">Password Expiry (days)</label>
+                                    <input type="number" class="form-control" id="password_expiry_days" name="password_expiry_days" value="{{ security_settings.password_expiry_days }}" min="0" max="365">
+                                    <div class="form-text">Days until password reset is required (0 to disable)</div>
+                                </div>
+                            </div>
+                            
+                            <div class="col-md-6">
+                                <div class="mb-3 form-check">
+                                    <input type="checkbox" class="form-check-input" id="enforce_password_complexity" name="enforce_password_complexity" {% if security_settings.enforce_password_complexity %}checked{% endif %}>
+                                    <label class="form-check-label" for="enforce_password_complexity">Enforce Password Complexity</label>
+                                    <div class="form-text">Require strong passwords with mixed case, numbers, and special characters</div>
+                                </div>
+                                
+                                <div class="mb-3 form-check">
+                                    <input type="checkbox" class="form-check-input" id="two_factor_auth" name="two_factor_auth" {% if security_settings.two_factor_auth %}checked{% endif %}>
+                                    <label class="form-check-label" for="two_factor_auth">Enable Two-Factor Authentication</label>
+                                    <div class="form-text">Require 2FA for all admin accounts</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <h4 class="mb-3">Access Control</h4>
+                        <div class="row mb-4">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="allowed_ip_ranges" class="form-label">Allowed Admin IP Ranges</label>
+                                    <textarea class="form-control" id="allowed_ip_ranges" name="allowed_ip_ranges" rows="3" placeholder="192.168.1.0/24, 10.0.0.0/8">{{ security_settings.allowed_ip_ranges|join(', ') }}</textarea>
+                                    <div class="form-text">IP addresses or CIDR ranges allowed to access admin area (leave empty to allow all)</div>
+                                </div>
+                            </div>
+                            
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="api_rate_limit" class="form-label">API Rate Limit (requests per minute)</label>
+                                    <input type="number" class="form-control" id="api_rate_limit" name="api_rate_limit" value="{{ security_settings.api_rate_limit }}" min="10" max="1000">
+                                    <div class="form-text">Maximum number of API requests allowed per minute per IP</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="d-flex justify-content-end">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-save me-1"></i> Save Security Settings
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Toggle notification events based on enable_notifications checkbox
+        const enableNotificationsCheckbox = document.getElementById('enable_notifications');
+        const notificationEventsDiv = document.getElementById('notification_events');
+        
+        function toggleNotificationEvents() {
+            if (enableNotificationsCheckbox.checked) {
+                notificationEventsDiv.classList.remove('opacity-50');
+                notificationEventsDiv.querySelectorAll('input').forEach(input => {
+                    input.disabled = false;
+                });
+            } else {
+                notificationEventsDiv.classList.add('opacity-50');
+                notificationEventsDiv.querySelectorAll('input').forEach(input => {
+                    input.disabled = true;
+                });
+            }
+        }
+        
+        // Initial state
+        toggleNotificationEvents();
+        
+        // Listen for changes
+        enableNotificationsCheckbox.addEventListener('change', toggleNotificationEvents);
+        
+        // Show the tab specified in the URL hash, if any
+        let hash = window.location.hash;
+        if (hash) {
+            const tabId = hash.substring(1) + '-tab';
+            const tab = document.getElementById(tabId);
+            if (tab) {
+                new bootstrap.Tab(tab).show();
+            }
+        }
+        
+        // Update URL when tabs are changed
+        const tabElms = document.querySelectorAll('button[data-bs-toggle="tab"]');
+        tabElms.forEach(tab => {
+            tab.addEventListener('shown.bs.tab', function (event) {
+                const target = event.target.getAttribute('data-bs-target').substring(1);
+                window.location.hash = target;
+            });
+        });
+        
+        // Show additional fields based on backup destination
+        const backupDestinationSelect = document.getElementById('backup_destination');
+        const backupPathInput = document.getElementById('backup_path');
+        
+        if (backupDestinationSelect && backupPathInput) {
+            backupDestinationSelect.addEventListener('change', function() {
+                const destination = this.value;
+                
+                // Update placeholder based on destination
+                if (destination === 'local') {
+                    backupPathInput.placeholder = '/var/backups/proxy-manager';
+                } else if (destination === 's3') {
+                    backupPathInput.placeholder = 'my-backup-bucket/path';
+                } else if (destination === 'ftp') {
+                    backupPathInput.placeholder = '/backups';
+                }
+            });
+            
+            // Trigger on page load
+            backupDestinationSelect.dispatchEvent(new Event('change'));
+        }
+    });
+</script>
+{% endblock %}
