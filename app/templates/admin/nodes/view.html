@@ -304,6 +304,7 @@
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                 <form action="{{ url_for('admin.redeploy_all_sites', node_id=node.id) }}" method="POST" class="d-inline">
+                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                      <button type="submit" class="btn btn-primary"><i class="fas fa-sync me-1"></i>Redeploy Now</button>
                 </form>
             </div>
@@ -327,6 +328,7 @@
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                 <form action="{{ url_for('admin.delete_node', node_id=node.id) }}" method="POST" class="d-inline">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit" class="btn btn-danger"><i class="fas fa-trash me-1"></i>Delete Node</button>
                 </form>
             </div>
@@ -432,7 +434,7 @@
             systemStatsError.classList.add('d-none');
             connectionStatsError.classList.add('d-none');
 
-            fetch(`/admin/nodes/${nodeId}/stats`)
+            fetch(`{{ url_for('admin.get_node_stats_ajax', node_id=0) }}`.replace('0', nodeId))
                 .then(response => {
                     if (!response.ok) { throw new Error(`HTTP error! status: ${response.status}`); }
                     return response.json();

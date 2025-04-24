@@ -59,8 +59,9 @@
                 </div>
             </div>
             
-            <form id="resetForm" method="POST" action="{{ url_for('admin.reset_system') }}" onsubmit="return validateResetForm();">
+            <form id="resetForm" method="POST" action="{{ url_for('admin.system_reset') }}" onsubmit="return validateResetForm();">
                 <input type="hidden" name="confirm" value="yes">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 
                 <div class="mb-4">
                     <label class="form-label">Reset Type:</label>

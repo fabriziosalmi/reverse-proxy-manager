@@ -245,6 +245,7 @@
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                 <form id="deleteNodeForm" method="POST" class="d-inline"> <!-- Use d-inline -->
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit" class="btn btn-danger"><i class="fas fa-trash me-1"></i>Delete Node</button>
                 </form>
             </div>
