@@ -2,208 +2,250 @@
 
 {% block title %}Manage Nodes - Italia CDN Proxy{% endblock %}
 
-{% block styles %}
+{% block head_extra %}
 <style>
     /* Node list custom styling */
     .node-status-info {
         font-size: 0.85rem;
         line-height: 1.4;
     }
-    
-    .table td {
+
+    .table td, .table th {
         vertical-align: middle;
     }
-    
+
     .node-details-container {
-        min-width: 180px;
+        min-width: 200px; /* Slightly wider */
     }
-    
-    tr.align-middle:hover {
-        background-color: rgba(0,0,0,0.03);
-    }
-    
+
     .badge.bg-light {
-        color: #212529;
-        border: 1px solid #dee2e6;
+        color: var(--bs-body-color); /* Use theme color */
+        border: 1px solid var(--bs-border-color);
     }
-    
+
     /* Add some animation for status changes */
     @keyframes fadeIn {
         from { opacity: 0; }
         to { opacity: 1; }
     }
-    
+
     .node-status-info {
         animation: fadeIn 0.3s ease-in-out;
+    }
+
+    .action-btn-group .btn {
+        padding: 0.25rem 0.5rem; /* Smaller padding for action buttons */
     }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="container py-4">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <h1>Node Management</h1>
-        <div>
-            <button class="btn btn-outline-secondary dropdown-toggle me-2" type="button" id="bulkActionsDropdown" data-bs-toggle="dropdown" aria-expanded="false">
-                Bulk Actions
-            </button>
-            <ul class="dropdown-menu" aria-labelledby="bulkActionsDropdown">
-                <li>
-                    <form id="activateSelectedForm" action="{{ url_for('admin.bulk_toggle_nodes') }}" method="POST">
-                        <input type="hidden" name="action" value="activate">
-                        <input type="hidden" name="node_ids" id="activateNodeIds">
-                        <button type="submit" class="dropdown-item">Activate Selected</button>
-                    </form>
-                </li>
-                <li>
-                    <form id="deactivateSelectedForm" action="{{ url_for('admin.bulk_toggle_nodes') }}" method="POST">
-                        <input type="hidden" name="action" value="deactivate">
-                        <input type="hidden" name="node_ids" id="deactivateNodeIds">
-                        <button type="submit" class="dropdown-item">Deactivate Selected</button>
-                    </form>
-                </li>
-            </ul>
+    <nav aria-label="breadcrumb" class="mb-4">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{{ url_for('admin.dashboard') }}"><i class="fas fa-tachometer-alt me-1"></i>Dashboard</a></li>
+            <li class="breadcrumb-item active" aria-current="page"><i class="fas fa-server me-1"></i>Nodes</li>
+        </ol>
+    </nav>
+
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+        <h1 class="h3 mb-0">Node Management</h1>
+        <div class="d-flex gap-2">
+            <div class="btn-group">
+                <button class="btn btn-outline-secondary dropdown-toggle" type="button" id="bulkActionsDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+                    <i class="fas fa-tasks me-1"></i> Bulk Actions
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="bulkActionsDropdown">
+                    <li>
+                        <form id="activateSelectedForm" action="{{ url_for('admin.bulk_toggle_nodes') }}" method="POST" class="d-inline">
+                            <input type="hidden" name="action" value="activate">
+                            <input type="hidden" name="node_ids" id="activateNodeIds">
+                            <button type="submit" class="dropdown-item"><i class="fas fa-check-circle me-2 text-success"></i>Activate Selected</button>
+                        </form>
+                    </li>
+                    <li>
+                        <form id="deactivateSelectedForm" action="{{ url_for('admin.bulk_toggle_nodes') }}" method="POST" class="d-inline">
+                            <input type="hidden" name="action" value="deactivate">
+                            <input type="hidden" name="node_ids" id="deactivateNodeIds">
+                            <button type="submit" class="dropdown-item"><i class="fas fa-times-circle me-2 text-danger"></i>Deactivate Selected</button>
+                        </form>
+                    </li>
+                </ul>
+            </div>
             <a href="{{ url_for('admin.new_node') }}" class="btn btn-primary">
-                <i class="fas fa-plus"></i> Add New Node
+                <i class="fas fa-plus me-1"></i> Add New Node
             </a>
         </div>
     </div>
-    
+
     {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
             {% for category, message in messages %}
-                <div class="alert alert-{{ category if category != 'error' else 'danger' }} alert-dismissible fade show">
-                    {{ message }}
+                {% set alert_class = 'alert-info' %}
+                {% set icon_class = 'fa-info-circle' %}
+                {% if category == 'success' %}
+                    {% set alert_class = 'alert-success' %}
+                    {% set icon_class = 'fa-check-circle' %}
+                {% elif category == 'error' %}
+                    {% set alert_class = 'alert-danger' %}
+                    {% set icon_class = 'fa-exclamation-circle' %}
+                {% elif category == 'warning' %}
+                    {% set alert_class = 'alert-warning' %}
+                    {% set icon_class = 'fa-exclamation-triangle' %}
+                {% endif %}
+                <div class="alert {{ alert_class }} alert-dismissible fade show" role="alert">
+                    <div class="d-flex align-items-center">
+                        <i class="fas {{ icon_class }} me-2"></i>
+                        <div>{{ message }}</div>
+                    </div>
                     <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
                 </div>
             {% endfor %}
         {% endif %}
     {% endwith %}
-    
+
     <div class="card shadow-sm">
-        <div class="card-body">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0"><i class="fas fa-list me-2"></i>Nodes</h5>
+            <span class="text-muted small">Total: {{ nodes|length }}</span>
+        </div>
+        <div class="card-body p-0"> <!-- Remove padding for full-width table -->
             <div class="table-responsive">
-                <table class="table table-striped table-hover">
-                    <thead>
+                <table class="table table-striped table-hover mb-0"> <!-- Remove bottom margin -->
+                    <thead class="table-light">
                         <tr>
-                            <th width="40">
-                                <input type="checkbox" id="selectAllNodes" class="form-check-input">
+                            <th class="text-center" style="width: 40px;">
+                                <input type="checkbox" id="selectAllNodes" class="form-check-input mx-auto">
                             </th>
-                            <th>ID</th>
+                            <th style="width: 50px;">ID</th>
                             <th>Name</th>
                             <th>IP Address</th>
                             <th>External IP</th>
                             <th>SSH Info</th>
                             <th>Status</th>
                             <th>Details</th>
-                            <th>Actions</th>
+                            <th class="text-end" style="width: 120px;">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
-                        {% for node in nodes %}
-                        <tr class="align-middle" id="node-row-{{ node.id }}">
-                            <td>
-                                <input type="checkbox" class="form-check-input node-checkbox" data-node-id="{{ node.id }}" value="{{ node.id }}">
-                            </td>
-                            <td>{{ node.id }}</td>
-                            <td>
-                                <span class="fw-semibold">{{ node.name }}</span>
-                                {% if node.is_discovered %}
-                                    <span class="badge bg-info ms-1" title="This node was automatically discovered">Discovered</span>
-                                {% endif %}
-                            </td>
-                            <td>{{ node.ip_address }}</td>
-                            <td id="external-ip-{{ node.id }}">
-                                <button class="btn btn-sm btn-outline-secondary" onclick="checkExternalIP({{ node.id }})" title="Check external IP">
-                                    <i class="fas fa-globe"></i> Check
-                                </button>
-                            </td>
-                            <td>
-                                <div>
-                                    <small class="text-secondary">User: <span class="text-dark">{{ node.ssh_user }}</span></small>
-                                </div>
-                                <div>
-                                    <small class="text-secondary">Port: <span class="text-dark">{{ node.ssh_port }}</span></small>
-                                </div>
-                                <div>
-                                    <small class="text-secondary">Auth: 
-                                        <span class="text-dark badge bg-light text-dark border">
+                        {% if nodes %}
+                            {% for node in nodes %}
+                            <tr id="node-row-{{ node.id }}">
+                                <td class="text-center">
+                                    <input type="checkbox" class="form-check-input node-checkbox mx-auto" data-node-id="{{ node.id }}" value="{{ node.id }}">
+                                </td>
+                                <td>{{ node.id }}</td>
+                                <td>
+                                    <a href="{{ url_for('admin.view_node', node_id=node.id) }}" class="fw-semibold text-decoration-none">{{ node.name }}</a>
+                                    {% if node.is_discovered %}
+                                        <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle rounded-pill ms-1" title="This node was automatically discovered">
+                                            <i class="fas fa-magic me-1"></i>Discovered
+                                        </span>
+                                    {% endif %}
+                                </td>
+                                <td><code>{{ node.ip_address }}</code></td>
+                                <td id="external-ip-{{ node.id }}">
+                                    <button class="btn btn-sm btn-outline-secondary" onclick="checkExternalIP({{ node.id }})" title="Check external IP">
+                                        <i class="fas fa-globe"></i> Check
+                                    </button>
+                                </td>
+                                <td>
+                                    <div class="small">
+                                        <i class="fas fa-user text-muted me-1"></i>{{ node.ssh_user }}@{{ node.ssh_port }}
+                                    </div>
+                                    <div class="small">
+                                        <i class="fas {{ 'fa-key' if node.ssh_key_path else 'fa-lock' }} text-muted me-1"></i>
+                                        <span class="badge bg-light text-dark border rounded-pill">
                                             {% if node.ssh_key_path %}Key{% else %}Password{% endif %}
                                         </span>
-                                    </small>
-                                </div>
-                            </td>
-                            <td>
-                                <span class="badge bg-{{ 'success' if node.is_active else 'danger' }} p-2">
-                                    <i class="fas fa-{{ 'check-circle' if node.is_active else 'times-circle' }} me-1"></i>
-                                    {{ 'Active' if node.is_active else 'Inactive' }}
-                                </span>
-                                <div class="mt-1">
-                                    <small class="text-muted">{{ node.created_at.strftime('%Y-%m-%d') }}</small>
-                                </div>
-                            </td>
-                            <td>
-                                <div class="node-details-container">
-                                    <div>
-                                        <small class="text-secondary">Nginx path: </small>
-                                        <small class="text-dark">{{ node.nginx_config_path }}</small>
                                     </div>
-                                    {% if node.detected_nginx_path %}
-                                    <div>
-                                        <small class="text-secondary">Nginx bin: </small>
-                                        <small class="text-dark">{{ node.detected_nginx_path }}</small>
+                                </td>
+                                <td>
+                                    <span class="badge rounded-pill bg-{{ 'success' if node.is_active else 'danger' }}-subtle text-{{ 'success' if node.is_active else 'danger' }}-emphasis border border-{{ 'success' if node.is_active else 'danger' }}-subtle">
+                                        <i class="fas fa-{{ 'check-circle' if node.is_active else 'times-circle' }} me-1"></i>
+                                        {{ 'Active' if node.is_active else 'Inactive' }}
+                                    </span>
+                                    <div class="mt-1">
+                                        <small class="text-muted" title="Created at {{ node.created_at.strftime('%Y-%m-%d %H:%M:%S') }}">
+                                            <i class="far fa-calendar-alt me-1"></i>{{ node.created_at.strftime('%Y-%m-%d') }}
+                                        </small>
                                     </div>
-                                    {% endif %}
-                                    <div id="node-stats-{{ node.id }}" class="mt-1">
-                                        <button class="btn btn-sm btn-outline-info" onclick="checkNodeStatus({{ node.id }})" title="Check node status">
-                                            <i class="fas fa-server"></i> Check Status
+                                </td>
+                                <td>
+                                    <div class="node-details-container small">
+                                        <div>
+                                            <i class="far fa-folder text-muted me-1" title="Nginx Config Path"></i>
+                                            <code>{{ node.nginx_config_path }}</code>
+                                        </div>
+                                        {% if node.detected_nginx_path %}
+                                        <div>
+                                            <i class="fas fa-cog text-muted me-1" title="Nginx Binary Path"></i>
+                                            <code>{{ node.detected_nginx_path }}</code>
+                                        </div>
+                                        {% endif %}
+                                        <div id="node-stats-{{ node.id }}" class="mt-1">
+                                            <button class="btn btn-sm btn-outline-info" onclick="checkNodeStatus({{ node.id }})" title="Check node status">
+                                                <i class="fas fa-heartbeat"></i> Check Status
+                                            </button>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td class="text-end">
+                                    <div class="btn-group action-btn-group">
+                                        <a href="{{ url_for('admin.view_node', node_id=node.id) }}" class="btn btn-outline-secondary" title="View Details">
+                                            <i class="fas fa-eye"></i>
+                                        </a>
+                                        <a href="{{ url_for('admin.edit_node', node_id=node.id) }}" class="btn btn-outline-primary" title="Edit Node">
+                                            <i class="fas fa-edit"></i>
+                                        </a>
+                                        <button type="button" class="btn btn-outline-danger"
+                                                data-bs-toggle="modal"
+                                                data-bs-target="#deleteNodeModal"
+                                                data-node-id="{{ node.id }}"
+                                                data-node-name="{{ node.name }}"
+                                                title="Delete Node">
+                                            <i class="fas fa-trash"></i>
                                         </button>
                                     </div>
-                                </div>
-                            </td>
-                            <td>
-                                <div class="btn-group btn-group-sm">
-                                    <a href="{{ url_for('admin.view_node', node_id=node.id) }}" class="btn btn-outline-info" title="View Details">
-                                        <i class="fas fa-eye"></i>
-                                    </a>
-                                    <a href="{{ url_for('admin.edit_node', node_id=node.id) }}" class="btn btn-outline-primary" title="Edit Node">
-                                        <i class="fas fa-edit"></i>
-                                    </a>
-                                    <button type="button" class="btn btn-outline-danger" 
-                                            data-bs-toggle="modal" 
-                                            data-bs-target="#deleteNodeModal" 
-                                            data-node-id="{{ node.id }}"
-                                            data-node-name="{{ node.name }}"
-                                            title="Delete Node">
-                                        <i class="fas fa-trash"></i>
-                                    </button>
-                                </div>
-                            </td>
-                        </tr>
-                        {% endfor %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        {% else %}
+                            <tr>
+                                <td colspan="9" class="text-center text-muted py-4">
+                                    <i class="fas fa-info-circle me-2"></i>No nodes found. <a href="{{ url_for('admin.new_node') }}">Add one now</a>.
+                                </td>
+                            </tr>
+                        {% endif %}
                     </tbody>
                 </table>
             </div>
         </div>
+        {% if nodes %}
+        <div class="card-footer text-muted small">
+            Use the checkboxes and Bulk Actions menu to manage multiple nodes.
+        </div>
+        {% endif %}
     </div>
 </div>
 
 <!-- Delete Node Modal -->
 <div class="modal fade" id="deleteNodeModal" tabindex="-1" aria-labelledby="deleteNodeModalLabel" aria-hidden="true">
-    <div class="modal-dialog">
+    <div class="modal-dialog modal-dialog-centered"> <!-- Centered modal -->
         <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="deleteNodeModalLabel">Confirm Deletion</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title" id="deleteNodeModalLabel"><i class="fas fa-exclamation-triangle me-2"></i>Confirm Deletion</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
-                Are you sure you want to delete the node <span id="deleteNodeName" class="fw-bold"></span>?
-                This action cannot be undone.
+                Are you sure you want to delete the node <strong id="deleteNodeName" class="text-danger"></strong>?
+                <br>
+                <small class="text-muted">This action cannot be undone and may affect deployed sites.</small>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <form id="deleteNodeForm" method="POST">
-                    <button type="submit" class="btn btn-danger">Delete Node</button>
+                <form id="deleteNodeForm" method="POST" class="d-inline"> <!-- Use d-inline -->
+                    <button type="submit" class="btn btn-danger"><i class="fas fa-trash me-1"></i>Delete Node</button>
                 </form>
             </div>
         </div>
@@ -214,6 +256,7 @@
 
 {% block scripts %}
 <script>
+    // ... existing setup for delete modal and bulk actions ...
     document.addEventListener('DOMContentLoaded', function() {
         // Delete Node Modal
         const deleteNodeModal = document.getElementById('deleteNodeModal');
@@ -222,28 +265,51 @@
                 const button = event.relatedTarget;
                 const nodeId = button.getAttribute('data-node-id');
                 const nodeName = button.getAttribute('data-node-name');
-                
+
                 document.getElementById('deleteNodeName').textContent = nodeName;
                 document.getElementById('deleteNodeForm').action = "{{ url_for('admin.delete_node', node_id=0) }}".replace('0', nodeId);
             });
         }
-        
+
         // Select All Nodes
         const selectAllNodes = document.getElementById('selectAllNodes');
         const nodeCheckboxes = document.querySelectorAll('.node-checkbox');
-        
+
         if (selectAllNodes) {
             selectAllNodes.addEventListener('change', function() {
                 nodeCheckboxes.forEach(checkbox => {
                     checkbox.checked = selectAllNodes.checked;
                 });
+                // Also update indeterminate state if needed
+                updateSelectAllState();
             });
         }
-        
+
+        nodeCheckboxes.forEach(checkbox => {
+            checkbox.addEventListener('change', updateSelectAllState);
+        });
+
+        function updateSelectAllState() {
+            if (!selectAllNodes) return;
+            const total = nodeCheckboxes.length;
+            const checkedCount = document.querySelectorAll('.node-checkbox:checked').length;
+            if (checkedCount === 0) {
+                selectAllNodes.checked = false;
+                selectAllNodes.indeterminate = false;
+            } else if (checkedCount === total) {
+                selectAllNodes.checked = true;
+                selectAllNodes.indeterminate = false;
+            } else {
+                selectAllNodes.checked = false;
+                selectAllNodes.indeterminate = true;
+            }
+        }
+        updateSelectAllState(); // Initial check
+
         // Handle bulk actions
         const activateForm = document.getElementById('activateSelectedForm');
         const deactivateForm = document.getElementById('deactivateSelectedForm');
-        
+
         function getSelectedNodeIds() {
             const selectedNodes = [];
             nodeCheckboxes.forEach(checkbox => {
@@ -253,122 +319,156 @@
             });
             return selectedNodes;
         }
-        
-        if (activateForm) {
-            activateForm.addEventListener('submit', function(e) {
-                e.preventDefault();
-                const selectedNodes = getSelectedNodeIds();
-                
-                if (selectedNodes.length === 0) {
-                    alert('Please select at least one node');
-                    return;
-                }
-                
-                document.getElementById('activateNodeIds').value = selectedNodes.join(',');
-                activateForm.submit();
-            });
+
+        function setupBulkActionForm(form, hiddenInputId) {
+             if (form) {
+                form.addEventListener('submit', function(e) {
+                    e.preventDefault();
+                    const selectedNodes = getSelectedNodeIds();
+
+                    if (selectedNodes.length === 0) {
+                        // Consider using a more user-friendly notification (e.g., Bootstrap toast)
+                        alert('Please select at least one node.');
+                        return;
+                    }
+
+                    document.getElementById(hiddenInputId).value = selectedNodes.join(',');
+                    form.submit();
+                });
+            }
         }
-        
-        if (deactivateForm) {
-            deactivateForm.addEventListener('submit', function(e) {
-                e.preventDefault();
-                const selectedNodes = getSelectedNodeIds();
-                
-                if (selectedNodes.length === 0) {
-                    alert('Please select at least one node');
-                    return;
-                }
-                
-                document.getElementById('deactivateNodeIds').value = selectedNodes.join(',');
-                deactivateForm.submit();
-            });
-        }
+
+        setupBulkActionForm(activateForm, 'activateNodeIds');
+        setupBulkActionForm(deactivateForm, 'deactivateNodeIds');
     });
-    
+
     // Function to check external IP address
     function checkExternalIP(nodeId) {
         const ipElement = document.getElementById(`external-ip-${nodeId}`);
-        ipElement.innerHTML = '<div class="spinner-border spinner-border-sm text-secondary" role="status"><span class="visually-hidden">Loading...</span></div> Checking...';
-        
+        const originalButton = ipElement.innerHTML; // Store original button
+        ipElement.innerHTML = `<div class="spinner-border spinner-border-sm text-secondary" role="status"><span class="visually-hidden">Loading...</span></div>`;
+
         fetch(`{{ url_for('admin.check_external_ip', node_id=0) }}`.replace('0', nodeId))
-            .then(response => response.json())
+            .then(response => {
+                if (!response.ok) { throw new Error(`HTTP error! status: ${response.status}`); }
+                return response.json();
+            })
             .then(data => {
-                if (data.success) {
-                    ipElement.innerHTML = `<span class="fw-bold text-success"><i class="fas fa-globe"></i> ${data.external_ip}</span>`;
+                if (data.success && data.external_ip) {
+                    ipElement.innerHTML = `<span class="badge bg-light-subtle text-dark border rounded-pill" title="External IP"><i class="fas fa-globe text-success me-1"></i>${data.external_ip}</span>`;
                 } else {
-                    ipElement.innerHTML = `<span class="text-danger"><i class="fas fa-exclamation-triangle"></i> ${data.error || 'Failed to check'}</span>
-                        <button class="btn btn-sm btn-outline-secondary ms-2" onclick="checkExternalIP(${nodeId})" title="Try again">
-                            <i class="fas fa-redo"></i>
+                    ipElement.innerHTML = `<span class="badge bg-danger-subtle text-danger-emphasis border border-danger-subtle rounded-pill" title="${data.error || 'Failed to check'}"><i class="fas fa-exclamation-triangle"></i> Error</span>
+                        <button class="btn btn-sm btn-link text-secondary p-0 ms-1" onclick="checkExternalIP(${nodeId})" title="Try again">
+                            <i class="fas fa-redo small"></i>
                         </button>`;
                 }
             })
             .catch(error => {
-                ipElement.innerHTML = `<span class="text-danger"><i class="fas fa-exclamation-triangle"></i> Request failed</span>
-                    <button class="btn btn-sm btn-outline-secondary ms-2" onclick="checkExternalIP(${nodeId})" title="Try again">
-                        <i class="fas fa-redo"></i>
+                console.error("External IP check failed:", error);
+                ipElement.innerHTML = `<span class="badge bg-danger-subtle text-danger-emphasis border border-danger-subtle rounded-pill" title="Request failed"><i class="fas fa-exclamation-triangle"></i> Error</span>
+                    <button class="btn btn-sm btn-link text-secondary p-0 ms-1" onclick="checkExternalIP(${nodeId})" title="Try again">
+                        <i class="fas fa-redo small"></i>
                     </button>`;
             });
     }
-    
+
     // Function to check node status
     function checkNodeStatus(nodeId) {
         const statsElement = document.getElementById(`node-stats-${nodeId}`);
-        statsElement.innerHTML = '<div class="spinner-border spinner-border-sm text-secondary" role="status"><span class="visually-hidden">Loading...</span></div> Checking status...';
-        
+        const originalButton = statsElement.innerHTML; // Store original button
+        statsElement.innerHTML = `<div class="spinner-border spinner-border-sm text-secondary" role="status"><span class="visually-hidden">Loading...</span></div> Checking...`;
+
         fetch(`{{ url_for('admin.get_node_stats_ajax', node_id=0) }}`.replace('0', nodeId))
-            .then(response => response.json())
+            .then(response => {
+                 if (!response.ok) { throw new Error(`HTTP error! status: ${response.status}`); }
+                 return response.json();
+            })
             .then(data => {
+                const rowElement = document.getElementById(`node-row-${nodeId}`);
                 if (data.success) {
-                    const serverStats = data.serverStats;
-                    let statsHtml = '<div class="mt-2 node-status-info">';
-                    
+                    const serverStats = data.serverStats || {}; // Ensure serverStats exists
+                    const connectionStats = data.connectionStats || {}; // Ensure connectionStats exists
+
+                    let statsHtml = '<div class="mt-1 node-status-info small">'; // Use small text
+
                     if (serverStats.cpu_usage && serverStats.cpu_usage !== 'N/A') {
-                        statsHtml += `<div><small class="text-secondary">CPU: <span class="badge bg-${getCpuBadgeColor(serverStats.cpu_usage)}">${serverStats.cpu_usage}</span></small></div>`;
+                        statsHtml += `<div class="mb-1"><i class="fas fa-microchip text-muted me-1" title="CPU Usage"></i><span class="badge bg-${getCpuBadgeColor(serverStats.cpu_usage)} rounded-pill">${serverStats.cpu_usage}</span></div>`;
                     }
-                    
+
                     if (serverStats.memory_usage && serverStats.memory_usage !== 'N/A') {
-                        statsHtml += `<div><small class="text-secondary">Memory: <span class="text-dark">${serverStats.memory_usage}</span></small></div>`;
+                         statsHtml += `<div class="mb-1"><i class="fas fa-memory text-muted me-1" title="Memory Usage"></i>${serverStats.memory_usage}</div>`;
                     }
-                    
+
                     if (serverStats.disk_usage && serverStats.disk_usage !== 'N/A') {
-                        statsHtml += `<div><small class="text-secondary">Disk: <span class="text-dark">${serverStats.disk_usage}</span></small></div>`;
+                         statsHtml += `<div class="mb-1"><i class="far fa-hdd text-muted me-1" title="Disk Usage"></i>${serverStats.disk_usage}</div>`;
                     }
-                    
-                    if (serverStats.external_ip) {
-                        document.getElementById(`external-ip-${nodeId}`).innerHTML = `<span class="fw-bold text-success"><i class="fas fa-globe"></i> ${serverStats.external_ip}</span>`;
+
+                    // Update external IP if received in stats and not already displayed correctly
+                    const externalIpElement = document.getElementById(`external-ip-${nodeId}`);
+                    if (serverStats.external_ip && !externalIpElement.innerHTML.includes(serverStats.external_ip)) {
+                         externalIpElement.innerHTML = `<span class="badge bg-light-subtle text-dark border rounded-pill" title="External IP"><i class="fas fa-globe text-success me-1"></i>${serverStats.external_ip}</span>`;
                     }
-                    
+
                     statsHtml += `<div class="mt-1">
-                                    <button class="btn btn-sm btn-outline-secondary" onclick="checkNodeStatus(${nodeId})" title="Refresh status">
-                                        <i class="fas fa-sync-alt"></i> Refresh
+                                    <button class="btn btn-sm btn-link text-secondary p-0" onclick="checkNodeStatus(${nodeId})" title="Refresh status">
+                                        <i class="fas fa-sync-alt small"></i> Refresh
                                     </button>
                                   </div>`;
                     statsHtml += '</div>';
-                    
+
                     statsElement.innerHTML = statsHtml;
+                    // Indicate success visually on the row (optional)
+                    if(rowElement) {
+                        rowElement.classList.add('table-success-light'); // Custom class or use Bootstrap's
+                        setTimeout(() => rowElement.classList.remove('table-success-light'), 1500);
+                    }
+
                 } else {
-                    statsElement.innerHTML = `<span class="text-danger"><i class="fas fa-exclamation-triangle"></i> ${data.error || 'Failed to check status'}</span>
-                        <button class="btn btn-sm btn-outline-secondary ms-2" onclick="checkNodeStatus(${nodeId})" title="Try again">
-                            <i class="fas fa-redo"></i>
+                    statsElement.innerHTML = `<span class="badge bg-danger-subtle text-danger-emphasis border border-danger-subtle rounded-pill" title="${data.error || 'Failed to check status'}"><i class="fas fa-exclamation-triangle"></i> Error</span>
+                        <button class="btn btn-sm btn-link text-secondary p-0 ms-1" onclick="checkNodeStatus(${nodeId})" title="Try again">
+                            <i class="fas fa-redo small"></i>
                         </button>`;
+                     // Indicate failure visually on the row (optional)
+                    if(rowElement) {
+                        rowElement.classList.add('table-danger-light'); // Custom class or use Bootstrap's
+                        setTimeout(() => rowElement.classList.remove('table-danger-light'), 1500);
+                    }
                 }
             })
             .catch(error => {
-                statsElement.innerHTML = `<span class="text-danger"><i class="fas fa-exclamation-triangle"></i> Request failed</span>
-                    <button class="btn btn-sm btn-outline-secondary ms-2" onclick="checkNodeStatus(${nodeId})" title="Try again">
-                        <i class="fas fa-redo"></i>
+                console.error("Node status check failed:", error);
+                statsElement.innerHTML = `<span class="badge bg-danger-subtle text-danger-emphasis border border-danger-subtle rounded-pill" title="Request failed"><i class="fas fa-exclamation-triangle"></i> Error</span>
+                    <button class="btn btn-sm btn-link text-secondary p-0 ms-1" onclick="checkNodeStatus(${nodeId})" title="Try again">
+                        <i class="fas fa-redo small"></i>
                     </button>`;
+                 // Indicate failure visually on the row (optional)
+                 const rowElement = document.getElementById(`node-row-${nodeId}`);
+                 if(rowElement) {
+                    rowElement.classList.add('table-danger-light');
+                    setTimeout(() => rowElement.classList.remove('table-danger-light'), 1500);
+                 }
             });
     }
-    
-    // Helper function to determine CPU usage badge color
+
+    // Helper function to determine CPU usage badge color (using Bootstrap text/bg utilities)
     function getCpuBadgeColor(cpuUsage) {
-        const usage = parseInt(cpuUsage.replace('%', ''));
-        if (isNaN(usage)) return 'secondary';
-        
-        if (usage < 30) return 'success';
-        if (usage < 70) return 'warning';
-        return 'danger';
+        const usage = parseFloat(cpuUsage); // Use parseFloat
+        if (isNaN(usage)) return 'secondary-subtle text-secondary-emphasis border border-secondary-subtle'; // Default subtle badge
+
+        if (usage < 30) return 'success-subtle text-success-emphasis border border-success-subtle';
+        if (usage < 70) return 'warning-subtle text-warning-emphasis border border-warning-subtle';
+        return 'danger-subtle text-danger-emphasis border border-danger-subtle';
     }
+
+    // Add custom styles for visual feedback on rows (optional)
+    const style = document.createElement('style');
+    style.textContent = `
+        @keyframes flash-success { 0% { background-color: var(--bs-success-bg-subtle); } 100% { background-color: transparent; } }
+        @keyframes flash-danger { 0% { background-color: var(--bs-danger-bg-subtle); } 100% { background-color: transparent; } }
+        .table-success-light { animation: flash-success 1.5s ease-out; }
+        .table-danger-light { animation: flash-danger 1.5s ease-out; }
+    `;
+    document.head.appendChild(style);
+
 </script>
 {% endblock %}

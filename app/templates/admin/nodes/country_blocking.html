@@ -2,96 +2,137 @@
 
 {% block title %}Node Country Blocking - {{ node.name }} - Italia CDN Proxy Manager{% endblock %}
 
+{% block head_extra %}
+<link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/select2-bootstrap-5-theme@1.3.0/dist/select2-bootstrap-5-theme.min.css" />
+<style>
+    .select2-container--bootstrap-5 .select2-selection--multiple .select2-selection__choice {
+        background-color: var(--bs-primary-bg-subtle);
+        border-color: var(--bs-primary-border-subtle);
+        color: var(--bs-emphasis-color);
+        margin-top: 0.3rem !important; /* Adjust vertical alignment */
+    }
+    .select2-container--bootstrap-5 .select2-selection--multiple .select2-selection__choice__remove {
+        color: var(--bs-emphasis-color);
+        opacity: 0.7;
+    }
+    .select2-container--bootstrap-5 .select2-selection--multiple .select2-selection__choice__remove:hover {
+        opacity: 1;
+        background-color: transparent !important;
+    }
+    .table th, .table td { vertical-align: middle; }
+    .country-label { cursor: pointer; }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="container py-4">
-    <div class="row mb-4">
-        <div class="col-md-8">
-            <h1 class="display-5 fw-bold mb-2">
-                <i class="fas fa-globe me-2"></i>Global Country Blocking for {{ node.name }}
-            </h1>
-            <p class="text-muted">IP address: {{ node.ip_address }}</p>
-        </div>
-        <div class="col-md-4 text-md-end">
-            <a href="{{ url_for('admin.view_node', node_id=node.id) }}" class="btn btn-outline-secondary">
-                <i class="fas fa-arrow-left me-1"></i> Back to Node
-            </a>
-        </div>
+     <nav aria-label="breadcrumb" class="mb-4">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{{ url_for('admin.dashboard') }}" class="text-decoration-none"><i class="fas fa-tachometer-alt me-1"></i>Dashboard</a></li>
+            <li class="breadcrumb-item"><a href="{{ url_for('admin.list_nodes') }}" class="text-decoration-none"><i class="fas fa-server me-1"></i>Nodes</a></li>
+            <li class="breadcrumb-item"><a href="{{ url_for('admin.view_node', node_id=node.id) }}" class="text-decoration-none">{{ node.name }}</a></li>
+            <li class="breadcrumb-item active" aria-current="page"><i class="fas fa-globe-americas me-1"></i>Country Blocking</li>
+        </ol>
+    </nav>
+
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+         <h1 class="h3 mb-0">
+            <i class="fas fa-globe-americas me-2 text-primary"></i>Global Country Blocking <span class="text-muted fw-normal">({{ node.name }})</span>
+        </h1>
+        <a href="{{ url_for('admin.view_node', node_id=node.id) }}" class="btn btn-outline-secondary">
+            <i class="fas fa-arrow-left me-1"></i> Back to Node Details
+        </a>
     </div>
 
-    <div class="row">
-        <div class="col-lg-12 mb-4">
-            <div class="alert alert-info">
-                <i class="fas fa-info-circle me-2"></i>
-                <strong>Admin-Only Feature:</strong> Country blocking at the iptables level affects all traffic to this node, regardless of site. This is a global setting managed only by administrators.
-            </div>
+     {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                 {% set alert_class = 'alert-info' %}
+                 {% set icon_class = 'fa-info-circle' %}
+                 {% if category == 'success' %}
+                     {% set alert_class = 'alert-success' %}
+                     {% set icon_class = 'fa-check-circle' %}
+                 {% elif category == 'error' %}
+                     {% set alert_class = 'alert-danger' %}
+                     {% set icon_class = 'fa-exclamation-circle' %}
+                 {% elif category == 'warning' %}
+                     {% set alert_class = 'alert-warning' %}
+                     {% set icon_class = 'fa-exclamation-triangle' %}
+                 {% endif %}
+                 <div class="alert {{ alert_class }} alert-dismissible fade show" role="alert">
+                     <div class="d-flex align-items-center">
+                         <i class="fas {{ icon_class }} me-2"></i>
+                         <div>{{ message }}</div>
+                     </div>
+                     <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                 </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
+    <div class="alert alert-info d-flex align-items-center mb-4">
+        <i class="fas fa-shield-alt fa-lg me-3"></i>
+        <div>
+            <strong>Admin-Only Feature:</strong> Country blocking at the iptables level affects <strong>all traffic</strong> to this node (<code>{{ node.ip_address }}</code>), regardless of site configuration. Rules are applied using the <code>xt_geoip</code> module and persisted. For site-specific blocking, use the GeoIP settings within the site configuration.
         </div>
     </div>
 
     <!-- GeoIP Module Status -->
-    <div class="row mb-4">
-        <div class="col-lg-12">
-            <div class="card border-{{ 'success' if geoip_status.fully_functional else 'warning' }}">
-                <div class="card-header bg-{{ 'success' if geoip_status.fully_functional else 'warning' }} text-white">
-                    <h5 class="card-title mb-0">
-                        <i class="fas fa-{{ 'check-circle' if geoip_status.fully_functional else 'exclamation-triangle' }} me-2"></i>
-                        GeoIP Module Status
-                    </h5>
+    <div class="card shadow-sm mb-4 border-{{ 'success' if geoip_status.fully_functional else 'warning' }}">
+        <div class="card-header bg-{{ 'success' if geoip_status.fully_functional else 'warning' }}-subtle text-{{ 'success' if geoip_status.fully_functional else 'warning' }}-emphasis d-flex justify-content-between align-items-center">
+            <h5 class="card-title mb-0">
+                <i class="fas fa-puzzle-piece me-2"></i>GeoIP Module Status
+            </h5>
+             <span class="badge bg-{{ 'success' if geoip_status.fully_functional else 'warning' }} rounded-pill">
+                {{ 'Ready' if geoip_status.fully_functional else 'Needs Attention' }}
+            </span>
+        </div>
+        <div class="card-body">
+            <div class="row align-items-center">
+                <div class="col-md-6">
+                    <ul class="list-group list-group-flush">
+                        <li class="list-group-item d-flex justify-content-between align-items-center ps-0">
+                            <span><i class="fas fa-check-circle me-2 {{ 'text-success' if geoip_status.module_loaded else 'text-muted' }}"></i>iptables Module Loaded</span>
+                            <span class="badge rounded-pill bg-{{ 'success' if geoip_status.module_loaded else 'danger' }}-subtle text-{{ 'success' if geoip_status.module_loaded else 'danger' }}-emphasis border border-{{ 'success' if geoip_status.module_loaded else 'danger' }}-subtle">
+                                {{ 'Yes' if geoip_status.module_loaded else 'No' }}
+                            </span>
+                        </li>
+                        <li class="list-group-item d-flex justify-content-between align-items-center ps-0">
+                             <span><i class="fas fa-check-circle me-2 {{ 'text-success' if geoip_status.module_available else 'text-muted' }}"></i>Kernel Module Available</span>
+                             <span class="badge rounded-pill bg-{{ 'success' if geoip_status.module_available else 'danger' }}-subtle text-{{ 'success' if geoip_status.module_available else 'danger' }}-emphasis border border-{{ 'success' if geoip_status.module_available else 'danger' }}-subtle">
+                                {{ 'Yes' if geoip_status.module_available else 'No' }}
+                            </span>
+                        </li>
+                        <li class="list-group-item d-flex justify-content-between align-items-center ps-0">
+                             <span><i class="fas fa-check-circle me-2 {{ 'text-success' if geoip_status.geoip_db_installed else 'text-muted' }}"></i>GeoIP Database Found</span>
+                             <span class="badge rounded-pill bg-{{ 'success' if geoip_status.geoip_db_installed else 'danger' }}-subtle text-{{ 'success' if geoip_status.geoip_db_installed else 'danger' }}-emphasis border border-{{ 'success' if geoip_status.geoip_db_installed else 'danger' }}-subtle">
+                                {{ 'Yes' if geoip_status.geoip_db_installed else 'No' }}
+                            </span>
+                        </li>
+                    </ul>
                 </div>
-                <div class="card-body">
-                    <div class="row">
-                        <div class="col-md-6">
-                            <ul class="list-group list-group-flush">
-                                <li class="list-group-item d-flex justify-content-between align-items-center">
-                                    Module Loaded
-                                    <span class="badge bg-{{ 'success' if geoip_status.module_loaded else 'danger' }} rounded-pill">
-                                        <i class="fas fa-{{ 'check' if geoip_status.module_loaded else 'times' }}"></i>
-                                    </span>
-                                </li>
-                                <li class="list-group-item d-flex justify-content-between align-items-center">
-                                    Module Available
-                                    <span class="badge bg-{{ 'success' if geoip_status.module_available else 'danger' }} rounded-pill">
-                                        <i class="fas fa-{{ 'check' if geoip_status.module_available else 'times' }}"></i>
-                                    </span>
-                                </li>
-                                <li class="list-group-item d-flex justify-content-between align-items-center">
-                                    GeoIP Database Installed
-                                    <span class="badge bg-{{ 'success' if geoip_status.geoip_db_installed else 'danger' }} rounded-pill">
-                                        <i class="fas fa-{{ 'check' if geoip_status.geoip_db_installed else 'times' }}"></i>
-                                    </span>
-                                </li>
-                                <li class="list-group-item d-flex justify-content-between align-items-center">
-                                    Ready for Country Blocking
-                                    <span class="badge bg-{{ 'success' if geoip_status.fully_functional else 'danger' }} rounded-pill">
-                                        <i class="fas fa-{{ 'check' if geoip_status.fully_functional else 'times' }}"></i>
-                                    </span>
-                                </li>
-                            </ul>
-                        </div>
-                        <div class="col-md-6">
-                            {% if not geoip_status.fully_functional %}
-                                <div class="alert alert-warning">
-                                    <i class="fas fa-exclamation-triangle me-2"></i>
-                                    <strong>GeoIP module is not fully functional.</strong>
-                                    {% if geoip_status.error %}
-                                        <p class="mt-2 mb-0">Error: {{ geoip_status.error }}</p>
-                                    {% endif %}
-                                    <p class="mt-2 mb-0">You need to install the GeoIP module to use iptables-level country blocking.</p>
-                                    <form method="POST" class="mt-3">
-                                        <input type="hidden" name="action" value="install_geoip">
-                                        <button type="submit" class="btn btn-warning">
-                                            <i class="fas fa-download me-1"></i> Install GeoIP Module
-                                        </button>
-                                    </form>
-                                </div>
-                            {% else %}
-                                <div class="alert alert-success">
-                                    <i class="fas fa-check-circle me-2"></i>
-                                    <strong>GeoIP module is working properly.</strong>
-                                    <p class="mt-2 mb-0">You can now block countries at the iptables level.</p>
-                                </div>
+                <div class="col-md-6">
+                    {% if not geoip_status.fully_functional %}
+                        <div class="alert alert-warning mt-3 mt-md-0 mb-0"> <!-- Removed bottom margin -->
+                            <h6 class="alert-heading"><i class="fas fa-exclamation-triangle me-2"></i>Action Required</h6>
+                            {% if geoip_status.error %}
+                                <p class="small mb-2">Error: {{ geoip_status.error }}</p>
                             {% endif %}
+                            <p class="small mb-2">The GeoIP module (<code>xtables-addons-common</code> and relevant kernel module) needs to be installed and configured on the node <strong>{{ node.name }}</strong> to enable iptables-level country blocking.</p>
+                            <form method="POST" class="mt-2">
+                                <input type="hidden" name="action" value="install_geoip">
+                                <button type="submit" class="btn btn-sm btn-warning">
+                                    <i class="fas fa-download me-1"></i> Attempt GeoIP Module Installation
+                                </button>
+                            </form>
                         </div>
-                    </div>
+                    {% else %}
+                        <div class="alert alert-success mt-3 mt-md-0 mb-0"> <!-- Removed bottom margin -->
+                             <h6 class="alert-heading"><i class="fas fa-check-circle me-2"></i>Ready for Blocking</h6>
+                            <p class="small mb-0">The GeoIP module is working correctly. You can manage country blocking rules below.</p>
+                        </div>
+                    {% endif %}
                 </div>
             </div>
         </div>
@@ -101,55 +142,53 @@
     <div class="row">
         <!-- Currently Blocked Countries -->
         <div class="col-lg-6 mb-4">
-            <div class="card h-100">
-                <div class="card-header bg-primary text-white">
+            <div class="card shadow-sm h-100">
+                <div class="card-header bg-danger-subtle text-danger-emphasis">
                     <h5 class="card-title mb-0">
-                        <i class="fas fa-ban me-2"></i>Currently Blocked Countries
+                        <i class="fas fa-ban me-2"></i>Currently Blocked Countries ({{ blocked_countries|length }})
                     </h5>
                 </div>
-                <div class="card-body">
+                <div class="card-body d-flex flex-column"> <!-- Flex column for button at bottom -->
                     {% if blocked_countries %}
-                        <form method="POST">
+                        <form method="POST" id="unblockForm" class="flex-grow-1"> <!-- Form takes available space -->
                             <input type="hidden" name="action" value="unblock">
-                            <div class="mb-3">
-                                <div class="table-responsive">
-                                    <table class="table table-striped">
-                                        <thead>
-                                            <tr>
-                                                <th style="width: 10%">Select</th>
-                                                <th>Country Code</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {% for country in blocked_countries|sort %}
-                                            <tr>
-                                                <td>
-                                                    <div class="form-check">
-                                                        <input class="form-check-input" type="checkbox" name="blocked_countries" value="{{ country }}" id="country_{{ country }}">
-                                                    </div>
-                                                </td>
-                                                <td>
-                                                    <label class="form-check-label w-100" for="country_{{ country }}">
-                                                        {{ country }} 
-                                                        {% if country|lower in country_names %}
-                                                            - {{ country_names[country|lower] }}
-                                                        {% endif %}
-                                                    </label>
-                                                </td>
-                                            </tr>
-                                            {% endfor %}
-                                        </tbody>
-                                    </table>
-                                </div>
+                            <p class="small text-muted">Select countries to unblock:</p>
+                            <div class="mb-3" style="max-height: 300px; overflow-y: auto;"> <!-- Scrollable list -->
+                                <table class="table table-sm table-hover">
+                                    <thead>
+                                        <tr>
+                                            <th style="width: 10%"><input type="checkbox" class="form-check-input" id="selectAllBlocked"></th>
+                                            <th>Country</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for country_code, country_name in blocked_countries_with_names|sort(attribute='1') %}
+                                        <tr>
+                                            <td>
+                                                <div class="form-check">
+                                                    <input class="form-check-input blocked-checkbox" type="checkbox" name="blocked_countries" value="{{ country_code }}" id="country_{{ country_code }}">
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <label class="form-check-label w-100 country-label" for="country_{{ country_code }}">
+                                                    <span class="badge bg-secondary me-2">{{ country_code }}</span> {{ country_name }}
+                                                </label>
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
                             </div>
-                            <button type="submit" class="btn btn-danger">
-                                <i class="fas fa-unlock me-1"></i> Unblock Selected Countries
+                             <button type="submit" class="btn btn-success mt-auto" disabled id="unblockButton"> <!-- Button at bottom, initially disabled -->
+                                <i class="fas fa-unlock me-1"></i> Unblock Selected (<span id="unblockCount">0</span>)
                             </button>
                         </form>
                     {% else %}
-                        <div class="alert alert-info">
-                            <i class="fas fa-info-circle me-2"></i>
-                            No countries are currently blocked at the iptables level.
+                        <div class="alert alert-secondary text-center flex-grow-1 d-flex align-items-center justify-content-center"> <!-- Center content -->
+                            <div>
+                                <i class="fas fa-check-circle fa-2x mb-2 text-muted"></i><br>
+                                No countries are currently blocked at the iptables level.
+                            </div>
                         </div>
                     {% endif %}
                 </div>
@@ -158,108 +197,28 @@
 
         <!-- Block New Countries -->
         <div class="col-lg-6 mb-4">
-            <div class="card h-100">
-                <div class="card-header bg-danger text-white">
+            <div class="card shadow-sm h-100">
+                <div class="card-header bg-primary-subtle text-primary-emphasis">
                     <h5 class="card-title mb-0">
-                        <i class="fas fa-shield-alt me-2"></i>Block New Countries
+                        <i class="fas fa-plus-circle me-2"></i>Block New Countries
                     </h5>
                 </div>
                 <div class="card-body">
                     <form method="POST">
                         <input type="hidden" name="action" value="block">
                         <div class="mb-3">
-                            <label for="countries" class="form-label">Country Codes (comma-separated)</label>
-                            <input type="text" class="form-control" id="countries" name="countries" placeholder="US,CA,UK" required>
+                            <label for="countriesToBlock" class="form-label">Select countries to block:</label>
+                            <select class="form-select" id="countriesToBlock" name="countries[]" multiple="multiple" required>
+                                <!-- Options will be populated by JS -->
+                            </select>
                             <div class="form-text">
-                                Enter two-letter ISO country codes separated by commas (e.g., US,CA,UK).
+                                Select one or more countries using their two-letter ISO code. Start typing to search.
                             </div>
                         </div>
                         <button type="submit" class="btn btn-danger">
-                            <i class="fas fa-ban me-1"></i> Block Countries
+                            <i class="fas fa-ban me-1"></i> Block Selected Countries
                         </button>
                     </form>
-                    
-                    <div class="mt-4">
-                        <div class="accordion" id="countryCodeAccordion">
-                            <div class="accordion-item">
-                                <h2 class="accordion-header" id="headingOne">
-                                    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseOne" aria-expanded="false" aria-controls="collapseOne">
-                                        <i class="fas fa-list me-2"></i> View Common Country Codes
-                                    </button>
-                                </h2>
-                                <div id="collapseOne" class="accordion-collapse collapse" aria-labelledby="headingOne" data-bs-parent="#countryCodeAccordion">
-                                    <div class="accordion-body">
-                                        <div class="row">
-                                            <div class="col-md-6">
-                                                <ul class="list-group">
-                                                    <li class="list-group-item d-flex justify-content-between align-items-center">
-                                                        United States
-                                                        <span class="badge bg-secondary">US</span>
-                                                    </li>
-                                                    <li class="list-group-item d-flex justify-content-between align-items-center">
-                                                        Canada
-                                                        <span class="badge bg-secondary">CA</span>
-                                                    </li>
-                                                    <li class="list-group-item d-flex justify-content-between align-items-center">
-                                                        United Kingdom
-                                                        <span class="badge bg-secondary">GB</span>
-                                                    </li>
-                                                    <li class="list-group-item d-flex justify-content-between align-items-center">
-                                                        Australia
-                                                        <span class="badge bg-secondary">AU</span>
-                                                    </li>
-                                                    <li class="list-group-item d-flex justify-content-between align-items-center">
-                                                        Germany
-                                                        <span class="badge bg-secondary">DE</span>
-                                                    </li>
-                                                    <li class="list-group-item d-flex justify-content-between align-items-center">
-                                                        France
-                                                        <span class="badge bg-secondary">FR</span>
-                                                    </li>
-                                                    <li class="list-group-item d-flex justify-content-between align-items-center">
-                                                        Japan
-                                                        <span class="badge bg-secondary">JP</span>
-                                                    </li>
-                                                </ul>
-                                            </div>
-                                            <div class="col-md-6">
-                                                <ul class="list-group">
-                                                    <li class="list-group-item d-flex justify-content-between align-items-center">
-                                                        China
-                                                        <span class="badge bg-secondary">CN</span>
-                                                    </li>
-                                                    <li class="list-group-item d-flex justify-content-between align-items-center">
-                                                        Russia
-                                                        <span class="badge bg-secondary">RU</span>
-                                                    </li>
-                                                    <li class="list-group-item d-flex justify-content-between align-items-center">
-                                                        India
-                                                        <span class="badge bg-secondary">IN</span>
-                                                    </li>
-                                                    <li class="list-group-item d-flex justify-content-between align-items-center">
-                                                        Brazil
-                                                        <span class="badge bg-secondary">BR</span>
-                                                    </li>
-                                                    <li class="list-group-item d-flex justify-content-between align-items-center">
-                                                        Italy
-                                                        <span class="badge bg-secondary">IT</span>
-                                                    </li>
-                                                    <li class="list-group-item d-flex justify-content-between align-items-center">
-                                                        Spain
-                                                        <span class="badge bg-secondary">ES</span>
-                                                    </li>
-                                                    <li class="list-group-item d-flex justify-content-between align-items-center">
-                                                        South Korea
-                                                        <span class="badge bg-secondary">KR</span>
-                                                    </li>
-                                                </ul>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
                 </div>
             </div>
         </div>
@@ -267,72 +226,158 @@
     {% endif %}
 
     <!-- Information and Help -->
-    <div class="row mb-4">
-        <div class="col-lg-12">
-            <div class="card">
-                <div class="card-header bg-info text-white">
-                    <h5 class="card-title mb-0">
-                        <i class="fas fa-info-circle me-2"></i>Information About Country Blocking
-                    </h5>
-                </div>
-                <div class="card-body">
-                    <div class="alert alert-warning">
-                        <i class="fas fa-exclamation-triangle me-2"></i>
-                        <strong>Important:</strong> This feature uses iptables with the GeoIP module to block traffic at the firewall level.
-                    </div>
-                    
-                    <h5 class="mt-3">Key Points:</h5>
-                    <ul>
-                        <li><strong>Admin-Only Feature:</strong> Only administrators can configure iptables-level country blocking.</li>
-                        <li><strong>Node-Level Blocking:</strong> This blocks traffic at the node level and applies to all sites hosted on this node.</li>
-                        <li><strong>Higher Performance:</strong> Blocking at the iptables level is more efficient than using Nginx's GeoIP module.</li>
-                        <li><strong>Global Effect:</strong> This will affect ALL sites on this node. For site-specific blocking, use the Nginx GeoIP option in site settings.</li>
-                        <li><strong>Persistence:</strong> Rules are saved to persist across reboots.</li>
-                    </ul>
-                </div>
-            </div>
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-info-subtle text-info-emphasis">
+            <h5 class="card-title mb-0">
+                <i class="fas fa-info-circle me-2"></i>How iptables Country Blocking Works
+            </h5>
+        </div>
+        <div class="card-body small">
+            <ul>
+                <li><strong>Global Impact:</strong> Rules added here apply to <strong>all incoming traffic</strong> on ports 80 and 443 for this node (<code>{{ node.ip_address }}</code>) before Nginx processes the request.</li>
+                <li><strong>Technology:</strong> Uses the <code>iptables</code> firewall with the <code>xt_geoip</code> kernel module and a GeoIP database (usually from MaxMind or similar).</li>
+                <li><strong>Persistence:</strong> Rules are typically saved using <code>iptables-persistent</code> or a similar mechanism to survive reboots (handled by the backend service).</li>
+                <li><strong>Performance:</strong> Blocking at the firewall level is generally more performant than blocking within Nginx, as unwanted connections are dropped earlier.</li>
+                <li><strong>Site vs. Node Blocking:</strong> This node-level blocking overrides any site-specific GeoIP settings. Use site settings for more granular control per domain.</li>
+                 <li><strong>Database Updates:</strong> The GeoIP database needs periodic updates for accuracy. This manager does not handle automatic updates; ensure the node has a mechanism (e.g., a cron job) to update its GeoIP database.</li>
+            </ul>
         </div>
     </div>
 </div>
+{% endblock %}
 
-<!-- Add common country codes JavaScript -->
+{% block scripts %}
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
 <script>
-document.addEventListener('DOMContentLoaded', function() {
-    const commonCountryCodes = {
-        'us': 'United States',
-        'ca': 'Canada',
-        'gb': 'United Kingdom',
-        'au': 'Australia',
-        'de': 'Germany',
-        'fr': 'France',
-        'jp': 'Japan',
-        'cn': 'China',
-        'ru': 'Russia',
-        'in': 'India',
-        'br': 'Brazil',
-        'it': 'Italy',
-        'es': 'Spain',
-        'kr': 'South Korea',
-        'nl': 'Netherlands',
-        'se': 'Sweden',
-        'no': 'Norway',
-        'dk': 'Denmark',
-        'fi': 'Finland',
-        'pl': 'Poland',
-        'ua': 'Ukraine',
-        'mx': 'Mexico',
-        'tr': 'Turkey',
-        'sg': 'Singapore',
-        'hk': 'Hong Kong',
-        'za': 'South Africa',
-        'eg': 'Egypt',
-        'ng': 'Nigeria',
-        'ar': 'Argentina',
-        'cl': 'Chile'
+    // Full list of ISO 3166-1 alpha-2 country codes and names
+    const allCountries = {
+        "AF": "Afghanistan", "AX": "Åland Islands", "AL": "Albania", "DZ": "Algeria", "AS": "American Samoa",
+        "AD": "Andorra", "AO": "Angola", "AI": "Anguilla", "AQ": "Antarctica", "AG": "Antigua and Barbuda",
+        "AR": "Argentina", "AM": "Armenia", "AW": "Aruba", "AU": "Australia", "AT": "Austria", "AZ": "Azerbaijan",
+        "BS": "Bahamas", "BH": "Bahrain", "BD": "Bangladesh", "BB": "Barbados", "BY": "Belarus", "BE": "Belgium",
+        "BZ": "Belize", "BJ": "Benin", "BM": "Bermuda", "BT": "Bhutan", "BO": "Bolivia", "BQ": "Bonaire, Sint Eustatius and Saba",
+        "BA": "Bosnia and Herzegovina", "BW": "Botswana", "BV": "Bouvet Island", "BR": "Brazil", "IO": "British Indian Ocean Territory",
+        "BN": "Brunei Darussalam", "BG": "Bulgaria", "BF": "Burkina Faso", "BI": "Burundi", "CV": "Cabo Verde", "KH": "Cambodia",
+        "CM": "Cameroon", "CA": "Canada", "KY": "Cayman Islands", "CF": "Central African Republic", "TD": "Chad", "CL": "Chile",
+        "CN": "China", "CX": "Christmas Island", "CC": "Cocos (Keeling) Islands", "CO": "Colombia", "KM": "Comoros",
+        "CG": "Congo", "CD": "Congo (Democratic Republic of the)", "CK": "Cook Islands", "CR": "Costa Rica", "CI": "Côte d'Ivoire",
+        "HR": "Croatia", "CU": "Cuba", "CW": "Curaçao", "CY": "Cyprus", "CZ": "Czech Republic", "DK": "Denmark", "DJ": "Djibouti",
+        "DM": "Dominica", "DO": "Dominican Republic", "EC": "Ecuador", "EG": "Egypt", "SV": "El Salvador", "GQ": "Equatorial Guinea",
+        "ER": "Eritrea", "EE": "Estonia", "SZ": "Eswatini", "ET": "Ethiopia", "FK": "Falkland Islands (Malvinas)",
+        "FO": "Faroe Islands", "FJ": "Fiji", "FI": "Finland", "FR": "France", "GF": "French Guiana", "PF": "French Polynesia",
+        "TF": "French Southern Territories", "GA": "Gabon", "GM": "Gambia", "GE": "Georgia", "DE": "Germany", "GH": "Ghana",
+        "GI": "Gibraltar", "GR": "Greece", "GL": "Greenland", "GD": "Grenada", "GP": "Guadeloupe", "GU": "Guam", "GT": "Guatemala",
+        "GG": "Guernsey", "GN": "Guinea", "GW": "Guinea-Bissau", "GY": "Guyana", "HT": "Haiti", "HM": "Heard Island and McDonald Islands",
+        "VA": "Holy See", "HN": "Honduras", "HK": "Hong Kong", "HU": "Hungary", "IS": "Iceland", "IN": "India", "ID": "Indonesia",
+        "IR": "Iran", "IQ": "Iraq", "IE": "Ireland", "IM": "Isle of Man", "IL": "Israel", "IT": "Italy", "JM": "Jamaica", "JP": "Japan",
+        "JE": "Jersey", "JO": "Jordan", "KZ": "Kazakhstan", "KE": "Kenya", "KI": "Kiribati", "KP": "Korea (Democratic People's Republic of)",
+        "KR": "Korea (Republic of)", "KW": "Kuwait", "KG": "Kyrgyzstan", "LA": "Lao People's Democratic Republic", "LV": "Latvia",
+        "LB": "Lebanon", "LS": "Lesotho", "LR": "Liberia", "LY": "Libya", "LI": "Liechtenstein", "LT": "Lithuania", "LU": "Luxembourg",
+        "MO": "Macao", "MG": "Madagascar", "MW": "Malawi", "MY": "Malaysia", "MV": "Maldives", "ML": "Mali", "MT": "Malta",
+        "MH": "Marshall Islands", "MQ": "Martinique", "MR": "Mauritania", "MU": "Mauritius", "YT": "Mayotte", "MX": "Mexico",
+        "FM": "Micronesia (Federated States of)", "MD": "Moldova", "MC": "Monaco", "MN": "Mongolia", "ME": "Montenegro",
+        "MS": "Montserrat", "MA": "Morocco", "MZ": "Mozambique", "MM": "Myanmar", "NA": "Namibia", "NR": "Nauru", "NP": "Nepal",
+        "NL": "Netherlands", "NC": "New Caledonia", "NZ": "New Zealand", "NI": "Nicaragua", "NE": "Niger", "NG": "Nigeria", "NU": "Niue",
+        "NF": "Norfolk Island", "MK": "North Macedonia", "MP": "Northern Mariana Islands", "NO": "Norway", "OM": "Oman", "PK": "Pakistan",
+        "PW": "Palau", "PS": "Palestine, State of", "PA": "Panama", "PG": "Papua New Guinea", "PY": "Paraguay", "PE": "Peru",
+        "PH": "Philippines", "PN": "Pitcairn", "PL": "Poland", "PT": "Portugal", "PR": "Puerto Rico", "QA": "Qatar", "RE": "Réunion",
+        "RO": "Romania", "RU": "Russian Federation", "RW": "Rwanda", "BL": "Saint Barthélemy", "SH": "Saint Helena, Ascension and Tristan da Cunha",
+        "KN": "Saint Kitts and Nevis", "LC": "Saint Lucia", "MF": "Saint Martin (French part)", "PM": "Saint Pierre and Miquelon",
+        "VC": "Saint Vincent and the Grenadines", "WS": "Samoa", "SM": "San Marino", "ST": "Sao Tome and Principe", "SA": "Saudi Arabia",
+        "SN": "Senegal", "RS": "Serbia", "SC": "Seychelles", "SL": "Sierra Leone", "SG": "Singapore", "SX": "Sint Maarten (Dutch part)",
+        "SK": "Slovakia", "SI": "Slovenia", "SB": "Solomon Islands", "SO": "Somalia", "ZA": "South Africa", "GS": "South Georgia and the South Sandwich Islands",
+        "SS": "South Sudan", "ES": "Spain", "LK": "Sri Lanka", "SD": "Sudan", "SR": "Suriname", "SJ": "Svalbard and Jan Mayen",
+        "SE": "Sweden", "CH": "Switzerland", "SY": "Syrian Arab Republic", "TW": "Taiwan", "TJ": "Tajikistan", "TZ": "Tanzania",
+        "TH": "Thailand", "TL": "Timor-Leste", "TG": "Togo", "TK": "Tokelau", "TO": "Tonga", "TT": "Trinidad and Tobago", "TN": "Tunisia",
+        "TR": "Turkey", "TM": "Turkmenistan", "TC": "Turks and Caicos Islands", "TV": "Tuvalu", "UG": "Uganda", "UA": "Ukraine",
+        "AE": "United Arab Emirates", "GB": "United Kingdom", "US": "United States", "UM": "United States Minor Outlying Islands",
+        "UY": "Uruguay", "UZ": "Uzbekistan", "VU": "Vanuatu", "VE": "Venezuela", "VN": "Viet Nam", "VG": "Virgin Islands (British)",
+        "VI": "Virgin Islands (U.S.)", "WF": "Wallis and Futuna", "EH": "Western Sahara", "YE": "Yemen", "ZM": "Zambia", "ZW": "Zimbabwe"
     };
-    
-    // Populate the country names for the blocked countries table
-    window.country_names = commonCountryCodes;
-});
+
+    // Get currently blocked country codes from the table
+    const currentlyBlockedCodes = Array.from(document.querySelectorAll('.blocked-checkbox')).map(cb => cb.value);
+
+    $(document).ready(function() {
+        const selectElement = $('#countriesToBlock');
+
+        // Populate the select2 dropdown, excluding already blocked countries
+        for (const [code, name] of Object.entries(allCountries)) {
+            if (!currentlyBlockedCodes.includes(code)) {
+                const option = new Option(`${code} - ${name}`, code, false, false);
+                selectElement.append(option);
+            }
+        }
+
+        // Initialize Select2
+        selectElement.select2({
+            theme: 'bootstrap-5',
+            placeholder: 'Select countries...',
+            allowClear: true,
+            templateResult: formatCountryOption,
+            templateSelection: formatCountrySelection
+        });
+
+        function formatCountryOption(country) {
+            if (!country.id) { return country.text; }
+            var $country = $(
+                `<span><span class="badge bg-secondary me-2">${country.id}</span> ${country.text.split(' - ')[1]}</span>`
+            );
+            return $country;
+        }
+         function formatCountrySelection(country) {
+             if (!country.id) { return country.text; }
+             return country.id; // Show only the code in the selection bar
+        }
+
+        // --- Unblock Form Logic ---
+        const unblockForm = document.getElementById('unblockForm');
+        const unblockButton = document.getElementById('unblockButton');
+        const unblockCountSpan = document.getElementById('unblockCount');
+        const blockedCheckboxes = document.querySelectorAll('.blocked-checkbox');
+        const selectAllBlockedCheckbox = document.getElementById('selectAllBlocked');
+
+        function updateUnblockButton() {
+            const selectedCount = document.querySelectorAll('.blocked-checkbox:checked').length;
+            unblockCountSpan.textContent = selectedCount;
+            if (selectedCount > 0) {
+                unblockButton.disabled = false;
+            } else {
+                unblockButton.disabled = true;
+            }
+            // Update select all checkbox state
+             if (selectAllBlockedCheckbox) {
+                const totalBlocked = blockedCheckboxes.length;
+                 if (selectedCount === 0) {
+                    selectAllBlockedCheckbox.checked = false;
+                    selectAllBlockedCheckbox.indeterminate = false;
+                } else if (selectedCount === totalBlocked) {
+                    selectAllBlockedCheckbox.checked = true;
+                    selectAllBlockedCheckbox.indeterminate = false;
+                } else {
+                     selectAllBlockedCheckbox.checked = false;
+                    selectAllBlockedCheckbox.indeterminate = true;
+                }
+            }
+        }
+
+        blockedCheckboxes.forEach(checkbox => {
+            checkbox.addEventListener('change', updateUnblockButton);
+        });
+
+        if (selectAllBlockedCheckbox) {
+            selectAllBlockedCheckbox.addEventListener('change', function() {
+                blockedCheckboxes.forEach(checkbox => {
+                    checkbox.checked = selectAllBlockedCheckbox.checked;
+                });
+                updateUnblockButton();
+            });
+        }
+
+        // Initial state update
+        updateUnblockButton();
+
+    });
 </script>
 {% endblock %}

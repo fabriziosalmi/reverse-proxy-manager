@@ -4,100 +4,100 @@
 
 {% block head_extra %}
 <style>
-    /* Form UI Improvements */
+    /* Form UI Improvements from original */
     .form-card {
         border-radius: 0.75rem;
         transition: all 0.2s ease;
     }
-    
+
     .form-section {
         border-radius: 0.5rem;
         padding: 1.5rem;
         margin-bottom: 1.5rem;
-        background-color: var(--card-bg);
-        border: 1px solid var(--border-color);
+        background-color: var(--bs-tertiary-bg); /* Use subtle background */
+        border: 1px solid var(--bs-border-color);
     }
-    
+
     .form-section-title {
         font-size: 1.1rem;
         font-weight: 600;
         margin-bottom: 1.25rem;
+        padding-bottom: 0.75rem; /* Add padding below title */
+        border-bottom: 1px solid var(--bs-border-color); /* Add separator line */
         display: flex;
         align-items: center;
     }
-    
+
     .form-section-title i {
-        margin-right: 0.5rem;
-        color: var(--primary-color);
+        margin-right: 0.75rem; /* Increased icon margin */
+        color: var(--bs-primary); /* Use theme primary */
     }
-    
+
     .form-label {
         font-weight: 500;
         margin-bottom: 0.5rem;
     }
-    
+
     .required-indicator {
-        color: var(--danger-color);
+        color: var(--bs-danger); /* Use theme danger */
         font-weight: bold;
         margin-left: 0.25rem;
     }
-    
+
     .form-check-label {
         font-weight: 500;
     }
-    
+
     .form-text {
         margin-top: 0.375rem;
-        font-size: 0.8rem;
+        font-size: 0.85rem; /* Slightly larger help text */
+        color: var(--bs-secondary-color); /* Use theme secondary text color */
     }
-    
-    .form-control:focus, .form-check-input:focus {
-        border-color: var(--primary-color);
+
+    .form-control:focus, .form-select:focus, .form-check-input:focus {
+        border-color: var(--bs-primary); /* Use theme primary */
+        box-shadow: 0 0 0 0.25rem var(--input-focus-shadow); /* Use variable from base.html */
     }
-    
+
     .alert-icon {
-        margin-right: 0.5rem;
+        margin-right: 0.75rem; /* Increased icon margin */
     }
-    
+
+    /* Auth Switch Styling */
     .auth-switch {
         display: flex;
         margin-bottom: 1rem;
+        border: 1px solid var(--bs-border-color);
+        border-radius: 0.375rem;
+        overflow: hidden; /* Ensure rounded corners */
     }
-    
+
     .auth-option {
         flex: 1;
         text-align: center;
         padding: 0.75rem;
-        background-color: var(--bg-color);
+        background-color: var(--bs-body-bg); /* Use body background */
+        color: var(--bs-body-color);
         cursor: pointer;
         font-weight: 500;
         transition: all 0.2s ease;
+        border-right: 1px solid var(--bs-border-color); /* Add separator */
     }
-    
-    .auth-option:first-child {
-        border-top-left-radius: 0.375rem;
-        border-bottom-left-radius: 0.375rem;
+     .auth-option:last-child {
+        border-right: none; /* Remove border on last item */
     }
-    
-    .auth-option:last-child {
-        border-top-right-radius: 0.375rem;
-        border-bottom-right-radius: 0.375rem;
-    }
-    
+
     .auth-option.active {
-        background-color: var(--primary-color);
-        color: white;
+        background-color: var(--bs-primary); /* Use theme primary */
+        color: var(--bs-light); /* Use light text on primary */
+        border-color: var(--bs-primary);
     }
-    
-    [data-bs-theme="dark"] .auth-option {
-        background-color: #343a40;
+
+    .auth-option:not(.active):hover {
+        background-color: var(--bs-tertiary-bg); /* Subtle hover */
     }
-    
-    [data-bs-theme="dark"] .auth-option.active {
-        background-color: var(--primary-color);
-    }
-    
-    .btn-custom {
+
+    .btn-custom { /* Keep custom button padding if desired */
         padding: 0.5rem 1.5rem;
         font-weight: 500;
         letter-spacing: 0.025rem;
@@ -111,12 +111,12 @@
         <ol class="breadcrumb">
             <li class="breadcrumb-item"><a href="{{ url_for('admin.dashboard') }}" class="text-decoration-none"><i class="fas fa-tachometer-alt me-1"></i>Dashboard</a></li>
             <li class="breadcrumb-item"><a href="{{ url_for('admin.list_nodes') }}" class="text-decoration-none"><i class="fas fa-server me-1"></i>Nodes</a></li>
-            <li class="breadcrumb-item active" aria-current="page">Add New Node</li>
+            <li class="breadcrumb-item active" aria-current="page"><i class="fas fa-plus-circle me-1"></i>Add New Node</li>
         </ol>
     </nav>
 
     <div class="row justify-content-center">
-        <div class="col-lg-9">
+        <div class="col-lg-9 col-xl-8"> <!-- Adjusted column width -->
             {% with messages = get_flashed_messages(with_categories=true) %}
                 {% if messages %}
                     {% for category, message in messages %}
@@ -132,9 +132,11 @@
                             {% set alert_class = 'alert-warning' %}
                             {% set icon_class = 'fa-exclamation-triangle' %}
                         {% endif %}
-                        <div class="alert {{ alert_class }} alert-dismissible fade show mb-4">
-                            <i class="fas {{ icon_class }} alert-icon"></i>
-                            {{ message }}
+                        <div class="alert {{ alert_class }} alert-dismissible fade show mb-4" role="alert">
+                             <div class="d-flex align-items-center">
+                                <i class="fas {{ icon_class }} alert-icon"></i>
+                                <div>{{ message }}</div>
+                            </div>
                             <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
                         </div>
                     {% endfor %}
@@ -146,101 +148,103 @@
                     <i class="fas fa-server me-2"></i>
                     <h3 class="card-title h5 mb-0">Add New Node</h3>
                 </div>
-                <div class="card-body">
-                    <p class="text-muted mb-4">Add a new server node to your proxy infrastructure. The node will need SSH access for configuration management.</p>
-                    
-                    <form method="POST" action="{{ url_for('admin.new_node') }}">
+                <div class="card-body p-4"> <!-- Increased padding -->
+                    <p class="text-muted mb-4">Add a new server node to your proxy infrastructure. The node requires SSH access for configuration management.</p>
+
+                    <form method="POST" action="{{ url_for('admin.new_node') }}" id="addNodeForm">
                         <!-- Basic Information Section -->
                         <div class="form-section">
                             <h4 class="form-section-title">
                                 <i class="fas fa-info-circle"></i>Basic Information
                             </h4>
-                            
+
                             <div class="mb-3">
                                 <label for="name" class="form-label">Node Name<span class="required-indicator">*</span></label>
-                                <input type="text" class="form-control" id="name" name="name" required autocomplete="off">
-                                <div class="form-text">A descriptive name to identify this node (e.g., us-east-1-node1)</div>
+                                <input type="text" class="form-control" id="name" name="name" required autocomplete="off" placeholder="e.g., us-east-1-node1">
+                                <div class="form-text">A descriptive name to identify this node.</div>
                             </div>
-                            
+
                             <div class="mb-3">
-                                <label for="ip_address" class="form-label">IP Address<span class="required-indicator">*</span></label>
-                                <input type="text" class="form-control" id="ip_address" name="ip_address" required autocomplete="off" placeholder="e.g., 192.168.1.10 or 2001:db8::1">
-                                <div class="form-text">IPv4 or IPv6 address of the node</div>
+                                <label for="ip_address" class="form-label">IP Address or Hostname<span class="required-indicator">*</span></label>
+                                <input type="text" class="form-control" id="ip_address" name="ip_address" required autocomplete="off" placeholder="e.g., 192.168.1.10 or node1.example.com">
+                                <div class="form-text">IPv4/IPv6 address or a resolvable hostname of the node.</div>
                             </div>
-                            
+
                             <div class="form-check form-switch mt-4">
                                 <input class="form-check-input" type="checkbox" id="is_active" name="is_active" checked>
                                 <label class="form-check-label" for="is_active">
                                     Active Node
                                 </label>
-                                <div class="form-text">If enabled, this node will be available for deploying sites</div>
+                                <div class="form-text">If enabled, this node will be available for deploying sites.</div>
                             </div>
                         </div>
-                        
+
                         <!-- SSH Connection Section -->
                         <div class="form-section">
                             <h4 class="form-section-title">
-                                <i class="fas fa-lock"></i>SSH Connection
+                                <i class="fas fa-terminal"></i>SSH Connection Details
                             </h4>
-                            
+
                             <div class="row g-3 mb-3">
                                 <div class="col-md-8">
                                     <label for="ssh_user" class="form-label">SSH Username<span class="required-indicator">*</span></label>
-                                    <input type="text" class="form-control" id="ssh_user" name="ssh_user" required autocomplete="off">
-                                    <div class="form-text">Username for SSH authentication (usually "root" or a user with sudo privileges)</div>
+                                    <input type="text" class="form-control" id="ssh_user" name="ssh_user" required autocomplete="off" placeholder="e.g., root or adminuser">
+                                    <div class="form-text">Username for SSH authentication (needs sudo privileges without password if not root).</div>
                                 </div>
-                                
+
                                 <div class="col-md-4">
                                     <label for="ssh_port" class="form-label">SSH Port</label>
                                     <input type="number" class="form-control" id="ssh_port" name="ssh_port" value="22" min="1" max="65535">
-                                    <div class="form-text">Default is 22</div>
+                                    <div class="form-text">Default is 22.</div>
                                 </div>
                             </div>
-                            
+
+                            <label class="form-label">Authentication Method<span class="required-indicator">*</span></label>
                             <div class="auth-switch mb-3" id="authSwitch">
-                                <div class="auth-option active" data-auth="key">SSH Key Authentication</div>
-                                <div class="auth-option" data-auth="password">Password Authentication</div>
+                                <div class="auth-option active" data-auth="key"><i class="fas fa-key me-1"></i>SSH Key</div>
+                                <div class="auth-option" data-auth="password"><i class="fas fa-lock me-1"></i>Password</div>
                             </div>
-                            
+                            <input type="hidden" name="auth_method" id="auth_method" value="key"> <!-- Hidden input to track method -->
+
                             <div id="keyAuth">
                                 <div class="mb-3">
-                                    <label for="ssh_key_path" class="form-label">SSH Key Path</label>
-                                    <input type="text" class="form-control" id="ssh_key_path" name="ssh_key_path" autocomplete="off" placeholder="/path/to/private_key">
-                                    <div class="form-text">Absolute path to the SSH private key file on the server where this application runs</div>
+                                    <label for="ssh_key_path" class="form-label">SSH Private Key Path<span class="required-indicator">*</span></label>
+                                    <input type="text" class="form-control" id="ssh_key_path" name="ssh_key_path" autocomplete="off" placeholder="/home/user/.ssh/id_rsa" required>
+                                    <div class="form-text">Absolute path to the SSH private key file on the server running *this* application. Ensure it has correct permissions (e.g., 600).</div>
                                 </div>
                             </div>
-                            
+
                             <div id="passwordAuth" style="display: none;">
                                 <div class="mb-3">
-                                    <label for="ssh_password" class="form-label">SSH Password</label>
+                                    <label for="ssh_password" class="form-label">SSH Password<span class="required-indicator">*</span></label>
                                     <input type="password" class="form-control" id="ssh_password" name="ssh_password" autocomplete="new-password">
-                                    <div class="form-text">Password will be encrypted before storage</div>
+                                    <div class="form-text">Password will be encrypted before storage. Using SSH keys is recommended for better security.</div>
                                 </div>
                             </div>
                         </div>
-                        
+
                         <!-- Nginx Configuration Section -->
                         <div class="form-section">
                             <h4 class="form-section-title">
                                 <i class="fas fa-cogs"></i>Nginx Configuration
                             </h4>
-                            
+
                             <div class="mb-3">
                                 <label for="nginx_config_path" class="form-label">Nginx Config Path</label>
                                 <input type="text" class="form-control" id="nginx_config_path" name="nginx_config_path" value="/etc/nginx/conf.d">
-                                <div class="form-text">Path to Nginx configuration directory on the node</div>
+                                <div class="form-text">Path to the directory where site configuration files will be placed on the node (e.g., <code>/etc/nginx/sites-available</code> or <code>/etc/nginx/conf.d</code>).</div>
                             </div>
-                            
+
                             <div class="mb-3">
                                 <label for="nginx_reload_command" class="form-label">Nginx Reload Command</label>
                                 <input type="text" class="form-control" id="nginx_reload_command" name="nginx_reload_command" value="sudo systemctl reload nginx">
-                                <div class="form-text">Command to reload Nginx after configuration changes</div>
+                                <div class="form-text">Command executed on the node to reload Nginx after configuration changes (e.g., <code>sudo systemctl reload nginx</code> or <code>sudo service nginx reload</code>).</div>
                             </div>
                         </div>
-                        
-                        <div class="d-flex justify-content-between mt-4">
+
+                        <div class="d-flex justify-content-between align-items-center mt-4 pt-3 border-top"> <!-- Added top border -->
                             <a href="{{ url_for('admin.list_nodes') }}" class="btn btn-outline-secondary btn-custom">
-                                <i class="fas fa-arrow-left me-1"></i> Cancel
+                                <i class="fas fa-times me-1"></i> Cancel
                             </a>
                             <button type="submit" class="btn btn-primary btn-custom">
                                 <i class="fas fa-plus me-1"></i> Add Node
@@ -249,9 +253,9 @@
                     </form>
                 </div>
             </div>
-            
+
             <div class="text-center mt-3">
-                <small class="text-muted">After adding a node, you'll be able to check its connectivity and install Nginx if needed.</small>
+                <small class="text-muted">After adding a node, you can check its connectivity and manage it from the Nodes list.</small>
             </div>
         </div>
     </div>
@@ -266,32 +270,40 @@
         const authOptions = authSwitch.querySelectorAll('.auth-option');
         const keyAuth = document.getElementById('keyAuth');
         const passwordAuth = document.getElementById('passwordAuth');
-        const sshKeyPath = document.getElementById('ssh_key_path');
-        const sshPassword = document.getElementById('ssh_password');
-        
+        const sshKeyPathInput = document.getElementById('ssh_key_path');
+        const sshPasswordInput = document.getElementById('ssh_password');
+        const authMethodInput = document.getElementById('auth_method'); // Hidden input
+
         authOptions.forEach(option => {
             option.addEventListener('click', function() {
                 // Remove active class from all options
                 authOptions.forEach(opt => opt.classList.remove('active'));
-                
+
                 // Add active class to the clicked option
                 this.classList.add('active');
-                
-                // Show/hide appropriate auth form
+
+                // Show/hide appropriate auth form and set required attributes
                 const authType = this.getAttribute('data-auth');
+                authMethodInput.value = authType; // Update hidden input
+
                 if (authType === 'key') {
                     keyAuth.style.display = 'block';
                     passwordAuth.style.display = 'none';
-                    // Clear password value
-                    sshPassword.value = '';
-                } else {
+                    sshKeyPathInput.required = true; // Make key path required
+                    sshPasswordInput.required = false; // Make password not required
+                    sshPasswordInput.value = ''; // Clear password value
+                } else { // password auth
                     keyAuth.style.display = 'none';
                     passwordAuth.style.display = 'block';
-                    // Clear key path value
-                    sshKeyPath.value = '';
+                    sshKeyPathInput.required = false; // Make key path not required
+                    sshPasswordInput.required = true; // Make password required
+                    sshKeyPathInput.value = ''; // Clear key path value
                 }
             });
         });
+
+        // Trigger click on initial active option to set initial state correctly
+        authSwitch.querySelector('.auth-option.active').click();
     });
 </script>
 {% endblock %}

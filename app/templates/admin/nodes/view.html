@@ -4,59 +4,61 @@
 
 {% block head_extra %}
 <meta name="node-id" content="{{ node.id }}">
+<style>
+    .stat-card .card-body { padding: 1rem; }
+    .stat-card h6 { margin-bottom: 0.25rem; font-size: 0.9rem; color: var(--bs-secondary-color); }
+    .stat-card .display-6 { font-weight: 600; }
+    .progress { height: 0.6rem; } /* Slimmer progress bars */
+    #refreshIndicator { font-size: 0.8rem; }
+    .table th, .table td { vertical-align: middle; }
+</style>
 {% endblock %}
 
 {% block content %}
 <div class="container py-4">
-    <div class="row mb-4">
-        <div class="col-md-8">
-            <h1 class="display-5 fw-bold mb-2">
-                <i class="fas fa-server me-2"></i>{{ node.name }}
-                <span class="badge {% if node.is_active %}bg-success{% else %}bg-danger{% endif %} align-middle fs-6">
-                    {{ 'Active' if node.is_active else 'Inactive' }}
-                </span>
-                {% if node.is_discovered %}
-                <span class="badge bg-info align-middle fs-6">Auto-discovered</span>
-                {% endif %}
+    <nav aria-label="breadcrumb" class="mb-4">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{{ url_for('admin.dashboard') }}" class="text-decoration-none"><i class="fas fa-tachometer-alt me-1"></i>Dashboard</a></li>
+            <li class="breadcrumb-item"><a href="{{ url_for('admin.list_nodes') }}" class="text-decoration-none"><i class="fas fa-server me-1"></i>Nodes</a></li>
+            <li class="breadcrumb-item active" aria-current="page">{{ node.name }}</li>
+        </ol>
+    </nav>
+
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+        <div class="d-flex align-items-center">
+             <h1 class="h3 mb-0 me-3">
+                <i class="fas fa-server me-2 text-primary"></i>{{ node.name }}
             </h1>
-            <p class="text-muted">{{ node.ip_address }}</p>
+            <span class="badge rounded-pill me-2 bg-{{ 'success' if node.is_active else 'danger' }}-subtle text-{{ 'success' if node.is_active else 'danger' }}-emphasis border border-{{ 'success' if node.is_active else 'danger' }}-subtle">
+                <i class="fas fa-{{ 'check-circle' if node.is_active else 'times-circle' }} me-1"></i>
+                {{ 'Active' if node.is_active else 'Inactive' }}
+            </span>
+            {% if node.is_discovered %}
+            <span class="badge rounded-pill bg-info-subtle text-info-emphasis border border-info-subtle">
+                <i class="fas fa-magic me-1"></i>Auto-discovered
+            </span>
+            {% endif %}
         </div>
-        <div class="col-md-4 text-md-end d-flex flex-column flex-md-row align-items-md-center justify-content-md-end gap-2">
+
+        <div class="d-flex align-items-center gap-2">
+             <button id="toggleRefresh" class="btn btn-sm btn-outline-secondary" title="Toggle Auto-Refresh (10s)">
+                <i class="fas fa-sync-alt me-1"></i> <span id="refreshState">Auto-Refresh Off</span>
+            </button>
+             <div id="refreshIndicator" class="text-muted small" style="min-width: 100px;"></div> <!-- Placeholder for time -->
+
             <div class="btn-group">
-                <button type="button" class="btn btn-primary dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
-                    <i class="fas fa-cog me-1"></i> Actions
+                <a href="{{ url_for('admin.edit_node', node_id=node.id) }}" class="btn btn-outline-primary"><i class="fas fa-edit me-1"></i> Edit</a>
+                <button type="button" class="btn btn-outline-primary dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown" aria-expanded="false">
+                    <span class="visually-hidden">Toggle Dropdown</span>
                 </button>
                 <ul class="dropdown-menu dropdown-menu-end">
-                    <li class="dropdown-header">Node Management</li>
-                    <li>
-                        <a class="dropdown-item" href="{{ url_for('admin.edit_node', node_id=node.id) }}">
-                            <i class="fas fa-edit me-2 text-primary"></i> Edit Node
-                        </a>
-                    </li>
-                    <li>
-                        <form method="POST" action="{{ url_for('admin.toggle_node_active', node_id=node.id) }}">
-                            <button type="submit" class="dropdown-item">
-                                <i class="fas fa-{{ 'pause-circle' if node.is_active else 'play-circle' }} me-2 text-{{ 'warning' if node.is_active else 'success' }}"></i>
-                                {{ 'Deactivate Node' if node.is_active else 'Activate Node' }}
-                            </button>
-                        </form>
-                    </li>
+                    <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#redeployModal"><i class="fas fa-sync me-2"></i>Redeploy Config</a></li>
+                    <li><a class="dropdown-item" href="{{ url_for('admin.node_country_blocking', node_id=node.id) }}"><i class="fas fa-globe-americas me-2"></i>Country Blocking</a></li>
                     <li><hr class="dropdown-divider"></li>
-                    <li class="dropdown-header">Site Operations</li>
                     <li>
-                        <button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#redeployModal">
-                            <i class="fas fa-sync me-2 text-warning"></i> Redeploy All Sites
+                        <button class="dropdown-item text-danger" type="button" data-bs-toggle="modal" data-bs-target="#deleteNodeModal" data-node-id="{{ node.id }}" data-node-name="{{ node.name }}">
+                            <i class="fas fa-trash me-2"></i>Delete Node
                         </button>
-                    </li>
-                    <li><hr class="dropdown-divider"></li>
-                    <li class="dropdown-header">Danger Zone</li>
-                    <li>
-                        <form method="POST" action="{{ url_for('admin.delete_node', node_id=node.id) }}"
-                              onsubmit="return confirm('Are you sure you want to delete this node? This action cannot be undone.');">
-                            <button type="submit" class="dropdown-item text-danger">
-                                <i class="fas fa-trash-alt me-2"></i> Delete Node
-                            </button>
-                        </form>
                     </li>
                 </ul>
             </div>
@@ -65,486 +67,164 @@
 
     <!-- Server Stats -->
     <div class="row mb-4">
-        <div class="col-md-6 mb-4">
-            <div class="card h-100">
-                <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
-                    <h5 class="card-title mb-0">
-                        <i class="fas fa-chart-line me-2"></i>Server Statistics
-                    </h5>
-                    <div>
-                        <button id="toggleRefresh" class="btn btn-sm btn-success">Start Auto-Refresh</button>
-                        <span id="refreshIndicator" style="display: none;" class="ms-2">
-                            <i class="fas fa-sync fa-spin text-light"></i>
-                            <small class="text-light ms-1">Last: <span id="lastRefreshTime">-</span></small>
-                        </span>
-                    </div>
+        <!-- System Stats -->
+        <div class="col-lg-7 mb-4">
+            <div class="card h-100 shadow-sm">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0"><i class="fas fa-tachometer-alt me-2"></i>System Status</h5>
+                    <span id="lastRefreshTime" class="text-muted small"></span>
                 </div>
                 <div class="card-body">
-                    <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <h6 class="text-muted">CPU Usage</h6>
-                            <div class="progress mb-1">
-                                <div class="progress-bar" role="progressbar" style="width: {{ server_stats.cpu_usage }};" 
-                                    aria-valuenow="{{ server_stats.cpu_usage|replace('%', '') }}" aria-valuemin="0" aria-valuemax="100">
-                                    {{ server_stats.cpu_usage }}
-                                </div>
-                            </div>
+                    <div id="systemStatsContainer">
+                        <!-- Stats will be loaded here by JS -->
+                        <div class="text-center text-muted py-3">
+                            <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+                            <span class="ms-2">Loading system stats...</span>
                         </div>
-                        <div class="col-md-6 mb-3">
-                            <h6 class="text-muted">Memory Usage</h6>
-                            <div class="progress mb-1">
-                                {% if server_stats.memory_usage is string and '(' in server_stats.memory_usage %}
-                                    <div class="progress-bar bg-info" role="progressbar" style="width: {{ server_stats.memory_usage.split('(')[1].split(')')[0] }};" 
-                                        aria-valuenow="{{ server_stats.memory_usage.split('(')[1].split('%')[0] }}" aria-valuemin="0" aria-valuemax="100">
-                                        {{ server_stats.memory_usage.split('(')[1].split(')')[0] }}
-                                    </div>
-                                {% elif server_stats.memory_usage is iterable and server_stats.memory_usage|length > 1 %}
-                                    <div class="progress-bar bg-info" role="progressbar" style="width: {{ server_stats.memory_usage[1] }};" 
-                                        aria-valuenow="{{ server_stats.memory_usage[1]|replace('%', '') }}" aria-valuemin="0" aria-valuemax="100">
-                                        {{ server_stats.memory_usage[1] }}
-                                    </div>
-                                {% else %}
-                                    <div class="progress-bar bg-info" role="progressbar" style="width: 0%;" 
-                                        aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
-                                        0%
-                                    </div>
-                                {% endif %}
-                            </div>
-                            <small class="text-muted">
-                                {% if server_stats.memory_usage is string and ' (' in server_stats.memory_usage %}
-                                    {{ server_stats.memory_usage.split(' (')[0] }}
-                                {% elif server_stats.memory_usage is iterable and server_stats.memory_usage|length > 0 %}
-                                    {{ server_stats.memory_usage[0] }}
-                                {% else %}
-                                    Memory usage information not available
-                                {% endif %}
-                            </small>
-                        </div>
-                    </div>
-
-                    <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <h6 class="text-muted">Disk Usage</h6>
-                            <div class="progress mb-1">
-                                {% if server_stats.disk_usage is string and '(' in server_stats.disk_usage %}
-                                    <div class="progress-bar bg-warning" role="progressbar" style="width: {{ server_stats.disk_usage.split('(')[1].split(')')[0] }};" 
-                                        aria-valuenow="{{ server_stats.disk_usage.split('(')[1].split('%')[0] }}" aria-valuemin="0" aria-valuemax="100">
-                                        {{ server_stats.disk_usage.split('(')[1].split(')')[0] }}
-                                    </div>
-                                {% elif server_stats.disk_usage is iterable and server_stats.disk_usage|length > 1 %}
-                                    <div class="progress-bar bg-warning" role="progressbar" style="width: {{ server_stats.disk_usage[1] }};" 
-                                        aria-valuenow="{{ server_stats.disk_usage[1]|replace('%', '') }}" aria-valuemin="0" aria-valuemax="100">
-                                        {{ server_stats.disk_usage[1] }}
-                                    </div>
-                                {% else %}
-                                    <div class="progress-bar bg-warning" role="progressbar" style="width: 0%;" 
-                                        aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
-                                        0%
-                                    </div>
-                                {% endif %}
-                            </div>
-                            <small class="text-muted">
-                                {% if server_stats.disk_usage is string and ' (' in server_stats.disk_usage %}
-                                    {{ server_stats.disk_usage.split(' (')[0] }}
-                                {% elif server_stats.disk_usage is iterable and server_stats.disk_usage|length > 0 %}
-                                    {{ server_stats.disk_usage[0] }}
-                                {% else %}
-                                    Disk usage information not available
-                                {% endif %}
-                            </small>
-                        </div>
-                        <div class="col-md-6 mb-3">
-                            <h6 class="text-muted">Load Average</h6>
-                            <p class="mb-0">{{ server_stats.load_average }}</p>
-                        </div>
-                    </div>
-
-                    <div class="row">
-                        <div class="col-md-12 mb-3">
-                            <h6 class="text-muted">System Uptime</h6>
-                            <p class="mb-0">{{ server_stats.uptime }}</p>
-                        </div>
+                     <div id="systemStatsError" class="alert alert-warning small d-none mt-3">
+                        <i class="fas fa-exclamation-triangle me-1"></i> Could not load system stats. Auto-refresh is paused.
+                        <button class="btn btn-sm btn-link p-0 ms-1" onclick="refreshStats()">Retry</button>
                     </div>
                 </div>
             </div>
         </div>
 
-        <div class="col-md-6 mb-4">
-            <div class="card h-100">
-                <div class="card-header bg-success text-white">
-                    <h5 class="card-title mb-0">
-                        <i class="fas fa-network-wired me-2"></i>Connection Statistics
-                    </h5>
+        <!-- Connection Stats -->
+        <div class="col-lg-5 mb-4">
+            <div class="card h-100 shadow-sm">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="fas fa-network-wired me-2"></i>Connection Status</h5>
                 </div>
-                <div class="card-body">
-                    <div class="row mb-4">
-                        <div class="col-md-4 text-center">
-                            <h6 class="text-muted">Total Connections</h6>
-                            <h2 class="mb-0">{{ connection_stats.total_connections }}</h2>
+                 <div class="card-body">
+                     <div id="connectionStatsContainer">
+                         <!-- Stats will be loaded here by JS -->
+                         <div class="text-center text-muted py-3">
+                            <div class="spinner-border spinner-border-sm text-success" role="status"></div>
+                            <span class="ms-2">Loading connection stats...</span>
                         </div>
-                        <div class="col-md-4 text-center">
-                            <h6 class="text-muted">HTTP Connections</h6>
-                            <h2 class="mb-0">{{ connection_stats.active_http }}</h2>
-                        </div>
-                        <div class="col-md-4 text-center">
-                            <h6 class="text-muted">HTTPS Connections</h6>
-                            <h2 class="mb-0">{{ connection_stats.active_https }}</h2>
-                        </div>
+                     </div>
+                     <div id="connectionStatsError" class="alert alert-warning small d-none mt-3">
+                        <i class="fas fa-exclamation-triangle me-1"></i> Could not load connection stats.
+                        <button class="btn btn-sm btn-link p-0 ms-1" onclick="refreshStats()">Retry</button>
                     </div>
-
-                    <div class="row">
-                        <div class="col-md-6 text-center mb-3">
-                            <div class="card border-0 bg-light">
-                                <div class="card-body py-3">
-                                    <h6 class="text-muted">Requests Per Second</h6>
-                                    <h3 class="mb-0">{{ connection_stats.requests_per_second }}</h3>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-6 text-center mb-3">
-                            <div class="card border-0 bg-light">
-                                <div class="card-body py-3">
-                                    <h6 class="text-muted">Bandwidth Usage</h6>
-                                    <h3 class="mb-0">{{ connection_stats.bandwidth_usage }}</h3>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Node Configuration -->
-    <div class="card mb-4">
-        <div class="card-header">
-            <h5 class="card-title mb-0">
-                <i class="fas fa-cogs me-2"></i>Node Configuration
-            </h5>
-        </div>
-        <div class="card-body">
-            {% if nginx_missing %}
-            <div class="alert alert-warning mb-4">
-                <i class="fas fa-exclamation-triangle me-2"></i>
-                <strong>Nginx Not Detected:</strong> {{ nginx_missing_message }}
-                <form method="POST" action="{{ url_for('admin.install_nginx', node_id=node.id) }}" class="mt-2">
-                    <button type="submit" class="btn btn-success">
-                        <i class="fas fa-download me-1"></i> Install Nginx
-                    </button>
-                </form>
-            </div>
-            {% endif %}
-            <div class="row">
-                <div class="col-md-6">
-                    <table class="table table-borderless">
-                        <tbody>
-                            <tr>
-                                <th class="w-50">Internal IP Address:</th>
-                                <td>{{ node.ip_address }}</td>
-                            </tr>
-                            <tr>
-                                <th>External IP Address:</th>
-                                <td>
-                                    {% if server_stats.external_ip %}
-                                        {{ server_stats.external_ip }}
-                                    {% else %}
-                                        <span class="text-muted">Not available</span>
-                                        <button class="btn btn-sm btn-outline-secondary ms-2" id="checkExternalIP">
-                                            <i class="fas fa-sync-alt me-1"></i> Check
-                                        </button>
-                                    {% endif %}
-                                </td>
-                            </tr>
-                            <tr>
-                                <th>SSH Port:</th>
-                                <td>{{ node.ssh_port }}</td>
-                            </tr>
-                            <tr>
-                                <th>SSH User:</th>
-                                <td>{{ node.ssh_user }}</td>
-                            </tr>
-                            <tr>
-                                <th>Hostname:</th>
-                                <td>{{ server_stats.hostname|default('Not available') }}</td>
-                            </tr>
-                        </tbody>
-                    </table>
+    <!-- Node Configuration & Nginx Info -->
+    <div class="row mb-4">
+        <div class="col-lg-7 mb-4">
+            <div class="card shadow-sm h-100">
+                <div class="card-header">
+                    <h5 class="card-title mb-0"><i class="fas fa-cogs me-2"></i>Node Configuration</h5>
                 </div>
-                <div class="col-md-6">
-                    <table class="table table-borderless">
-                        <tbody>
-                            <tr>
-                                <th class="w-50">SSH Key Path:</th>
-                                <td>{{ node.ssh_key_path or 'Not configured' }}</td>
-                            </tr>
-                            <tr>
-                                <th>Nginx Config Path:</th>
-                                <td>
-                                    {{ node.nginx_config_path }}
-                                    {% if node.detected_nginx_path and node.detected_nginx_path != node.nginx_config_path %}
-                                    <span class="badge bg-warning" title="Detected path differs from configured path">
-                                        <i class="fas fa-exclamation-triangle"></i> Detected: {{ node.detected_nginx_path }}
-                                    </span>
-                                    {% endif %}
-                                </td>
-                            </tr>
-                            <tr>
-                                <th>Nginx Reload Command:</th>
-                                <td>{{ node.nginx_reload_command }}</td>
-                            </tr>
-                            <tr>
-                                <th>OS Version:</th>
-                                <td>{{ server_stats.os_version|default('Not available') }}</td>
-                            </tr>
-                            <tr>
-                                <th>Node Discovery:</th>
-                                <td>
-                                    {% if node.is_discovered %}
-                                        <span class="badge bg-info">Auto-discovered</span>
-                                        <span class="ms-2 text-muted">{{ node.discovery_method|default('') }}</span>
-                                    {% else %}
-                                        <span class="badge bg-secondary">Manually added</span>
-                                    {% endif %}
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-            
-            <!-- Network Information -->
-            <div class="mt-4">
-                <h6 class="border-bottom pb-2 mb-3"><i class="fas fa-network-wired me-2"></i>Network Information</h6>
-                <div class="row">
-                    <div class="col-md-4 mb-3">
-                        <div class="card bg-light">
-                            <div class="card-body py-3">
-                                <h6 class="text-muted">Firewall Status</h6>
-                                <p class="mb-0">
-                                    {% if server_stats.firewall_status %}
-                                        <span class="badge {% if server_stats.firewall_status == 'active' %}bg-success{% else %}bg-danger{% endif %}">
-                                            {{ server_stats.firewall_status|capitalize }}
-                                        </span>
-                                    {% else %}
-                                        <span class="text-muted">Unknown</span>
-                                    {% endif %}
-                                </p>
-                            </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <strong>IP Address:</strong><br> <code>{{ node.ip_address }}</code>
                         </div>
-                    </div>
-                    <div class="col-md-4 mb-3">
-                        <div class="card bg-light">
-                            <div class="card-body py-3">
-                                <h6 class="text-muted">Open Ports</h6>
-                                <p class="mb-0">
-                                    {% if server_stats.open_ports %}
-                                        {% for port in server_stats.open_ports[:5] %}
-                                            <span class="badge bg-secondary me-1">{{ port }}</span>
-                                        {% endfor %}
-                                        {% if server_stats.open_ports|length > 5 %}
-                                            <span class="badge bg-secondary">+{{ server_stats.open_ports|length - 5 }} more</span>
-                                        {% endif %}
-                                    {% else %}
-                                        <span class="text-muted">Not available</span>
-                                    {% endif %}
-                                </p>
-                            </div>
+                        <div class="col-md-6 mb-3">
+                            <strong>External IP:</strong><br>
+                            <span id="externalIpDisplay">
+                                <button id="checkExternalIP" class="btn btn-sm btn-outline-secondary"><i class="fas fa-globe me-1"></i>Check</button>
+                            </span>
                         </div>
-                    </div>
-                    <div class="col-md-4 mb-3">
-                        <div class="card bg-light">
-                            <div class="card-body py-3">
-                                <h6 class="text-muted">DNS Servers</h6>
-                                <p class="mb-0">
-                                    {% if server_stats.dns_servers %}
-                                        {% for dns in server_stats.dns_servers[:2] %}
-                                            <span class="badge bg-info me-1">{{ dns }}</span>
-                                        {% endfor %}
-                                        {% if server_stats.dns_servers|length > 2 %}
-                                            <span class="badge bg-info">+{{ server_stats.dns_servers|length - 2 }} more</span>
-                                        {% endif %}
-                                    {% else %}
-                                        <span class="text-muted">Not available</span>
-                                    {% endif %}
-                                </p>
-                            </div>
+                        <div class="col-md-6 mb-3">
+                            <strong>SSH Connection:</strong><br>
+                            <i class="fas fa-user me-1"></i>{{ node.ssh_user }}@{{ node.ssh_port }}
+                            (<i class="fas {{ 'fa-key' if node.ssh_key_path else 'fa-lock' }} me-1"></i>{% if node.ssh_key_path %}Key{% else %}Password{% endif %})
+                        </div>
+                         <div class="col-md-6 mb-3">
+                            <strong>Created:</strong><br> <i class="far fa-calendar-alt me-1"></i>{{ node.created_at.strftime('%Y-%m-%d %H:%M') }}
                         </div>
                     </div>
                 </div>
             </div>
         </div>
-    </div>
-
-    <!-- Nginx Information -->
-    <div class="card mb-4">
-        <div class="card-header bg-info text-white">
-            <h5 class="card-title mb-0">
-                <i class="fas fa-server me-2"></i>Nginx Information
-            </h5>
-        </div>
-        <div class="card-body">
-            {% if nginx_info and nginx_info.is_running %}
-                <div class="row">
-                    <div class="col-md-6">
-                        <div class="card bg-light mb-3">
-                            <div class="card-body">
-                                <h5 class="card-title"><i class="fas fa-code-branch me-2"></i>Version</h5>
-                                <p class="card-text mb-0">
-                                    <span class="badge bg-success fs-6">{{ nginx_info.version }}</span>
-                                </p>
-                                {% if nginx_info.modules %}
-                                    <hr>
-                                    <h6 class="text-muted">Installed Modules</h6>
-                                    <div class="module-list">
-                                        {% for module in nginx_info.modules %}
-                                            <span class="badge bg-secondary me-1 mb-1">{{ module }}</span>
-                                        {% endfor %}
-                                    </div>
-                                {% endif %}
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-6">
-                        <div class="card bg-light mb-3">
-                            <div class="card-body">
-                                <h5 class="card-title"><i class="fas fa-tachometer-alt me-2"></i>Status</h5>
-                                <div class="d-flex align-items-center mb-3">
-                                    <div class="pe-3">
-                                        <span class="badge bg-success fs-6">
-                                            <i class="fas fa-circle me-1"></i>Running
-                                        </span>
-                                    </div>
-                                    <div>
-                                        <span class="text-muted">PID:</span> 
-                                        <span class="fw-bold">{{ nginx_info.pid if nginx_info.pid else 'Unknown' }}</span>
-                                    </div>
-                                </div>
-                                
-                                {% if nginx_info.compile_flags %}
-                                    <hr>
-                                    <h6 class="text-muted">Compile Flags</h6>
-                                    <div class="compile-flags small">
-                                        <code class="d-block mb-2">{{ nginx_info.compile_flags }}</code>
-                                    </div>
-                                {% endif %}
-                            </div>
-                        </div>
-                    </div>
+        <div class="col-lg-5 mb-4">
+             <div class="card shadow-sm h-100">
+                <div class="card-header">
+                    <h5 class="card-title mb-0"><i class="fas fa-server me-2"></i>Nginx Details</h5>
                 </div>
-
-                <div class="row mt-3">
-                    <div class="col-12">
-                        <div class="card bg-light">
-                            <div class="card-body">
-                                <h5 class="card-title"><i class="fas fa-sitemap me-2"></i>Configuration</h5>
-                                {% if nginx_info.config_tree %}
-                                    <div class="config-tree">
-                                        <pre class="bg-dark text-light p-3 rounded"><code>{{ nginx_info.config_tree }}</code></pre>
-                                    </div>
-                                {% endif %}
-                                
-                                {% if nginx_info.sites %}
-                                    <h6 class="text-muted mt-4">Virtual Hosts</h6>
-                                    <div class="table-responsive">
-                                        <table class="table table-sm table-hover">
-                                            <thead>
-                                                <tr>
-                                                    <th>Server Name</th>
-                                                    <th>Listen</th>
-                                                    <th>Root</th>
-                                                    <th>SSL</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {% for site in nginx_info.sites %}
-                                                    <tr>
-                                                        <td>{{ site.server_name }}</td>
-                                                        <td>{{ site.listen }}</td>
-                                                        <td>{{ site.root if site.root else 'N/A' }}</td>
-                                                        <td>
-                                                            {% if site.ssl_enabled %}
-                                                                <span class="badge bg-success">Enabled</span>
-                                                            {% else %}
-                                                                <span class="badge bg-secondary">Disabled</span>
-                                                            {% endif %}
-                                                        </td>
-                                                    </tr>
-                                                {% endfor %}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                {% endif %}
-                            </div>
-                        </div>
+                <div class="card-body">
+                     {% if nginx_missing %}
+                    <div class="alert alert-warning mb-3 small">
+                        <i class="fas fa-exclamation-triangle me-1"></i> Nginx does not appear to be installed or accessible at the configured path.
                     </div>
-                </div>
-            {% else %}
-                <div class="alert alert-warning">
-                    <i class="fas fa-exclamation-triangle me-2"></i>
-                    {% if nginx_info and nginx_info.error %}
-                        <strong>Error retrieving Nginx information:</strong> {{ nginx_info.error }}
+                    {% endif %}
+                    <div class="mb-2">
+                        <strong>Config Path:</strong><br> <code>{{ node.nginx_config_path }}</code>
+                    </div>
+                    <div class="mb-2">
+                        <strong>Reload Command:</strong><br> <code>{{ node.nginx_reload_command }}</code>
+                    </div>
+                     {% if node.detected_nginx_path %}
+                     <div class="mb-2">
+                        <strong>Detected Binary:</strong><br> <code>{{ node.detected_nginx_path }}</code>
+                    </div>
+                    {% endif %}
+                    {% if nginx_info %}
+                        <div class="mt-3 pt-3 border-top">
+                            <strong>Status:</strong>
+                            {% if nginx_info.is_running %}
+                                <span class="badge bg-success-subtle text-success-emphasis border border-success-subtle rounded-pill"><i class="fas fa-check-circle me-1"></i>Running</span>
+                                <small class="text-muted ms-2">(Version: {{ nginx_info.version or 'N/A' }})</small>
+                            {% else %}
+                                <span class="badge bg-danger-subtle text-danger-emphasis border border-danger-subtle rounded-pill"><i class="fas fa-times-circle me-1"></i>Not Running</span>
+                            {% endif %}
+                        </div>
                     {% else %}
-                        <strong>Nginx is not running on this node</strong>. Install or start Nginx to see detailed information.
+                         <div class="mt-3 pt-3 border-top text-muted small">
+                            <i class="fas fa-question-circle me-1"></i> Nginx status could not be determined.
+                         </div>
                     {% endif %}
                 </div>
-            {% endif %}
+            </div>
         </div>
     </div>
 
+
     <!-- Sites Served by This Node -->
-    <div class="card mb-4">
-        <div class="card-header">
-            <h5 class="card-title mb-0">
-                <i class="fas fa-globe me-2"></i>Sites Served by This Node ({{ sites|length }})
-            </h5>
+    <div class="card shadow-sm mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="card-title mb-0"><i class="fas fa-globe me-2"></i>Sites Served by This Node</h5>
+             <span class="badge bg-secondary rounded-pill">{{ sites|length }} Site(s)</span>
         </div>
-        <div class="card-body">
+        <div class="card-body p-0"> <!-- Remove padding -->
             {% if sites %}
             <div class="table-responsive">
-                <table class="table table-striped table-hover">
-                    <thead>
+                 <table class="table table-striped table-hover mb-0">
+                    <thead class="table-light">
                         <tr>
-                            <th>Name</th>
                             <th>Domain</th>
                             <th>Owner</th>
                             <th>Status</th>
-                            <th>Deployment Status</th>
-                            <th>Actions</th>
+                            <th>Deployed At</th>
+                            <th class="text-end">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for site in sites %}
-                        {% set site_node = site_nodes|selectattr('site_id', 'equalto', site.id)|first %}
                         <tr>
-                            <td>{{ site.name }}</td>
-                            <td>{{ site.domain }}</td>
-                            <td>{{ site.user.username if site.user else 'N/A' }}</td>
+                            <td><a href="{{ url_for('admin.view_site', site_id=site.id) }}" class="fw-semibold text-decoration-none">{{ site.domain }}</a></td>
+                            <td>{{ site.owner.username if site.owner else 'N/A' }}</td>
                             <td>
-                                <span class="badge rounded-pill {% if site.is_active %}bg-success{% else %}bg-danger{% endif %}">
+                                <span class="badge rounded-pill bg-{{ 'success' if site.is_active else 'secondary' }}-subtle text-{{ 'success' if site.is_active else 'secondary' }}-emphasis border border-{{ 'success' if site.is_active else 'secondary' }}-subtle">
                                     {{ 'Active' if site.is_active else 'Inactive' }}
                                 </span>
-                                {% if site.is_blocked %}
-                                <span class="badge rounded-pill bg-warning text-dark">Blocked</span>
+                            </td>
+                             <td>
+                                {% if site.last_deployed_at %}
+                                    <span title="{{ site.last_deployed_at.strftime('%Y-%m-%d %H:%M:%S') }}">{{ site.last_deployed_at.strftime('%Y-%m-%d %H:%M') }}</span>
+                                {% else %}
+                                    <span class="text-muted">Never</span>
                                 {% endif %}
                             </td>
-                            <td>
-                                <span class="badge rounded-pill 
-                                {% if site_node.status == 'deployed' %}bg-success
-                                {% elif site_node.status == 'pending' %}bg-warning text-dark
-                                {% else %}bg-danger{% endif %}">
-                                    {{ site_node.status|capitalize }}
-                                </span>
-                            </td>
-                            <td>
-                                <a href="{{ url_for('admin.view_site', site_id=site.id) }}" class="btn btn-sm btn-outline-primary">
+                            <td class="text-end">
+                                <a href="{{ url_for('admin.view_site', site_id=site.id) }}" class="btn btn-sm btn-outline-secondary" title="View Site">
                                     <i class="fas fa-eye"></i>
                                 </a>
-                                <form method="POST" action="{{ url_for('admin.toggle_site_blocked', site_id=site.id) }}" class="d-inline ms-1">
-                                    <button type="submit" class="btn btn-sm btn-{{ 'success' if site.is_blocked else 'outline-danger' }}">
-                                        <i class="fas fa-{{ 'unlock' if site.is_blocked else 'ban' }}"></i>
-                                        {{ 'Unblock' if site.is_blocked else 'Block' }}
-                                    </button>
-                                </form>
                             </td>
                         </tr>
                         {% endfor %}
@@ -552,82 +232,102 @@
                 </table>
             </div>
             {% else %}
-            <div class="alert alert-info">No sites are currently deployed on this node.</div>
+            <div class="card-body text-center text-muted">
+                <i class="fas fa-info-circle me-1"></i> No sites are currently deployed on this node.
+            </div>
             {% endif %}
         </div>
     </div>
 
     <!-- Recent Deployment Logs -->
-    <div class="card">
-        <div class="card-header">
-            <h5 class="card-title mb-0">
-                <i class="fas fa-history me-2"></i>Recent Deployment Logs
-            </h5>
+    <div class="card shadow-sm">
+         <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="card-title mb-0"><i class="fas fa-history me-2"></i>Recent Deployment Logs</h5>
+             <a href="{{ url_for('admin.deployment_logs', node_id=node.id) }}" class="btn btn-sm btn-outline-secondary">View All</a>
         </div>
-        <div class="card-body">
+         <div class="card-body p-0"> <!-- Remove padding -->
             {% if deployment_logs %}
             <div class="table-responsive">
-                <table class="table table-striped table-hover">
-                    <thead>
+                 <table class="table table-sm table-striped mb-0"> <!-- Smaller table -->
+                    <thead class="table-light">
                         <tr>
-                            <th>Time</th>
+                            <th>Timestamp</th>
                             <th>Site</th>
-                            <th>Action</th>
                             <th>Status</th>
                             <th>Message</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for log in deployment_logs %}
-                        <tr class="{% if log.status == 'error' %}table-danger{% endif %}">
-                            <td>{{ log.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                        <tr>
+                            <td class="text-nowrap" title="{{ log.created_at.strftime('%Y-%m-%d %H:%M:%S') }}">{{ log.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
                             <td>
-                                <a href="{{ url_for('admin.view_site', site_id=log.site_id) }}">
-                                    {{ log.site.domain }}
-                                </a>
+                                {% if log.site %}
+                                <a href="{{ url_for('admin.view_site', site_id=log.site.id) }}" class="text-decoration-none">{{ log.site.domain }}</a>
+                                {% else %}
+                                <span class="text-muted">N/A</span>
+                                {% endif %}
                             </td>
-                            <td>{{ log.action }}</td>
                             <td>
-                                <span class="badge rounded-pill 
-                                {% if log.status == 'success' %}bg-success
-                                {% elif log.status == 'error' %}bg-danger
-                                {% else %}bg-warning text-dark{% endif %}">
+                                <span class="badge rounded-pill bg-{{ 'success' if log.status == 'Success' else ('danger' if log.status == 'Failed' else 'warning') }}-subtle text-{{ 'success' if log.status == 'Success' else ('danger' if log.status == 'Failed' else 'warning') }}-emphasis border border-{{ 'success' if log.status == 'Success' else ('danger' if log.status == 'Failed' else 'warning') }}-subtle">
                                     {{ log.status }}
                                 </span>
                             </td>
-                            <td>{{ log.message }}</td>
+                            <td><code class="small">{{ log.message | truncate(100) }}</code></td>
                         </tr>
                         {% endfor %}
                     </tbody>
                 </table>
             </div>
             {% else %}
-            <div class="alert alert-info">No deployment logs found for this node.</div>
+             <div class="card-body text-center text-muted">
+                <i class="fas fa-info-circle me-1"></i> No deployment logs found for this node.
+            </div>
             {% endif %}
         </div>
     </div>
+
 </div>
 
 <!-- Redeploy Modal -->
 <div class="modal fade" id="redeployModal" tabindex="-1" aria-labelledby="redeployModalLabel" aria-hidden="true">
-    <div class="modal-dialog">
+    <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title" id="redeployModalLabel">Confirm Redeployment</h5>
+                <h5 class="modal-title" id="redeployModalLabel"><i class="fas fa-sync me-2"></i>Redeploy Configuration</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
-                <p>Are you sure you want to redeploy all sites on this node?</p>
-                <p>This will regenerate and reapply the Nginx configuration for all {{ sites|length }} site(s) currently deployed on this node.</p>
-                <div class="alert alert-warning">
-                    <i class="fas fa-exclamation-triangle me-2"></i>
-                    This operation might cause brief downtime during the Nginx reload.
-                </div>
+                <p>This will redeploy the current Nginx configuration for <strong>all sites</strong> assigned to this node ({{ node.name }}).</p>
+                <p class="text-muted small">This is useful if you suspect the configuration on the node is out of sync or needs refreshing.</p>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <form method="POST" action="{{ url_for('admin.redeploy_all_sites', node_id=node.id) }}">
-                    <button type="submit" class="btn btn-warning">Redeploy All Sites</button>
+                <form action="{{ url_for('admin.redeploy_all_sites', node_id=node.id) }}" method="POST" class="d-inline">
+                     <button type="submit" class="btn btn-primary"><i class="fas fa-sync me-1"></i>Redeploy Now</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Node Modal (reuse from list page if possible, or include here) -->
+<div class="modal fade" id="deleteNodeModal" tabindex="-1" aria-labelledby="deleteNodeModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title" id="deleteNodeModalLabel"><i class="fas fa-exclamation-triangle me-2"></i>Confirm Deletion</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                Are you sure you want to delete the node <strong class="text-danger">{{ node.name }}</strong>?
+                <br>
+                <small class="text-muted">This action cannot be undone and may affect deployed sites.</small>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <form action="{{ url_for('admin.delete_node', node_id=node.id) }}" method="POST" class="d-inline">
+                    <button type="submit" class="btn btn-danger"><i class="fas fa-trash me-1"></i>Delete Node</button>
                 </form>
             </div>
         </div>
@@ -638,196 +338,271 @@
 {% block scripts %}
 <script>
     document.addEventListener('DOMContentLoaded', function() {
-        // Auto-refresh functionality for stats
         const nodeId = document.querySelector('meta[name="node-id"]').getAttribute('content');
         let refreshInterval;
-        let isRefreshing = false;
+        let isRefreshing = false; // Start with auto-refresh off
         const refreshToggle = document.getElementById('toggleRefresh');
         const refreshIndicator = document.getElementById('refreshIndicator');
-        
-        // External IP check functionality
+        const refreshStateSpan = document.getElementById('refreshState');
+        const lastRefreshTimeSpan = document.getElementById('lastRefreshTime');
+        const systemStatsContainer = document.getElementById('systemStatsContainer');
+        const connectionStatsContainer = document.getElementById('connectionStatsContainer');
+        const systemStatsError = document.getElementById('systemStatsError');
+        const connectionStatsError = document.getElementById('connectionStatsError');
+        const externalIpDisplay = document.getElementById('externalIpDisplay');
         const checkExternalIPBtn = document.getElementById('checkExternalIP');
-        if (checkExternalIPBtn) {
-            checkExternalIPBtn.addEventListener('click', function() {
-                const button = this;
-                button.disabled = true;
-                button.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Checking...';
-                
-                fetch(`/admin/nodes/${nodeId}/check-external-ip`)
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.success && data.external_ip) {
-                            const parent = button.parentNode;
-                            parent.innerHTML = data.external_ip;
-                        } else {
-                            button.innerHTML = '<i class="fas fa-sync-alt me-1"></i> Check';
-                            button.disabled = false;
-                            alert('Could not retrieve external IP: ' + (data.error || 'Unknown error'));
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Error checking external IP:', error);
-                        button.innerHTML = '<i class="fas fa-sync-alt me-1"></i> Check';
-                        button.disabled = false;
-                        alert('Failed to check external IP. Please try again.');
-                    });
-            });
+
+        // --- External IP Check ---
+        function checkExternalIP() {
+            externalIpDisplay.innerHTML = `<div class="spinner-border spinner-border-sm text-secondary" role="status"><span class="visually-hidden">Loading...</span></div>`;
+            fetch(`{{ url_for('admin.check_external_ip', node_id=0) }}`.replace('0', nodeId))
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success && data.external_ip) {
+                        externalIpDisplay.innerHTML = `<code>${data.external_ip}</code> <i class="fas fa-check-circle text-success ms-1"></i>`;
+                    } else {
+                        externalIpDisplay.innerHTML = `<span class="text-danger small"><i class="fas fa-exclamation-triangle me-1"></i>${data.error || 'Failed'}</span>
+                            <button class="btn btn-sm btn-link text-secondary p-0 ms-1" onclick="checkExternalIP()" title="Try again">
+                                <i class="fas fa-redo small"></i>
+                            </button>`;
+                    }
+                })
+                .catch(error => {
+                     console.error("External IP check failed:", error);
+                     externalIpDisplay.innerHTML = `<span class="text-danger small"><i class="fas fa-exclamation-triangle me-1"></i>Request failed</span>
+                        <button class="btn btn-sm btn-link text-secondary p-0 ms-1" onclick="checkExternalIP()" title="Try again">
+                            <i class="fas fa-redo small"></i>
+                        </button>`;
+                });
         }
-        
+
+        if (checkExternalIPBtn) {
+            checkExternalIPBtn.addEventListener('click', checkExternalIP);
+            // Optionally trigger check on load
+            // checkExternalIP();
+        }
+        // Make checkExternalIP globally accessible if called from HTML onclick
+        window.checkExternalIP = checkExternalIP;
+
+
+        // --- Auto-Refresh Logic ---
+        function updateRefreshUI() {
+            if (isRefreshing) {
+                refreshStateSpan.textContent = 'Auto-Refresh On';
+                refreshToggle.classList.remove('btn-outline-secondary');
+                refreshToggle.classList.add('btn-secondary', 'active');
+                refreshToggle.title = "Turn Off Auto-Refresh";
+            } else {
+                refreshStateSpan.textContent = 'Auto-Refresh Off';
+                refreshToggle.classList.remove('btn-secondary', 'active');
+                refreshToggle.classList.add('btn-outline-secondary');
+                refreshToggle.title = "Turn On Auto-Refresh (10s)";
+                if (refreshIndicator) refreshIndicator.textContent = ''; // Clear indicator when off
+            }
+        }
+
         if (refreshToggle) {
             refreshToggle.addEventListener('click', function() {
                 if (isRefreshing) {
                     stopAutoRefresh();
-                    refreshToggle.textContent = 'Start Auto-Refresh';
-                    refreshToggle.classList.replace('btn-danger', 'btn-success');
-                    refreshIndicator.style.display = 'none';
                 } else {
                     startAutoRefresh();
-                    refreshToggle.textContent = 'Stop Auto-Refresh';
-                    refreshToggle.classList.replace('btn-success', 'btn-danger');
-                    refreshIndicator.style.display = 'inline-block';
                 }
             });
         }
-        
+
         function startAutoRefresh() {
+            if (isRefreshing) return; // Prevent multiple intervals
             isRefreshing = true;
-            refreshStats(); // Do an immediate refresh
+            updateRefreshUI();
+            refreshStats(); // Immediate refresh
             refreshInterval = setInterval(refreshStats, 10000); // Then every 10 seconds
+            if (refreshIndicator) refreshIndicator.textContent = 'Refreshing...';
         }
-        
+
         function stopAutoRefresh() {
             isRefreshing = false;
             clearInterval(refreshInterval);
+            updateRefreshUI();
         }
-        
+
+        // --- Stats Fetching and Display ---
         function refreshStats() {
+            if (refreshIndicator) refreshIndicator.innerHTML = `<div class="spinner-border spinner-border-sm text-muted" role="status"></div><span class="ms-1">Updating...</span>`;
+            systemStatsError.classList.add('d-none');
+            connectionStatsError.classList.add('d-none');
+
             fetch(`/admin/nodes/${nodeId}/stats`)
-                .then(response => response.json())
+                .then(response => {
+                    if (!response.ok) { throw new Error(`HTTP error! status: ${response.status}`); }
+                    return response.json();
+                 })
                 .then(data => {
                     if (data.success) {
-                        updateStatDisplay(data.serverStats, data.connectionStats);
+                        updateStatDisplay(data.serverStats || {}, data.connectionStats || {});
+                        const timestamp = new Date().toLocaleTimeString();
+                        if (lastRefreshTimeSpan) lastRefreshTimeSpan.textContent = `Last updated: ${timestamp}`;
+                        if (refreshIndicator) refreshIndicator.textContent = ''; // Clear indicator on success
                     } else {
-                        console.error('Error refreshing stats:', data.error);
+                        throw new Error(data.error || 'Failed to fetch stats');
                     }
                 })
                 .catch(error => {
-                    console.error('Failed to refresh node stats:', error);
+                    console.error("Failed to refresh stats:", error);
+                    // Show specific errors if containers exist
+                    if (systemStatsContainer) systemStatsError.classList.remove('d-none');
+                    if (connectionStatsContainer) connectionStatsError.classList.remove('d-none');
+                    if (refreshIndicator) refreshIndicator.innerHTML = `<i class="fas fa-exclamation-circle text-danger"></i><span class="ms-1">Update failed</span>`;
+                    // Optionally stop refresh on error
+                    // stopAutoRefresh();
                 });
         }
-        
+        // Make refreshStats globally accessible if called from HTML onclick
+        window.refreshStats = refreshStats;
+
+        function formatBytes(bytes, decimals = 2) {
+            if (bytes === 0 || !bytes) return '0 Bytes';
+            const k = 1024;
+            const dm = decimals < 0 ? 0 : decimals;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+        }
+
+         function formatUptime(seconds) {
+            if (!seconds || seconds < 0) return 'N/A';
+            let d = Math.floor(seconds / (3600*24));
+            let h = Math.floor(seconds % (3600*24) / 3600);
+            let m = Math.floor(seconds % 3600 / 60);
+            // let s = Math.floor(seconds % 60);
+            let parts = [];
+            if (d > 0) parts.push(d + (d == 1 ? " day" : " days"));
+            if (h > 0) parts.push(h + (h == 1 ? " hour" : " hours"));
+            if (m > 0) parts.push(m + (m == 1 ? " min" : " mins"));
+            // if (s > 0) parts.push(s + (s == 1 ? " sec" : " secs"));
+            if (parts.length === 0 && seconds > 0) return "< 1 min"; // Handle very short uptime
+            return parts.join(', ');
+        }
+
+        function getProgressColor(percentage) {
+            if (percentage < 50) return 'bg-success';
+            if (percentage < 85) return 'bg-warning';
+            return 'bg-danger';
+        }
+
         function updateStatDisplay(serverStats, connectionStats) {
-            // Update CPU usage
-            const cpuBar = document.querySelector('.progress-bar[aria-valuenow]');
-            if (cpuBar) {
-                cpuBar.style.width = serverStats.cpu_usage;
-                cpuBar.setAttribute('aria-valuenow', serverStats.cpu_usage.replace('%', ''));
-                cpuBar.textContent = serverStats.cpu_usage;
+            // --- Update System Stats ---
+            if (systemStatsContainer) {
+                let systemHtml = '<div class="row">';
+
+                 // CPU Usage
+                const cpuUsage = serverStats.cpu_usage ? parseFloat(serverStats.cpu_usage) : null;
+                systemHtml += `
+                    <div class="col-md-6 mb-3">
+                        <h6><i class="fas fa-microchip me-1"></i>CPU Usage</h6>
+                        ${cpuUsage !== null ? `
+                        <div class="progress" role="progressbar" aria-label="CPU Usage" aria-valuenow="${cpuUsage}" aria-valuemin="0" aria-valuemax="100">
+                            <div class="progress-bar ${getProgressColor(cpuUsage)}" style="width: ${cpuUsage}%"></div>
+                        </div>
+                        <div class="text-end small fw-bold mt-1">${cpuUsage.toFixed(1)}%</div>
+                        ` : '<span class="text-muted small">N/A</span>'}
+                    </div>`;
+
+                // Memory Usage
+                const memUsed = serverStats.memory_used_bytes;
+                const memTotal = serverStats.memory_total_bytes;
+                const memPercent = (memTotal && memUsed) ? (memUsed / memTotal * 100) : null;
+                 systemHtml += `
+                    <div class="col-md-6 mb-3">
+                        <h6><i class="fas fa-memory me-1"></i>Memory Usage</h6>
+                         ${memPercent !== null ? `
+                        <div class="progress" role="progressbar" aria-label="Memory Usage" aria-valuenow="${memPercent}" aria-valuemin="0" aria-valuemax="100">
+                            <div class="progress-bar ${getProgressColor(memPercent)}" style="width: ${memPercent}%"></div>
+                        </div>
+                        <div class="d-flex justify-content-between small mt-1">
+                            <span>${formatBytes(memUsed)} / ${formatBytes(memTotal)}</span>
+                            <span class="fw-bold">${memPercent.toFixed(1)}%</span>
+                        </div>
+                        ` : '<span class="text-muted small">N/A</span>'}
+                    </div>`;
+
+                // Disk Usage
+                const diskUsed = serverStats.disk_used_bytes;
+                const diskTotal = serverStats.disk_total_bytes;
+                const diskPercent = (diskTotal && diskUsed) ? (diskUsed / diskTotal * 100) : null;
+                 systemHtml += `
+                    <div class="col-md-6 mb-3">
+                        <h6><i class="far fa-hdd me-1"></i>Disk Usage (Root)</h6>
+                         ${diskPercent !== null ? `
+                        <div class="progress" role="progressbar" aria-label="Disk Usage" aria-valuenow="${diskPercent}" aria-valuemin="0" aria-valuemax="100">
+                            <div class="progress-bar ${getProgressColor(diskPercent)}" style="width: ${diskPercent}%"></div>
+                        </div>
+                         <div class="d-flex justify-content-between small mt-1">
+                            <span>${formatBytes(diskUsed)} / ${formatBytes(diskTotal)}</span>
+                            <span class="fw-bold">${diskPercent.toFixed(1)}%</span>
+                        </div>
+                        ` : '<span class="text-muted small">N/A</span>'}
+                    </div>`;
+
+                // Load Average
+                const loadAvg = serverStats.load_average ? serverStats.load_average.join(', ') : 'N/A';
+                 systemHtml += `
+                    <div class="col-md-6 mb-3">
+                        <h6><i class="fas fa-weight-hanging me-1"></i>Load Average (1m, 5m, 15m)</h6>
+                        <p class="mb-0 fw-bold">${loadAvg}</p>
+                    </div>`;
+
+                // Uptime
+                const uptime = formatUptime(serverStats.uptime_seconds);
+                 systemHtml += `
+                    <div class="col-md-12 mb-3">
+                        <h6><i class="far fa-clock me-1"></i>Uptime</h6>
+                        <p class="mb-0">${uptime}</p>
+                    </div>`;
+
+                systemHtml += '</div>'; // End row
+                systemStatsContainer.innerHTML = systemHtml;
             }
-            
-            // Update memory usage
-            const memBar = document.querySelector('.progress-bar.bg-info');
-            if (memBar) {
-                let memPercent, memText;
-                
-                if (Array.isArray(serverStats.memory_usage)) {
-                    // Handle array format
-                    if (serverStats.memory_usage.length > 1) {
-                        memPercent = serverStats.memory_usage[1];
-                        memText = serverStats.memory_usage[0];
-                    } else {
-                        memPercent = '0%';
-                        memText = serverStats.memory_usage[0] || 'Memory information not available';
-                    }
-                } else if (typeof serverStats.memory_usage === 'string' && 
-                          serverStats.memory_usage.includes('(') && 
-                          serverStats.memory_usage.includes(')')) {
-                    // Handle string format
-                    memPercent = serverStats.memory_usage.split('(')[1].split(')')[0];
-                    memText = serverStats.memory_usage.split(' (')[0];
-                } else {
-                    memPercent = '0%';
-                    memText = 'Memory information not available';
-                }
-                
-                memBar.style.width = memPercent;
-                memBar.setAttribute('aria-valuenow', memPercent.replace('%', ''));
-                memBar.textContent = memPercent;
-                
-                const memTextElem = document.querySelector('.col-md-6.mb-3:nth-of-type(2) small.text-muted');
-                if (memTextElem) {
-                    memTextElem.textContent = memText;
-                }
+
+            // --- Update Connection Stats ---
+             if (connectionStatsContainer) {
+                let connectionHtml = '<div class="row">';
+
+                connectionHtml += `
+                    <div class="col-6 col-md-4 text-center mb-3 stat-card">
+                        <h6>Total Conns</h6>
+                        <p class="display-6 mb-0">${connectionStats.total_connections ?? 'N/A'}</p>
+                    </div>
+                    <div class="col-6 col-md-4 text-center mb-3 stat-card">
+                        <h6>Active HTTP</h6>
+                        <p class="display-6 mb-0">${connectionStats.active_http ?? 'N/A'}</p>
+                    </div>
+                     <div class="col-12 col-md-4 text-center mb-3 stat-card">
+                        <h6>Waiting</h6>
+                        <p class="display-6 mb-0">${connectionStats.waiting ?? 'N/A'}</p>
+                    </div>
+                     <div class="col-6 text-center mb-3 stat-card">
+                        <h6>Requests/sec</h6>
+                        <h3 class="mb-0">${connectionStats.requests_per_second ?? 'N/A'}</h3>
+                    </div>
+                    <div class="col-6 text-center mb-3 stat-card">
+                        <h6>Bandwidth</h6>
+                        <h3 class="mb-0">${connectionStats.bandwidth ? formatBytes(connectionStats.bandwidth) + '/s' : 'N/A'}</h3>
+                    </div>
+                `;
+
+                connectionHtml += '</div>'; // End row
+                connectionStatsContainer.innerHTML = connectionHtml;
             }
-            
-            // Update disk usage
-            const diskBar = document.querySelector('.progress-bar.bg-warning');
-            if (diskBar) {
-                let diskPercent, diskText;
-                
-                if (Array.isArray(serverStats.disk_usage)) {
-                    // Handle array format
-                    if (serverStats.disk_usage.length > 1) {
-                        diskPercent = serverStats.disk_usage[1];
-                        diskText = serverStats.disk_usage[0];
-                    } else {
-                        diskPercent = '0%';
-                        diskText = serverStats.disk_usage[0] || 'Disk information not available';
-                    }
-                } else if (typeof serverStats.disk_usage === 'string' && 
-                          serverStats.disk_usage.includes('(') && 
-                          serverStats.disk_usage.includes(')')) {
-                    // Handle string format
-                    diskPercent = serverStats.disk_usage.split('(')[1].split(')')[0];
-                    diskText = serverStats.disk_usage.split(' (')[0];
-                } else {
-                    diskPercent = '0%';
-                    diskText = 'Disk information not available';
-                }
-                
-                diskBar.style.width = diskPercent;
-                diskBar.setAttribute('aria-valuenow', diskPercent.replace('%', ''));
-                diskBar.textContent = diskPercent;
-                
-                const diskTextElem = document.querySelector('.col-md-6.mb-3:nth-of-type(3) small.text-muted');
-                if (diskTextElem) {
-                    diskTextElem.textContent = diskText;
-                }
-            }
-            
-            // Update load average
-            const loadText = document.querySelector('.col-md-6.mb-3:nth-of-type(4) p.mb-0');
-            if (loadText) {
-                loadText.textContent = serverStats.load_average;
-            }
-            
-            // Update uptime
-            const uptimeText = document.querySelector('.col-md-12.mb-3 p.mb-0');
-            if (uptimeText) {
-                uptimeText.textContent = serverStats.uptime;
-            }
-            
-            // Update connection stats
-            document.querySelector('.col-md-4.text-center:nth-of-type(1) h2.mb-0').textContent = 
-                connectionStats.total_connections;
-            document.querySelector('.col-md-4.text-center:nth-of-type(2) h2.mb-0').textContent = 
-                connectionStats.active_http;
-            document.querySelector('.col-md-4.text-center:nth-of-type(3) h2.mb-0').textContent = 
-                connectionStats.active_https;
-                
-            // Update RPS and bandwidth
-            document.querySelector('.col-md-6.text-center.mb-3:nth-of-type(1) h3.mb-0').textContent = 
-                connectionStats.requests_per_second;
-            document.querySelector('.col-md-6.text-center.mb-3:nth-of-type(2) h3.mb-0').textContent = 
-                connectionStats.bandwidth_usage;
-                
-            // Show a flash message to indicate successful refresh
-            const timestamp = new Date().toLocaleTimeString();
-            const refreshStatus = document.getElementById('lastRefreshTime');
-            if (refreshStatus) {
-                refreshStatus.textContent = timestamp;
+
+            // Update external IP if received via stats
+            if (serverStats.external_ip && externalIpDisplay && !externalIpDisplay.innerHTML.includes('spinner')) {
+                 externalIpDisplay.innerHTML = `<code>${serverStats.external_ip}</code> <i class="fas fa-check-circle text-success ms-1" title="From node stats"></i>`;
             }
         }
+
+        // Initial fetch of stats when page loads
+        refreshStats();
     });
 </script>
 {% endblock %}
