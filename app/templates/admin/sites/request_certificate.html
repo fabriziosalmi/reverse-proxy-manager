@@ -111,6 +111,7 @@
                 </div>
                 <div class="card-body p-4">
                     <form method="POST" action="{{ url_for('admin.initiate_certificate_request') }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <div class="form-section">
                             <h4 class="form-section-title">
                                 <i class="fas fa-globe"></i>Select Site for Certificate
