@@ -1,181 +1,275 @@
-{% extends 'client/base.html' %}
+{% extends 'base.html' %}
 
-{% block title %}Analytics Dashboard{% endblock %}
+{% block title %}Analytics Dashboard - Italia CDN Proxy Manager{% endblock %}
+
+{% block head_extra %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/chart.js@3.7.0/dist/chart.min.css">
+<style>
+    .status-card {
+        transition: all 0.2s ease;
+        border: none;
+        height: 100%;
+    }
+    .status-card:hover {
+        transform: translateY(-5px);
+    }
+    .status-icon {
+        font-size: 2.5rem;
+        line-height: 1;
+    }
+    .status-count {
+        font-size: 2.5rem;
+        line-height: 1;
+        font-weight: 600;
+    }
+    .chart-container {
+        position: relative;
+        height: 300px;
+        width: 100%;
+    }
+    .chart-container-sm {
+        height: 220px;
+    }
+    .table th, .table td {
+        vertical-align: middle;
+    }
+    .progress {
+        height: 0.6rem;
+        border-radius: 0.5rem;
+    }
+    .empty-state {
+        padding: 3rem 0;
+        text-align: center;
+    }
+    .empty-state-icon {
+        font-size: 3rem;
+        color: var(--bs-secondary-color);
+        opacity: 0.6;
+        margin-bottom: 1rem;
+    }
+    .traffic-trend-indicator {
+        width: 12px;
+        height: 12px;
+        display: inline-block;
+        border-radius: 50%;
+        margin-right: 0.5rem;
+    }
+    .trend-up {
+        background-color: var(--bs-success);
+        box-shadow: 0 0 0 2px var(--bs-success-bg-subtle);
+    }
+    .trend-neutral {
+        background-color: var(--bs-info);
+        box-shadow: 0 0 0 2px var(--bs-info-bg-subtle);
+    }
+    .trend-down {
+        background-color: var(--bs-danger);
+        box-shadow: 0 0 0 2px var(--bs-danger-bg-subtle);
+    }
+    .site-selector {
+        max-width: 500px;
+    }
+    .period-selector .btn-check:checked + .btn-outline-secondary {
+        background-color: var(--bs-primary);
+        border-color: var(--bs-primary);
+        color: white;
+    }
+</style>
+{% endblock %}
 
 {% block content %}
-<div class="container-fluid">
-    <h1 class="h3 mb-4 text-gray-800">Site Analytics</h1>
-    
-    <div class="card shadow mb-4">
-        <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
-            <h6 class="m-0 font-weight-bold text-primary">Site Selection</h6>
+<div class="container py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+        <div>
+            <h1 class="h2 fw-bold mb-1"><i class="fas fa-chart-bar me-2 text-primary"></i>Analytics Dashboard</h1>
+            <p class="text-muted">Monitor traffic, performance metrics, and usage patterns for your sites.</p>
         </div>
+    </div>
+    
+    <!-- Site Selection and Period Controls -->
+    <div class="card shadow-sm mb-4">
         <div class="card-body">
-            {% if sites %}
-                <form method="get" action="{{ url_for('client.analytics_dashboard') }}" class="mb-4">
-                    <div class="row align-items-center">
-                        <div class="col-md-6">
-                            <select name="site_id" class="form-control">
-                                <option value="">All Sites</option>
-                                {% for site in sites %}
-                                <option value="{{ site.id }}" {% if selected_site and selected_site.id == site.id %}selected{% endif %}>
-                                    {{ site.name }} ({{ site.domain }})
-                                </option>
-                                {% endfor %}
-                            </select>
+            <div class="row align-items-end">
+                <div class="col-md-6 mb-3 mb-md-0">
+                    {% if sites %}
+                        <form method="get" action="{{ url_for('client.analytics_dashboard') }}" class="site-selector">
+                            <label for="siteSelect" class="form-label fw-bold"><i class="fas fa-globe me-1"></i> Select Site</label>
+                            <div class="input-group">
+                                <select id="siteSelect" name="site_id" class="form-select">
+                                    <option value="">All Sites</option>
+                                    {% for site in sites %}
+                                    <option value="{{ site.id }}" {% if selected_site and selected_site.id == site.id %}selected{% endif %}>
+                                        {{ site.name }} ({{ site.domain }})
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="fas fa-filter me-1"></i> Apply
+                                </button>
+                            </div>
+                        </form>
+                    {% else %}
+                        <div class="alert alert-info mb-0 d-flex align-items-center">
+                            <i class="fas fa-info-circle fa-lg me-3"></i>
+                            <div>You don't have any sites configured yet. <a href="{{ url_for('client.add_site') }}" class="fw-bold">Add a site</a> to start seeing analytics.</div>
                         </div>
-                        <div class="col-md-2">
-                            <button type="submit" class="btn btn-primary">View Analytics</button>
+                    {% endif %}
+                </div>
+                <div class="col-md-6">
+                    <div class="period-selector d-flex justify-content-md-end">
+                        <div class="btn-group" role="group" aria-label="Time period">
+                            <input type="radio" class="btn-check" name="period" id="periodDay" autocomplete="off" value="day" {% if period == 'day' %}checked{% endif %}>
+                            <label class="btn btn-outline-secondary" for="periodDay">Today</label>
+                            
+                            <input type="radio" class="btn-check" name="period" id="periodWeek" autocomplete="off" value="week" {% if period == 'week' or not period %}checked{% endif %}>
+                            <label class="btn btn-outline-secondary" for="periodWeek">Week</label>
+                            
+                            <input type="radio" class="btn-check" name="period" id="periodMonth" autocomplete="off" value="month" {% if period == 'month' %}checked{% endif %}>
+                            <label class="btn btn-outline-secondary" for="periodMonth">Month</label>
+                            
+                            <input type="radio" class="btn-check" name="period" id="periodYear" autocomplete="off" value="year" {% if period == 'year' %}checked{% endif %}>
+                            <label class="btn btn-outline-secondary" for="periodYear">Year</label>
                         </div>
                     </div>
-                </form>
-            {% else %}
-                <div class="alert alert-info">
-                    You don't have any sites configured yet. <a href="{{ url_for('client.add_site') }}">Add a site</a> to start seeing analytics.
                 </div>
-            {% endif %}
+            </div>
         </div>
     </div>
     
     {% if sites %}
     <!-- Overview Cards -->
-    <div class="row">
-        <div class="col-xl-4 col-md-6 mb-4">
-            <div class="card border-left-primary shadow h-100 py-2">
-                <div class="card-body">
-                    <div class="row no-gutters align-items-center">
-                        <div class="col mr-2">
-                            <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
-                                Total Traffic (Last 7 Days)
-                            </div>
-                            <div class="h5 mb-0 font-weight-bold text-gray-800">{{ total_traffic }}</div>
-                        </div>
-                        <div class="col-auto">
-                            <i class="fas fa-chart-line fa-2x text-gray-300"></i>
-                        </div>
+    <div class="row g-3 mb-4">
+        <div class="col-md-4">
+            <div class="card shadow-sm status-card border-0 bg-primary-subtle text-primary-emphasis h-100">
+                <div class="card-body d-flex align-items-center p-4">
+                    <div class="status-icon me-3">
+                        <i class="fas fa-chart-line"></i>
+                    </div>
+                    <div>
+                        <h6 class="text-uppercase fw-bold mb-2">Total Traffic</h6>
+                        <div class="status-count">{{ total_traffic }}</div>
                     </div>
                 </div>
-                <div class="card-footer small text-muted">
+                <div class="card-footer bg-transparent border-0 text-primary-emphasis">
                     {% if traffic_growth > 0 %}
-                        <span class="text-success"><i class="fas fa-arrow-up"></i> {{ traffic_growth }}%</span> from yesterday
+                        <span><i class="fas fa-arrow-up me-1"></i> {{ traffic_growth }}%</span> from previous period
                     {% elif traffic_growth < 0 %}
-                        <span class="text-danger"><i class="fas fa-arrow-down"></i> {{ traffic_growth|abs }}%</span> from yesterday
+                        <span><i class="fas fa-arrow-down me-1"></i> {{ traffic_growth|abs }}%</span> from previous period
                     {% else %}
-                        No change from yesterday
+                        No change from previous period
                     {% endif %}
                 </div>
             </div>
         </div>
         
-        <div class="col-xl-4 col-md-6 mb-4">
-            <div class="card border-left-success shadow h-100 py-2">
-                <div class="card-body">
-                    <div class="row no-gutters align-items-center">
-                        <div class="col mr-2">
-                            <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
-                                Total Requests (Last 7 Days)
-                            </div>
-                            <div class="h5 mb-0 font-weight-bold text-gray-800">{{ total_requests }}</div>
-                        </div>
-                        <div class="col-auto">
-                            <i class="fas fa-server fa-2x text-gray-300"></i>
-                        </div>
+        <div class="col-md-4">
+            <div class="card shadow-sm status-card border-0 bg-success-subtle text-success-emphasis h-100">
+                <div class="card-body d-flex align-items-center p-4">
+                    <div class="status-icon me-3">
+                        <i class="fas fa-server"></i>
+                    </div>
+                    <div>
+                        <h6 class="text-uppercase fw-bold mb-2">Total Requests</h6>
+                        <div class="status-count">{{ total_requests }}</div>
                     </div>
                 </div>
-                <div class="card-footer small text-muted">
-                    Across {% if selected_site %}1{% else %}{{ sites|length }}{% endif %} site{{ sites|length|pluralize }}
+                <div class="card-footer bg-transparent border-0 text-success-emphasis">
+                    Across {% if selected_site %}1 site{% else %}{{ sites|length }} site{% if sites|length != 1 %}s{% endif %}{% endif %}
                 </div>
             </div>
         </div>
         
-        <div class="col-xl-4 col-md-6 mb-4">
-            <div class="card border-left-info shadow h-100 py-2">
-                <div class="card-body">
-                    <div class="row no-gutters align-items-center">
-                        <div class="col mr-2">
-                            <div class="text-xs font-weight-bold text-info text-uppercase mb-1">
-                                Traffic Trends
-                            </div>
-                            <div class="row no-gutters align-items-center">
-                                <div class="col-auto">
-                                    <div class="h5 mb-0 mr-3 font-weight-bold text-gray-800">
-                                        <span id="trafficTrend">Analyzing</span>
-                                    </div>
-                                </div>
-                                <div class="col">
-                                    <div class="progress progress-sm mr-2" id="trafficTrendProgress">
-                                        <div class="progress-bar bg-info" role="progressbar" style="width: 50%"></div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-auto">
-                            <i class="fas fa-clipboard-list fa-2x text-gray-300"></i>
+        <div class="col-md-4">
+            <div class="card shadow-sm status-card border-0 bg-info-subtle text-info-emphasis h-100">
+                <div class="card-body d-flex align-items-center p-4">
+                    <div class="status-icon me-3">
+                        <i class="fas fa-tachometer-alt"></i>
+                    </div>
+                    <div>
+                        <h6 class="text-uppercase fw-bold mb-2">Traffic Trend</h6>
+                        <div class="d-flex align-items-center">
+                            <div id="trafficTrendIndicator" class="traffic-trend-indicator trend-neutral"></div>
+                            <div id="trafficTrend" class="h5 mb-0 fw-bold">Analyzing</div>
                         </div>
                     </div>
                 </div>
-                <div class="card-footer small text-muted">
-                    Based on weekly patterns
+                <div class="card-footer bg-transparent border-0 text-info-emphasis">
+                    <div class="d-flex align-items-center">
+                        <div class="flex-grow-1 me-2">
+                            <div class="progress">
+                                <div id="trafficTrendProgress" class="progress-bar bg-info" role="progressbar" style="width: 50%"></div>
+                            </div>
+                        </div>
+                        <div class="text-nowrap">Based on patterns</div>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
     
-    <!-- Content Row -->
-    <div class="row">
+    <!-- Traffic and Cache Performance -->
+    <div class="row g-4 mb-4">
         <!-- Traffic Chart -->
         <div class="col-xl-8 col-lg-7">
-            <div class="card shadow mb-4">
-                <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
-                    <h6 class="m-0 font-weight-bold text-primary">
+            <div class="card shadow-sm h-100">
+                <div class="card-header bg-transparent d-flex justify-content-between align-items-center">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-chart-area me-2 text-primary"></i>
                         {% if selected_site %}
                         Traffic Overview: {{ selected_site.name }}
                         {% else %}
                         Traffic Overview: All Sites
                         {% endif %}
-                    </h6>
-                    <div class="dropdown no-arrow">
-                        <a class="dropdown-toggle" href="#" role="button" id="periodDropdown" 
-                            data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-                            <i class="fas fa-ellipsis-v fa-sm fa-fw text-gray-400"></i>
-                        </a>
-                        <div class="dropdown-menu dropdown-menu-right shadow animated--fade-in" 
-                             aria-labelledby="periodDropdown">
-                            <div class="dropdown-header">Time Periods:</div>
-                            <a class="dropdown-item period-option" href="#" data-period="day">Today</a>
-                            <a class="dropdown-item period-option" href="#" data-period="week">Last Week</a>
-                            <a class="dropdown-item period-option" href="#" data-period="month">Last Month</a>
-                        </div>
+                    </h5>
+                    <div class="dropdown">
+                        <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" id="dropdownMenuButton" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="fas fa-chart-line me-1"></i> View
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end shadow-sm" aria-labelledby="dropdownMenuButton">
+                            <li><h6 class="dropdown-header">Chart Type</h6></li>
+                            <li><a class="dropdown-item chart-type" href="#" data-type="line">Line Chart</a></li>
+                            <li><a class="dropdown-item chart-type" href="#" data-type="bar">Bar Chart</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><h6 class="dropdown-header">Metrics</h6></li>
+                            <li><a class="dropdown-item data-metric" href="#" data-metric="bandwidth">Bandwidth</a></li>
+                            <li><a class="dropdown-item data-metric" href="#" data-metric="requests">Requests</a></li>
+                        </ul>
                     </div>
                 </div>
                 <div class="card-body">
-                    <canvas id="trafficChart" style="min-height: 300px;"></canvas>
+                    <div class="chart-container">
+                        <canvas id="trafficChart"></canvas>
+                    </div>
                 </div>
             </div>
         </div>
 
-        <!-- Response Time and Cache Performance -->
+        <!-- Performance Metrics -->
         <div class="col-xl-4 col-lg-5">
-            <div class="card shadow mb-4">
-                <div class="card-header py-3">
-                    <h6 class="m-0 font-weight-bold text-primary">Performance Metrics</h6>
+            <div class="card shadow-sm h-100">
+                <div class="card-header bg-transparent">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-tachometer-alt me-2 text-primary"></i>Performance Metrics
+                    </h5>
                 </div>
                 <div class="card-body">
-                    <div class="chart-pie mb-4">
-                        <canvas id="cacheHitRateChart" style="min-height: 200px;"></canvas>
+                    <div class="chart-container chart-container-sm mb-3">
+                        <canvas id="cacheHitRateChart"></canvas>
                     </div>
-                    <div class="mt-4 text-center small">
-                        <span class="mr-2">
-                            <i class="fas fa-circle text-success"></i> Cache Hits
+                    <div class="text-center small">
+                        <div class="mb-2 fw-bold">Cache Hit Rate</div>
+                        <span class="badge bg-success-subtle text-success-emphasis border border-success-subtle me-2">
+                            <i class="fas fa-circle-check me-1"></i> Cache Hits
                         </span>
-                        <span class="mr-2">
-                            <i class="fas fa-circle text-danger"></i> Cache Misses
+                        <span class="badge bg-danger-subtle text-danger-emphasis border border-danger-subtle">
+                            <i class="fas fa-circle-xmark me-1"></i> Cache Misses
                         </span>
                     </div>
                 </div>
-                <div class="card-footer">
-                    <div id="responseTimes" class="small text-muted">
-                        Average response time: Calculating...
+                <div class="card-footer bg-transparent">
+                    <div id="responseTimes" class="d-flex justify-content-between align-items-center">
+                        <span class="fw-bold">Average Response Time:</span>
+                        <span id="avgResponseTime" class="badge bg-primary">Calculating...</span>
                     </div>
                 </div>
             </div>
@@ -183,18 +277,20 @@
     </div>
 
     <!-- Error Logs and Realtime Monitoring -->
-    <div class="row">
+    <div class="row g-4 mb-4">
         <!-- Recent Error Logs -->
-        <div class="col-lg-6 mb-4">
-            <div class="card shadow mb-4">
-                <div class="card-header py-3">
-                    <h6 class="m-0 font-weight-bold text-primary">Recent Errors</h6>
+        <div class="col-lg-6">
+            <div class="card shadow-sm h-100">
+                <div class="card-header bg-transparent">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-exclamation-triangle me-2 text-warning"></i>Recent Errors
+                    </h5>
                 </div>
-                <div class="card-body">
+                <div class="card-body p-0">
                     {% if recent_errors %}
                     <div class="table-responsive">
-                        <table class="table table-bordered" width="100%" cellspacing="0">
-                            <thead>
+                        <table class="table table-hover mb-0">
+                            <thead class="table-light">
                                 <tr>
                                     <th>Time</th>
                                     <th>URL</th>
@@ -205,9 +301,9 @@
                                 {% for error in recent_errors %}
                                 <tr>
                                     <td>{{ error.timestamp.strftime('%H:%M:%S %d-%m-%Y') }}</td>
-                                    <td>{{ error.path }}</td>
+                                    <td class="text-truncate" style="max-width: 200px;">{{ error.path }}</td>
                                     <td>
-                                        <span class="badge badge-{% if error.status_code >= 500 %}danger{% else %}warning{% endif %}">
+                                        <span class="badge rounded-pill bg-{{ 'danger' if error.status_code >= 500 else 'warning' }}-subtle text-{{ 'danger' if error.status_code >= 500 else 'warning' }}-emphasis border border-{{ 'danger' if error.status_code >= 500 else 'warning' }}-subtle">
                                             {{ error.status_code }}
                                         </span>
                                     </td>
@@ -217,8 +313,12 @@
                         </table>
                     </div>
                     {% else %}
-                    <div class="alert alert-success">
-                        No errors reported in the last 7 days!
+                    <div class="empty-state">
+                        <div class="empty-state-icon text-success">
+                            <i class="fas fa-check-circle"></i>
+                        </div>
+                        <h4>No Errors Detected</h4>
+                        <p class="text-muted">No errors reported in the selected time period!</p>
                     </div>
                     {% endif %}
                 </div>
@@ -226,27 +326,48 @@
         </div>
 
         <!-- Real-time Monitoring -->
-        <div class="col-lg-6 mb-4">
-            <div class="card shadow mb-4">
-                <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
-                    <h6 class="m-0 font-weight-bold text-primary">Real-time Monitoring</h6>
+        <div class="col-lg-6">
+            <div class="card shadow-sm h-100">
+                <div class="card-header bg-transparent d-flex justify-content-between align-items-center">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-pulse me-2 text-primary"></i>Real-time Monitoring
+                    </h5>
                     <div>
-                        <button id="startRealtime" class="btn btn-sm btn-success">
-                            <i class="fas fa-play"></i> Start
+                        <button id="startRealtime" class="btn btn-sm btn-outline-success">
+                            <i class="fas fa-play me-1"></i> Start
                         </button>
-                        <button id="stopRealtime" class="btn btn-sm btn-danger" disabled>
-                            <i class="fas fa-stop"></i> Stop
+                        <button id="stopRealtime" class="btn btn-sm btn-outline-danger" disabled>
+                            <i class="fas fa-stop me-1"></i> Stop
                         </button>
                     </div>
                 </div>
                 <div class="card-body">
-                    <canvas id="realtimeChart" style="min-height: 300px;"></canvas>
-                </div>
-                <div class="card-footer">
-                    <div class="small text-muted">
-                        Last updated: <span id="lastUpdated">Never</span>
+                    <div class="chart-container">
+                        <canvas id="realtimeChart"></canvas>
                     </div>
                 </div>
+                <div class="card-footer bg-transparent">
+                    <div class="d-flex justify-content-between align-items-center small">
+                        <span>Requests/second</span>
+                        <span>Last updated: <span id="lastUpdated" class="fw-semibold">Never</span></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% else %}
+    <!-- Empty State for No Sites -->
+    <div class="card shadow-sm">
+        <div class="card-body py-5">
+            <div class="text-center">
+                <div class="empty-state-icon mb-4">
+                    <i class="fas fa-chart-bar"></i>
+                </div>
+                <h2 class="h4 mb-3">No Analytics Data Available</h2>
+                <p class="text-muted mb-4">You don't have any sites configured yet, so there's no analytics data to display.</p>
+                <a href="{{ url_for('client.add_site') }}" class="btn btn-primary">
+                    <i class="fas fa-plus-circle me-2"></i>Add Your First Site
+                </a>
             </div>
         </div>
     </div>
@@ -255,9 +376,15 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@3.7.0"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@3.7.0/dist/chart.min.js"></script>
 <script>
     {% if sites %}
+    // Set up chart defaults
+    Chart.defaults.font.family = "'Nunito', -apple-system, 'Segoe UI', Roboto, Arial, sans-serif";
+    Chart.defaults.font.size = 12;
+    Chart.defaults.color = '#6c757d';
+    Chart.defaults.responsive = true;
+    
     // Traffic Chart
     const ctx = document.getElementById('trafficChart').getContext('2d');
     const trafficChart = new Chart(ctx, {
@@ -267,8 +394,8 @@
             datasets: [{
                 label: 'Traffic (MB)',
                 data: {{ chart_data|tojson }},
-                fill: false,
-                backgroundColor: 'rgba(78, 115, 223, 0.5)',
+                fill: true,
+                backgroundColor: 'rgba(78, 115, 223, 0.1)',
                 borderColor: 'rgba(78, 115, 223, 1)',
                 pointBackgroundColor: 'rgba(78, 115, 223, 1)',
                 pointBorderColor: '#fff',
@@ -309,6 +436,24 @@
                         padding: 10
                     }
                 }
+            },
+            plugins: {
+                tooltip: {
+                    backgroundColor: "rgb(255, 255, 255)",
+                    bodyColor: "#858796",
+                    titleMarginBottom: 10,
+                    titleColor: '#6e707e',
+                    titleFont: {
+                        size: 14
+                    },
+                    borderColor: '#dddfeb',
+                    borderWidth: 1,
+                    caretPadding: 10,
+                    displayColors: false
+                },
+                legend: {
+                    display: false
+                }
             }
         }
     });
@@ -339,6 +484,12 @@
                     display: false
                 },
                 tooltip: {
+                    backgroundColor: "rgb(255, 255, 255)",
+                    bodyColor: "#858796",
+                    borderColor: '#dddfeb',
+                    borderWidth: 1,
+                    caretPadding: 10,
+                    displayColors: false,
                     callbacks: {
                         label: function(context) {
                             return `${context.label}: ${context.raw}%`;
@@ -350,7 +501,7 @@
         }
     });
 
-    // Set traffic trend based on chart data
+    // Update traffic trend indicators based on chart data
     function updateTrafficTrend() {
         const data = {{ chart_data|tojson }};
         if (data.length < 2) {
@@ -372,8 +523,9 @@
         const totalChanges = increases + decreases;
         if (totalChanges === 0) {
             document.getElementById('trafficTrend').textContent = 'Stable';
-            document.getElementById('trafficTrendProgress').innerHTML = 
-                '<div class="progress-bar bg-info" role="progressbar" style="width: 50%"></div>';
+            document.getElementById('trafficTrendIndicator').className = 'traffic-trend-indicator trend-neutral';
+            document.getElementById('trafficTrendProgress').style.width = '50%';
+            document.getElementById('trafficTrendProgress').className = 'progress-bar bg-info';
             return;
         }
         
@@ -381,20 +533,24 @@
         
         if (increasePercentage > 75) {
             document.getElementById('trafficTrend').textContent = 'Strong Growth';
-            document.getElementById('trafficTrendProgress').innerHTML = 
-                '<div class="progress-bar bg-success" role="progressbar" style="width: 90%"></div>';
+            document.getElementById('trafficTrendIndicator').className = 'traffic-trend-indicator trend-up';
+            document.getElementById('trafficTrendProgress').style.width = '90%';
+            document.getElementById('trafficTrendProgress').className = 'progress-bar bg-success';
         } else if (increasePercentage > 50) {
             document.getElementById('trafficTrend').textContent = 'Growing';
-            document.getElementById('trafficTrendProgress').innerHTML = 
-                '<div class="progress-bar bg-info" role="progressbar" style="width: 75%"></div>';
+            document.getElementById('trafficTrendIndicator').className = 'traffic-trend-indicator trend-up';
+            document.getElementById('trafficTrendProgress').style.width = '75%';
+            document.getElementById('trafficTrendProgress').className = 'progress-bar bg-success';
         } else if (increasePercentage > 25) {
             document.getElementById('trafficTrend').textContent = 'Declining';
-            document.getElementById('trafficTrendProgress').innerHTML = 
-                '<div class="progress-bar bg-warning" role="progressbar" style="width: 40%"></div>';
+            document.getElementById('trafficTrendIndicator').className = 'traffic-trend-indicator trend-down';
+            document.getElementById('trafficTrendProgress').style.width = '40%';
+            document.getElementById('trafficTrendProgress').className = 'progress-bar bg-warning';
         } else {
             document.getElementById('trafficTrend').textContent = 'Strong Decline';
-            document.getElementById('trafficTrendProgress').innerHTML = 
-                '<div class="progress-bar bg-danger" role="progressbar" style="width: 15%"></div>';
+            document.getElementById('trafficTrendIndicator').className = 'traffic-trend-indicator trend-down';
+            document.getElementById('trafficTrendProgress').style.width = '15%';
+            document.getElementById('trafficTrendProgress').className = 'progress-bar bg-danger';
         }
     }
     
@@ -402,8 +558,7 @@
     function setAverageResponseTime() {
         // In a real app, this would come from your analytics data
         const avgResponseTime = Math.floor(Math.random() * 100) + 50; // Random value between 50-150ms
-        document.getElementById('responseTimes').textContent = 
-            `Average response time: ${avgResponseTime}ms`;
+        document.getElementById('avgResponseTime').textContent = `${avgResponseTime}ms`;
     }
     
     // Realtime Chart Setup
@@ -442,6 +597,9 @@
             plugins: {
                 tooltip: {
                     enabled: false
+                },
+                legend: {
+                    display: false
                 }
             },
             interaction: {
@@ -481,17 +639,42 @@
         
         if (data.response_times && data.response_times.length > 0) {
             const avgResponseTime = data.response_times.reduce((a, b) => a + b, 0) / data.response_times.length;
-            document.getElementById('responseTimes').textContent = 
-                `Average response time: ${avgResponseTime.toFixed(2)}ms`;
+            document.getElementById('avgResponseTime').textContent = `${avgResponseTime.toFixed(2)}ms`;
         }
     }
     
-    // Change time period for analytics data
-    document.querySelectorAll('.period-option').forEach(option => {
+    // Period selector for analytics data
+    document.querySelectorAll('input[name="period"]').forEach(radio => {
+        radio.addEventListener('change', function() {
+            if (this.checked) {
+                fetchAnalyticsData(this.value);
+            }
+        });
+    });
+    
+    // Chart type toggle
+    document.querySelectorAll('.chart-type').forEach(option => {
         option.addEventListener('click', function(e) {
             e.preventDefault();
-            const period = this.dataset.period;
-            fetchAnalyticsData(period);
+            const chartType = this.dataset.type;
+            trafficChart.config.type = chartType;
+            trafficChart.update();
+        });
+    });
+    
+    // Metric toggle
+    document.querySelectorAll('.data-metric').forEach(option => {
+        option.addEventListener('click', function(e) {
+            e.preventDefault();
+            const metric = this.dataset.metric;
+            // In a real app, we would fetch different data based on the metric
+            // For demonstration, we just update the label
+            if (metric === 'bandwidth') {
+                trafficChart.data.datasets[0].label = 'Traffic (MB)';
+            } else if (metric === 'requests') {
+                trafficChart.data.datasets[0].label = 'Requests';
+            }
+            trafficChart.update();
         });
     });
     
