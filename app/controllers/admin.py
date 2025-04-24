@@ -1878,24 +1878,90 @@ def analytics_data():
 @admin_required
 def refresh_node_health():
     """API endpoint to refresh node health status"""
-    # In a real implementation, this would check each node's health
-    # For now, we'll return sample data
+    from app.services.nginx_service import get_node_stats
+    from app.services.node_inspection_service import check_node_connectivity
     
     nodes = Node.query.filter_by(is_active=True).all()
     nodes_data = []
+    
     for node in nodes:
-        import random
-        import datetime
-        node_data = {
-            "id": node.id,
-            "name": node.name,
-            "ip_address": node.ip_address,
-            "health_status": random.choice(["healthy", "unhealthy", "unreachable"]),
-            "cpu_load": random.randint(10, 95),
-            "memory_usage": random.randint(20, 90),
-            "last_check": datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M")
-        }
-        nodes_data.append(node_data)
+        try:
+            # Check if the node is reachable
+            is_reachable = check_node_connectivity(node)
+            
+            if is_reachable:
+                # Get real server stats if node is reachable
+                server_stats, _ = get_node_stats(node)
+                
+                # Extract CPU load from server stats
+                cpu_load = 0
+                if 'cpu_usage' in server_stats:
+                    # Extract percentage from string like "32%"
+                    cpu_str = server_stats.get('cpu_usage', '0%')
+                    cpu_load = int(cpu_str.strip('%').split()[0]) if '%' in cpu_str else 0
+                
+                # Extract memory usage from server stats
+                memory_usage = 0
+                if 'memory_usage' in server_stats:
+                    # Extract percentage from string like "4.2GB / 8GB (52%)"
+                    mem_str = server_stats.get('memory_usage', '0%')
+                    if '%' in mem_str:
+                        mem_percent = mem_str.split('(')[1].split(')')[0].strip('%') if '(' in mem_str else '0'
+                        memory_usage = int(mem_percent)
+                
+                # Determine health status based on CPU and memory
+                health_status = "healthy"
+                if cpu_load > 90 or memory_usage > 90:
+                    health_status = "unhealthy"
+                elif cpu_load > 75 or memory_usage > 75:
+                    health_status = "warning"
+                
+                node_data = {
+                    "id": node.id,
+                    "name": node.name,
+                    "ip_address": node.ip_address,
+                    "health_status": health_status,
+                    "cpu_load": cpu_load,
+                    "memory_usage": memory_usage,
+                    "last_check": datetime.utcnow().strftime("%Y-%m-%d %H:%M")
+                }
+            else:
+                # Node is unreachable
+                node_data = {
+                    "id": node.id,
+                    "name": node.name,
+                    "ip_address": node.ip_address,
+                    "health_status": "unreachable",
+                    "cpu_load": 0,
+                    "memory_usage": 0,
+                    "last_check": datetime.utcnow().strftime("%Y-%m-%d %H:%M")
+                }
+                
+            nodes_data.append(node_data)
+            
+        except Exception as e:
+            # Log error
+            from app.services.logger_service import log_activity
+            log_activity(
+                category='error',
+                action='check_node_health',
+                resource_type='node',
+                resource_id=node.id,
+                details=f"Error checking node health: {str(e)}"
+            )
+            
+            # Add node with error status
+            node_data = {
+                "id": node.id,
+                "name": node.name,
+                "ip_address": node.ip_address,
+                "health_status": "error",
+                "cpu_load": 0,
+                "memory_usage": 0,
+                "error": str(e),
+                "last_check": datetime.utcnow().strftime("%Y-%m-%d %H:%M")
+            }
+            nodes_data.append(node_data)
     
     return jsonify({"nodes": nodes_data})
 
@@ -2061,59 +2127,89 @@ def initiate_certificate_request():
 @admin_required
 def settings():
     """Admin settings page to manage system configurations"""
+    from flask import current_app
+    import os
     
-    # Import system settings model or service if available
-    # For now, we'll use mock data for the settings
-    
-    # Get application settings 
+    # Get application settings from config
     app_settings = {
-        'app_name': 'Reverse Proxy Manager',
-        'app_version': '1.0.0',
-        'debug_mode': False,
-        'maintenance_mode': False,
-        'allow_registration': True,
-        'max_upload_size': 50, # in MB
-        'session_timeout': 30, # in minutes
-        'log_retention_days': 30
+        'app_name': current_app.config.get('APP_NAME', 'Reverse Proxy Manager'),
+        'app_version': current_app.config.get('VERSION', '1.0.0'),
+        'debug_mode': current_app.config.get('DEBUG', False),
+        'maintenance_mode': current_app.config.get('MAINTENANCE_MODE', False),
+        'allow_registration': current_app.config.get('ALLOW_REGISTRATION', True),
+        'max_upload_size': current_app.config.get('MAX_UPLOAD_SIZE', 50),
+        'session_timeout': current_app.config.get('PERMANENT_SESSION_LIFETIME', 30) // 60,  # Convert seconds to minutes
+        'log_retention_days': current_app.config.get('LOG_RETENTION_DAYS', 30)
     }
     
     # Get email settings
     email_settings = {
-        'smtp_server': '',
-        'smtp_port': 587,
-        'smtp_username': '',
-        'smtp_from_address': '',
-        'enable_ssl': True,
-        'enable_notifications': False,
-        'notification_events': ['certificate_expiry', 'node_offline', 'failed_deployment']
+        'smtp_server': current_app.config.get('MAIL_SERVER', ''),
+        'smtp_port': current_app.config.get('MAIL_PORT', 587),
+        'smtp_username': current_app.config.get('MAIL_USERNAME', ''),
+        'smtp_from_address': current_app.config.get('MAIL_DEFAULT_SENDER', ''),
+        'enable_ssl': current_app.config.get('MAIL_USE_SSL', True),
+        'enable_notifications': current_app.config.get('MAIL_ENABLE_NOTIFICATIONS', False),
+        'notification_events': current_app.config.get('NOTIFICATION_EVENTS', ['certificate_expiry', 'node_offline', 'failed_deployment'])
     }
     
     # Get backup settings
     backup_settings = {
-        'backup_enabled': False,
-        'backup_frequency': 'daily',
-        'backup_retention': 7, # in days
-        'backup_destination': 'local',
-        'backup_path': '/var/backups/proxy-manager',
-        'include_certificates': True,
-        'include_logs': False
+        'backup_enabled': current_app.config.get('BACKUP_ENABLED', False),
+        'backup_frequency': current_app.config.get('BACKUP_FREQUENCY', 'daily'),
+        'backup_retention': current_app.config.get('BACKUP_RETENTION_DAYS', 7),
+        'backup_destination': current_app.config.get('BACKUP_DESTINATION', 'local'),
+        'backup_path': current_app.config.get('BACKUP_PATH', '/var/backups/proxy-manager'),
+        'include_certificates': current_app.config.get('BACKUP_INCLUDE_CERTS', True),
+        'include_logs': current_app.config.get('BACKUP_INCLUDE_LOGS', False)
     }
     
     # Get security settings
     security_settings = {
-        'failed_login_limit': 5,
-        'password_expiry_days': 90,
-        'enforce_password_complexity': True,
-        'two_factor_auth': False,
-        'allowed_ip_ranges': [],
-        'api_rate_limit': 100 # requests per minute
+        'failed_login_limit': current_app.config.get('FAILED_LOGIN_LIMIT', 5),
+        'password_expiry_days': current_app.config.get('PASSWORD_EXPIRY_DAYS', 90),
+        'enforce_password_complexity': current_app.config.get('ENFORCE_PASSWORD_COMPLEXITY', True),
+        'two_factor_auth': current_app.config.get('ENABLE_2FA', False),
+        'allowed_ip_ranges': current_app.config.get('ALLOWED_IP_RANGES', []),
+        'api_rate_limit': current_app.config.get('API_RATE_LIMIT', 100)
     }
     
-    # Get additional system info for the system tab
-    database_size = 24.5  # MB (mock value)
-    config_files_count = 42  # (mock value)
-    log_files_count = 156  # (mock value)
-    disk_usage = '128 MB'  # (mock value)
+    # Calculate real system statistics
+    try:
+        # Get database size
+        db_path = os.path.join(current_app.instance_path, 'app.db')
+        database_size = os.path.getsize(db_path) / (1024 * 1024) if os.path.exists(db_path) else 0  # Convert to MB
+        
+        # Count config files
+        nginx_configs_dir = os.path.join(current_app.root_path, '..', 'nginx_configs')
+        config_files_count = sum(1 for _ in os.listdir(nginx_configs_dir)) if os.path.exists(nginx_configs_dir) else 0
+        
+        # Count log entries
+        from app.models.models import DeploymentLog, SystemLog
+        deployment_log_count = DeploymentLog.query.count()
+        system_log_count = SystemLog.query.count()
+        log_files_count = deployment_log_count + system_log_count
+        
+        # Calculate total size of config files
+        config_files_size = 0
+        if os.path.exists(nginx_configs_dir):
+            for filename in os.listdir(nginx_configs_dir):
+                file_path = os.path.join(nginx_configs_dir, filename)
+                if os.path.isfile(file_path):
+                    config_files_size += os.path.getsize(file_path)
+        config_files_size = config_files_size / (1024 * 1024)  # Convert to MB
+        
+        # Calculate total disk usage
+        disk_usage = f"{database_size + config_files_size:.2f} MB"
+        
+    except Exception as e:
+        # If there's an error, use default values
+        import logging
+        logging.error(f"Error calculating system statistics: {str(e)}")
+        database_size = 0
+        config_files_count = 0
+        log_files_count = 0
+        disk_usage = "0 MB"
     
     if request.method == 'POST':
         # Process form data and update settings
@@ -2128,8 +2224,20 @@ def settings():
             app_settings['session_timeout'] = int(request.form.get('session_timeout', 30))
             app_settings['log_retention_days'] = int(request.form.get('log_retention_days', 30))
             
-            # Here would be code to save these settings to a database or config file
-            flash('Application settings updated successfully', 'success')
+            # Update config in database
+            try:
+                from app.models.models import SystemSetting
+                for key, value in app_settings.items():
+                    setting = SystemSetting.query.filter_by(key=f"app_{key}").first()
+                    if setting:
+                        setting.value = str(value)
+                    else:
+                        db.session.add(SystemSetting(key=f"app_{key}", value=str(value)))
+                db.session.commit()
+                flash('Application settings updated successfully', 'success')
+            except Exception as e:
+                db.session.rollback()
+                flash(f'Error saving application settings: {str(e)}', 'error')
         
         elif section == 'email':
             email_settings['smtp_server'] = request.form.get('smtp_server')
@@ -2140,16 +2248,37 @@ def settings():
             email_settings['enable_notifications'] = 'enable_notifications' in request.form
             email_settings['notification_events'] = request.form.getlist('notification_events')
             
-            # Save email settings
-            if request.form.get('test_email'):
-                # Test email configuration
-                try:
-                    # Here would be code to send a test email
-                    flash('Email test sent successfully', 'success')
-                except Exception as e:
-                    flash(f'Failed to send test email: {str(e)}', 'error')
-            else:
-                flash('Email settings updated successfully', 'success')
+            # Save email settings to database
+            try:
+                from app.models.models import SystemSetting
+                for key, value in email_settings.items():
+                    if isinstance(value, list):
+                        value = ','.join(value)
+                    setting = SystemSetting.query.filter_by(key=f"email_{key}").first()
+                    if setting:
+                        setting.value = str(value)
+                    else:
+                        db.session.add(SystemSetting(key=f"email_{key}", value=str(value)))
+                db.session.commit()
+                
+                if request.form.get('test_email'):
+                    # Test email configuration
+                    try:
+                        from flask_mail import Mail, Message
+                        mail = Mail(current_app)
+                        msg = Message("Test Email from Reverse Proxy Manager",
+                                    sender=email_settings['smtp_from_address'],
+                                    recipients=[current_user.email])
+                        msg.body = "This is a test email from your Reverse Proxy Manager instance."
+                        mail.send(msg)
+                        flash('Test email sent successfully', 'success')
+                    except Exception as e:
+                        flash(f'Failed to send test email: {str(e)}', 'error')
+                else:
+                    flash('Email settings updated successfully', 'success')
+            except Exception as e:
+                db.session.rollback()
+                flash(f'Error saving email settings: {str(e)}', 'error')
         
         elif section == 'backup':
             backup_settings['backup_enabled'] = 'backup_enabled' in request.form
@@ -2160,16 +2289,33 @@ def settings():
             backup_settings['include_certificates'] = 'include_certificates' in request.form
             backup_settings['include_logs'] = 'include_logs' in request.form
             
-            # Save backup settings
-            if request.form.get('run_backup_now'):
-                # Trigger an immediate backup
-                try:
-                    # Here would be code to start a backup
-                    flash('Backup started successfully', 'success')
-                except Exception as e:
-                    flash(f'Failed to start backup: {str(e)}', 'error')
-            else:
-                flash('Backup settings updated successfully', 'success')
+            # Save backup settings to database
+            try:
+                from app.models.models import SystemSetting
+                for key, value in backup_settings.items():
+                    setting = SystemSetting.query.filter_by(key=f"backup_{key}").first()
+                    if setting:
+                        setting.value = str(value)
+                    else:
+                        db.session.add(SystemSetting(key=f"backup_{key}", value=str(value)))
+                db.session.commit()
+                
+                if request.form.get('run_backup_now'):
+                    # Trigger an immediate backup
+                    try:
+                        from app.services.scheduled_task_service import run_backup
+                        success, message = run_backup()
+                        if success:
+                            flash('Backup started successfully', 'success')
+                        else:
+                            flash(f'Backup failed: {message}', 'error')
+                    except Exception as e:
+                        flash(f'Failed to start backup: {str(e)}', 'error')
+                else:
+                    flash('Backup settings updated successfully', 'success')
+            except Exception as e:
+                db.session.rollback()
+                flash(f'Error saving backup settings: {str(e)}', 'error')
         
         elif section == 'security':
             security_settings['failed_login_limit'] = int(request.form.get('failed_login_limit', 5))
@@ -2179,8 +2325,22 @@ def settings():
             security_settings['allowed_ip_ranges'] = [range.strip() for range in request.form.get('allowed_ip_ranges', '').split(',') if range.strip()]
             security_settings['api_rate_limit'] = int(request.form.get('api_rate_limit', 100))
             
-            # Save security settings
-            flash('Security settings updated successfully', 'success')
+            # Save security settings to database
+            try:
+                from app.models.models import SystemSetting
+                for key, value in security_settings.items():
+                    if isinstance(value, list):
+                        value = ','.join(value)
+                    setting = SystemSetting.query.filter_by(key=f"security_{key}").first()
+                    if setting:
+                        setting.value = str(value)
+                    else:
+                        db.session.add(SystemSetting(key=f"security_{key}", value=str(value)))
+                db.session.commit()
+                flash('Security settings updated successfully', 'success')
+            except Exception as e:
+                db.session.rollback()
+                flash(f'Error saving security settings: {str(e)}', 'error')
             
         elif section == 'database':
             # Handle database maintenance operations
@@ -2188,8 +2348,7 @@ def settings():
             
             if action == 'vacuum':
                 try:
-                    # Here would be code to vacuum the database
-                    # For SQLite: db.session.execute("VACUUM")
+                    # Perform vacuum operation
                     db.session.execute("VACUUM")
                     db.session.commit()
                     flash('Database vacuum operation completed successfully', 'success')
@@ -2198,8 +2357,7 @@ def settings():
                     
             elif action == 'reindex':
                 try:
-                    # Here would be code to reindex the database
-                    # For SQLite: db.session.execute("REINDEX")
+                    # Perform reindex operation
                     db.session.execute("REINDEX")
                     db.session.commit()
                     flash('Database reindex operation completed successfully', 'success')
@@ -2208,8 +2366,7 @@ def settings():
                     
             elif action == 'optimize':
                 try:
-                    # Here would be code to optimize the database
-                    # For SQLite: db.session.execute("PRAGMA optimize")
+                    # Perform optimize operation
                     db.session.execute("PRAGMA optimize")
                     db.session.commit()
                     flash('Database optimization completed successfully', 'success')
@@ -2220,11 +2377,10 @@ def settings():
             # Handle system data export
             try:
                 import json
-                import os
                 from datetime import datetime
                 
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                export_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'exports')
+                export_dir = os.path.join(current_app.root_path, '..', 'exports')
                 
                 # Create exports directory if it doesn't exist
                 os.makedirs(export_dir, exist_ok=True)
@@ -2235,13 +2391,10 @@ def settings():
                 
                 # Export config if selected
                 if 'export_config' in request.form:
-                    # Here would be code to export system configuration
-                    export_data['config'] = {
-                        'app_settings': app_settings,
-                        'email_settings': email_settings,
-                        'backup_settings': backup_settings,
-                        'security_settings': security_settings
-                    }
+                    # Export system configuration
+                    from app.models.models import SystemSetting
+                    settings = SystemSetting.query.all()
+                    export_data['config'] = {setting.key: setting.value for setting in settings}
                 
                 # Export sites data if selected
                 if 'export_sites' in request.form:
@@ -2271,34 +2424,6 @@ def settings():
                 
             except Exception as e:
                 flash(f'Export failed: {str(e)}', 'error')
-    
-    # Get actual system statistics when possible
-    try:
-        import os
-        import sqlite3
-        
-        # Get database size
-        db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'instance', 'app.db')
-        if os.path.exists(db_path):
-            database_size = os.path.getsize(db_path) / (1024 * 1024)  # Convert to MB
-        
-        # Count config files
-        nginx_configs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'nginx_configs')
-        if os.path.exists(nginx_configs_dir):
-            config_files_count = len([name for name in os.listdir(nginx_configs_dir) if os.path.isfile(os.path.join(nginx_configs_dir, name))])
-        
-        # Count log files
-        from app.models.models import DeploymentLog, SystemLog
-        deployment_log_count = DeploymentLog.query.count()
-        system_log_count = SystemLog.query.count()
-        log_files_count = deployment_log_count + system_log_count
-        
-        # Estimate disk usage
-        disk_usage = f"{database_size + (config_files_count * 0.01):.2f} MB"
-        
-    except Exception as e:
-        # If there's an error, just use the mock data
-        pass
     
     return render_template('admin/settings.html',
                           app_settings=app_settings,
