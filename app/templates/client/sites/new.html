@@ -727,8 +727,8 @@ location ~* \.(css|gif|ico|jpeg|jpg|js|png)$ {
                 event.preventDefault();
                 alert('Please select at least one deployment node');
                 
-                // Scroll to the nodes section
-                const deploymentSection = document.querySelector('h4.fw-semibold:contains("Deployment Nodes")');
+                // Scroll to the nodes section - fixing the invalid selector
+                const deploymentSection = document.querySelector('h4.fw-semibold[innerHTML*="Deployment Nodes"]');
                 if (deploymentSection) {
                     deploymentSection.scrollIntoView({
                         behavior: 'smooth',

@@ -9,11 +9,14 @@ A centralized proxy management system for distributed proxy nodes, providing rob
 
 ## Overview
 
-Reverse Proxy Manager is a comprehensive solution for managing multiple Nginx proxy nodes from a centralized interface. It simplifies deployment, configuration, and monitoring of proxy infrastructure at scale, making it ideal for content delivery networks, load balancing, and distributed web hosting environments.
+Reverse Proxy Manager is a comprehensive solution for managing multiple proxy nodes from a centralized interface. It simplifies deployment, configuration, and monitoring of proxy infrastructure at scale, making it ideal for content delivery networks, load balancing, and distributed web hosting environments.
+
+The system supports multiple reverse proxy types (Nginx, Caddy, and Traefik), allowing you to choose the right tool for each use case while managing everything from a single dashboard. This multi-proxy capability gives you flexibility to optimize for different requirements across your infrastructure.
 
 ## Features
 
 - **Centralized Management**: Control multiple proxy nodes from a single dashboard
+- **Multi-Proxy Support**: Mix and match Nginx, Caddy, and Traefik nodes in your infrastructure
 - **SSL Management**: Automated SSL certificate provisioning and renewal
 - **DNS Provider Integration**: Support for multiple DNS providers (CloudFlare, Route53, DigitalOcean, GoDaddy)  
 - **Web Application Firewall**: Built-in WAF for enhanced security with advanced configuration options
@@ -218,6 +221,60 @@ The application offers country-based access control at two levels:
 - Affects all sites on the node
 - Higher performance than Nginx-level filtering
 - Managed through the node's country blocking interface
+
+## Multi-Proxy System
+
+The Reverse Proxy Manager supports multiple reverse proxy types, giving you flexibility to choose the right tool for each scenario while managing everything from a single interface.
+
+### Supported Proxy Types
+
+Currently, the system supports three proxy types:
+
+1. **Nginx** - The default and most feature-rich option
+2. **Caddy** - A modern, automatic HTTPS web server
+3. **Traefik** - A dynamic, container-friendly reverse proxy and load balancer
+
+### Feature Comparison
+
+| Feature                   | Nginx                    | Caddy                    | Traefik                  |
+|---------------------------|--------------------------|--------------------------|--------------------------|
+| **Configuration Format**  | Text-based               | Text-based               | YAML/TOML                |
+| **Auto HTTPS**            | Manual (Let's Encrypt)   | Automatic                | With Let's Encrypt       |
+| **WAF Integration**       | ModSecurity              | Limited                  | Plugin-based             |
+| **Cache Control**         | Full control             | Basic                    | Plugin-based             |
+| **Rate Limiting**         | Built-in                 | Plugin                   | Plugin                   |
+| **GeoIP Filtering**       | Built-in                 | Built-in                 | Plugin                   |
+| **Websocket Support**     | Excellent                | Excellent                | Excellent                |
+| **Container Integration** | Manual                   | Basic                    | Excellent                |
+| **Dynamic Config**        | Reload required          | Automatic                | Automatic                |
+| **Memory Usage**          | Low                      | Moderate                 | Moderate                 |
+| **Community Support**     | Extensive                | Growing                  | Growing                  |
+| **Performance**           | Excellent                | Good                     | Good                     |
+
+### When to Use Each Proxy Type
+
+- **Nginx**: High-traffic production environments, complex routing requirements, when advanced WAF features are needed
+- **Caddy**: Quick deployments, environments where automatic HTTPS is valuable, when simplicity is preferred over fine-grained control
+- **Traefik**: Container orchestration environments, microservices architectures, dynamic cloud environments
+
+### Mixed Proxy Deployment Considerations
+
+When deploying sites to multiple node types:
+
+1. Some features may not be available across all proxy types
+2. WAF configurations may differ in implementation
+3. Caching behavior may vary
+4. Custom configurations may need to be proxy-specific
+
+The system attempts to translate configurations between proxy types when possible, but some advanced features may require proxy-specific configuration.
+
+### Best Practices
+
+1. Use the same proxy type for all nodes when possible
+2. Test deployments when using multiple proxy types
+3. Keep advanced features in separate configurations when using mixed proxy types
+4. Consider which features are critical when selecting proxy types
+5. Document any proxy-specific configurations for your sites
 
 ## Caching Configuration
 
