@@ -17,36 +17,39 @@ class ScheduledTaskService:
     _running = False
     _thread = None
     _tasks = {}
+    # Initialize lock for thread safety
+    _scheduler_lock = threading.Lock()
     
     @classmethod
     def initialize(cls):
         """Initialize the scheduled task service and register default tasks"""
-        if cls._running:
-            return False
+        with cls._scheduler_lock:
+            if cls._running:
+                return False
+                
+            # Register default tasks
+            cls.register_task(
+                'node_heartbeat', 
+                NodeDiscoveryService.run_heartbeat_check,
+                '*/5 * * * *'  # Every 5 minutes
+            )
             
-        # Register default tasks
-        cls.register_task(
-            'node_heartbeat', 
-            NodeDiscoveryService.run_heartbeat_check,
-            '*/5 * * * *'  # Every 5 minutes
-        )
-        
-        cls.register_task(
-            'ssl_certificates_check',
-            SSLCertificateService.certificate_health_check,
-            '0 */6 * * *'  # Every 6 hours
-        )
-        
-        # Auto-replace self-signed certificates with real ones if available
-        cls.register_task(
-            'replace_self_signed_certificates',
-            SSLCertificateService.auto_replace_self_signed_certificates,
-            '0 */12 * * *'  # Every 12 hours
-        )
-        
-        # Start the scheduler
-        cls.start()
-        return True
+            cls.register_task(
+                'ssl_certificates_check',
+                SSLCertificateService.certificate_health_check,
+                '0 */6 * * *'  # Every 6 hours
+            )
+            
+            # Auto-replace self-signed certificates with real ones if available
+            cls.register_task(
+                'replace_self_signed_certificates',
+                SSLCertificateService.auto_replace_self_signed_certificates,
+                '0 */12 * * *'  # Every 12 hours
+            )
+            
+            # Start the scheduler
+            cls.start()
+            return True
     
     @classmethod
     def register_task(cls, name, func, schedule_str, description=None):
@@ -144,6 +147,7 @@ class ScheduledTaskService:
     def _is_cron_format(schedule_str):
         """Check if a string is in cron format"""
         parts = schedule_str.split()
+        # A valid cron format should have exactly 5 parts
         return len(parts) == 5
     
     @staticmethod
@@ -153,34 +157,90 @@ class ScheduledTaskService:
         current_time = datetime.now()
         cron_parts = cron_str.split()
         
+        if len(cron_parts) != 5:
+            # Invalid cron format
+            logger.error(f"Invalid cron format: {cron_str}")
+            return
+        
         # Parse minute, hour, day, month, day of week
         minute_spec, hour_spec, day_spec, month_spec, dow_spec = cron_parts
         
-        if minute_spec != '*' and minute_spec.startswith('*/'):
-            # */5 format (every 5 minutes, etc.)
-            interval = int(minute_spec[2:])
-            if current_time.minute % interval != 0:
+        # Check minute
+        if minute_spec != '*':
+            if minute_spec.startswith('*/'):
+                # */5 format (every 5 minutes, etc.)
+                try:
+                    interval = int(minute_spec[2:])
+                    if current_time.minute % interval != 0:
+                        return
+                except (ValueError, IndexError):
+                    logger.error(f"Invalid minute interval in cron: {minute_spec}")
+                    return
+            else:
+                try:
+                    minute_values = [int(x) for x in minute_spec.split(',')]
+                    if current_time.minute not in minute_values:
+                        return
+                except (ValueError, IndexError):
+                    logger.error(f"Invalid minute values in cron: {minute_spec}")
+                    return
+        
+        # Check hour
+        if hour_spec != '*':
+            if hour_spec.startswith('*/'):
+                # */2 format (every 2 hours, etc.)
+                try:
+                    interval = int(hour_spec[2:])
+                    if current_time.hour % interval != 0:
+                        return
+                except (ValueError, IndexError):
+                    logger.error(f"Invalid hour interval in cron: {hour_spec}")
+                    return
+            else:
+                try:
+                    hour_values = [int(x) for x in hour_spec.split(',')]
+                    if current_time.hour not in hour_values:
+                        return
+                except (ValueError, IndexError):
+                    logger.error(f"Invalid hour values in cron: {hour_spec}")
+                    return
+        
+        # Check day of month
+        if day_spec != '*':
+            try:
+                day_values = [int(x) for x in day_spec.split(',')]
+                if current_time.day not in day_values:
+                    return
+            except (ValueError, IndexError):
+                logger.error(f"Invalid day values in cron: {day_spec}")
                 return
-        elif minute_spec != '*' and current_time.minute not in [int(x) for x in minute_spec.split(',')]:
-            return
-            
-        if hour_spec != '*' and hour_spec.startswith('*/'):
-            # */2 format (every 2 hours, etc.)
-            interval = int(hour_spec[2:])
-            if current_time.hour % interval != 0:
+        
+        # Check month
+        if month_spec != '*':
+            try:
+                month_values = [int(x) for x in month_spec.split(',')]
+                if current_time.month not in month_values:
+                    return
+            except (ValueError, IndexError):
+                logger.error(f"Invalid month values in cron: {month_spec}")
                 return
-        elif hour_spec != '*' and current_time.hour not in [int(x) for x in hour_spec.split(',')]:
-            return
-            
-        if day_spec != '*' and current_time.day not in [int(x) for x in day_spec.split(',')]:
-            return
-            
-        if month_spec != '*' and current_time.month not in [int(x) for x in month_spec.split(',')]:
-            return
-            
+        
+        # Check day of week (0 = Monday in datetime, but 0 = Sunday in cron)
+        if dow_spec != '*':
+            # Convert python's day of week (0 = Monday) to cron's (0 = Sunday)
+            python_dow = current_time.weekday()
+            cron_dow = (python_dow + 1) % 7
+            try:
+                dow_values = [int(x) for x in dow_spec.split(',')]
+                if cron_dow not in dow_values:
+                    return
+            except (ValueError, IndexError):
+                logger.error(f"Invalid day of week values in cron: {dow_spec}")
+                return
+        
         # If we get here, the cron schedule matches the current time
         ScheduledTaskService._execute_task_wrapper(func)
-        
+    
     @staticmethod
     def _monthly_check(func):
         """Check if a monthly schedule should run at the current time"""

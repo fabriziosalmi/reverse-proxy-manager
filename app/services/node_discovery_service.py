@@ -179,6 +179,7 @@ class NodeDiscoveryService:
             ssh_connection_successful = False
             connection_error = None
             start_time = time.time()
+            ssh_client = None
             
             try:
                 # Port connectivity check with timeout
@@ -257,16 +258,29 @@ class NodeDiscoveryService:
                                         node_result['disk_warning'] = True
                             
                             ssh_client.close()
+                            ssh_client = None
                             break
                             
                         except Exception as ssh_error:
                             connection_error = str(ssh_error)
                             if attempt < max_retries - 1:
                                 time.sleep(retry_delay)
+                            if ssh_client:
+                                ssh_client.close()
+                                ssh_client = None
                                 
             except Exception as e:
                 connection_error = str(e)
+                if ssh_client:
+                    ssh_client.close()
+                    ssh_client = None
                 
+            finally:
+                # Ensure ssh_client is closed in all cases
+                if ssh_client:
+                    ssh_client.close()
+                    ssh_client = None
+                    
             # Calculate response time
             response_time = time.time() - start_time
             node_result['response_time'] = round(response_time * 1000)  # in milliseconds

@@ -1428,82 +1428,248 @@ fi
     @staticmethod
     def auto_replace_self_signed_certificates():
         """
-        Check for self-signed certificates that can be replaced with real Let's Encrypt certificates
+        Automatically replace self-signed certificates with Let's Encrypt certificates
+        if they already exist on the node
         
         Returns:
-            dict: Results of automatic replacement
+            dict: Results of the replacement operation
         """
-        # Get all self-signed certificates from database
+        # Get all self-signed certificates
         self_signed_certs = SSLCertificate.query.filter_by(is_self_signed=True).all()
+        
+        results = {
+            'self_signed_count': len(self_signed_certs),
+            'replaced_count': 0,
+            'failed_count': 0,
+            'sites_checked': 0,
+            'sites_updated': 0,
+            'failed_replacements': [],
+            'sites': []
+        }
         
         replaced_count = 0
         failed_replacements = []
         
-        for cert in self_signed_certs:
-            site = Site.query.get(cert.site_id)
-            node = Node.query.get(cert.node_id)
-            
-            if not site or not node:
-                continue
-            
-            # Check if real Let's Encrypt certificate exists
-            try:
-                ssh_client = paramiko.SSHClient()
-                ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                
-                if node.ssh_key_path:
-                    ssh_client.connect(
-                        hostname=node.ip_address,
-                        port=node.ssh_port,
-                        username=node.ssh_user,
-                        key_filename=node.ssh_key_path,
-                        timeout=5
-                    )
-                else:
-                    ssh_client.connect(
-                        hostname=node.ip_address,
-                        port=node.ssh_port,
-                        username=node.ssh_user,
-                        password=node.ssh_password,
-                        timeout=5
-                    )
-                
-                le_cert_path = f"/etc/letsencrypt/live/{site.domain}/fullchain.pem"
-                
-                # Check if real certificate exists (not a symlink)
-                stdin, stdout, stderr = ssh_client.exec_command(f"[ -f {le_cert_path} -a ! -L {le_cert_path} ] && echo 'real' || echo 'not real'")
-                is_real_cert = stdout.read().decode('utf-8').strip() == 'real'
-                
-                ssh_client.close()
-                
-                if is_real_cert:
-                    # Replace self-signed with real certificate
-                    result = SSLCertificateService.replace_self_signed_with_real_certificate(cert.site_id, cert.node_id)
-                    
-                    if result.get("success", False):
-                        replaced_count += 1
-                    else:
-                        failed_replacements.append({
-                            "site_id": cert.site_id,
-                            "node_id": cert.node_id,
-                            "domain": site.domain,
-                            "error": result.get("message", "Unknown error")
-                        })
-            
-            except Exception as e:
-                failed_replacements.append({
-                    "site_id": cert.site_id,
-                    "node_id": cert.node_id,
-                    "domain": site.domain,
-                    "error": str(e)
-                })
+        # Get unique sites with self-signed certificates
+        site_ids = set([cert.site_id for cert in self_signed_certs])
+        sites = Site.query.filter(Site.id.in_(site_ids)).all()
         
-        return {
-            "self_signed_count": len(self_signed_certs),
-            "replaced_count": replaced_count,
-            "failed_count": len(failed_replacements),
-            "failed_replacements": failed_replacements
-        }
+        for site in sites:
+            site_result = {
+                'site_id': site.id,
+                'domain': site.domain,
+                'nodes': [],
+                'status': 'skipped'
+            }
+            
+            # Check each node for this site
+            site_nodes = SiteNode.query.filter_by(site_id=site.id).all()
+            for site_node in site_nodes:
+                node = Node.query.get(site_node.node_id)
+                if not node or not node.is_active:
+                    continue
+                    
+                # Check if Let's Encrypt certificate exists
+                ssh_client = None
+                try:
+                    import paramiko
+                    
+                    ssh_client = paramiko.SSHClient()
+                    ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                    
+                    # Connect to node
+                    if node.ssh_key_path:
+                        ssh_client.connect(
+                            hostname=node.ip_address,
+                            port=node.ssh_port,
+                            username=node.ssh_user,
+                            key_filename=node.ssh_key_path,
+                            timeout=10
+                        )
+                    else:
+                        ssh_client.connect(
+                            hostname=node.ip_address,
+                            port=node.ssh_port,
+                            username=node.ssh_user,
+                            password=node.ssh_password,
+                            timeout=10
+                        )
+                    
+                    # Check if Let's Encrypt certificate exists
+                    le_cert_path = f"/etc/letsencrypt/live/{site.domain}/fullchain.pem"
+                    le_key_path = f"/etc/letsencrypt/live/{site.domain}/privkey.pem"
+                    
+                    stdin, stdout, stderr = ssh_client.exec_command(
+                        f"test -f {le_cert_path} && test -f {le_key_path} && echo 'exists' || echo 'not found'"
+                    )
+                    le_exists = stdout.read().decode('utf-8').strip() == 'exists'
+                    
+                    if not le_exists:
+                        # Also check for wildcard certificates
+                        base_domain = '.'.join(site.domain.split('.')[-2:])  # e.g., example.com from sub.example.com
+                        le_cert_path_wildcard = f"/etc/letsencrypt/live/{base_domain}/fullchain.pem"
+                        
+                        stdin, stdout, stderr = ssh_client.exec_command(
+                            f"test -f {le_cert_path_wildcard} && echo 'exists' || echo 'not found'"
+                        )
+                        wildcard_exists = stdout.read().decode('utf-8').strip() == 'exists'
+                        
+                        if wildcard_exists:
+                            le_exists = True
+                            le_cert_path = le_cert_path_wildcard
+                            le_key_path = le_cert_path_wildcard.replace('fullchain.pem', 'privkey.pem')
+                    
+                    # Find the Nginx configuration file for this site
+                    nginx_site_conf = f"{node.nginx_config_path}/sites/{site.domain}.conf"
+                    stdin, stdout, stderr = ssh_client.exec_command(
+                        f"test -f {nginx_site_conf} && echo 'exists' || echo 'not found'"
+                    )
+                    conf_exists = stdout.read().decode('utf-8').strip() == 'exists'
+                    
+                    if not conf_exists:
+                        # Try other common locations
+                        potential_paths = [
+                            f"{node.nginx_config_path}/{site.domain}.conf",
+                            f"{node.nginx_config_path}/sites-enabled/{site.domain}.conf",
+                            f"{node.nginx_config_path}/conf.d/{site.domain}.conf"
+                        ]
+                        
+                        for path in potential_paths:
+                            stdin, stdout, stderr = ssh_client.exec_command(
+                                f"test -f {path} && echo 'exists' || echo 'not found'"
+                            )
+                            if stdout.read().decode('utf-8').strip() == 'exists':
+                                nginx_site_conf = path
+                                conf_exists = True
+                                break
+                    
+                    if le_exists and conf_exists:
+                        # Backup the current config
+                        backup_path = f"{nginx_site_conf}.bak-{int(time.time())}"
+                        stdin, stdout, stderr = ssh_client.exec_command(f"cp {nginx_site_conf} {backup_path}")
+                        if stdout.channel.recv_exit_status() != 0:
+                            raise Exception(f"Failed to create backup: {stderr.read().decode('utf-8')}")
+                            
+                        # Get current config
+                        stdin, stdout, stderr = ssh_client.exec_command(f"cat {nginx_site_conf}")
+                        current_config = stdout.read().decode('utf-8')
+                        
+                        # Check if it's using self-signed certs
+                        ssl_cert_line = None
+                        ssl_key_line = None
+                        
+                        for line in current_config.split('\n'):
+                            if 'ssl_certificate ' in line and 'self-signed' in line:
+                                ssl_cert_line = line.strip()
+                            if 'ssl_certificate_key ' in line and 'self-signed' in line:
+                                ssl_key_line = line.strip()
+                        
+                        if ssl_cert_line and ssl_key_line:
+                            # Replace cert paths
+                            new_config = current_config.replace(
+                                ssl_cert_line,
+                                f"    ssl_certificate {le_cert_path};"
+                            ).replace(
+                                ssl_key_line,
+                                f"    ssl_certificate_key {le_key_path};"
+                            )
+                            
+                            # Write updated config
+                            stdin, stdout, stderr = ssh_client.exec_command(f"cat > {nginx_site_conf} << 'EOF'\n{new_config}\nEOF")
+                            if stdout.channel.recv_exit_status() != 0:
+                                raise Exception(f"Failed to update config: {stderr.read().decode('utf-8')}")
+                                
+                            # Test the Nginx config
+                            stdin, stdout, stderr = ssh_client.exec_command("nginx -t")
+                            nginx_test = stdout.read().decode('utf-8') + stderr.read().decode('utf-8')
+                            
+                            if 'test is successful' in nginx_test or 'test successful' in nginx_test:
+                                # Reload Nginx
+                                stdin, stdout, stderr = ssh_client.exec_command(node.nginx_reload_command)
+                                if stdout.channel.recv_exit_status() == 0:
+                                    node_result = {
+                                        'node_id': node.id,
+                                        'node_name': node.name,
+                                        'status': 'replaced',
+                                        'from': ssl_cert_line,
+                                        'to': le_cert_path
+                                    }
+                                    site_result['nodes'].append(node_result)
+                                    site_result['status'] = 'replaced'
+                                    results['replaced_count'] += 1
+                                else:
+                                    # Failed to reload, restore backup
+                                    stdin, stdout, stderr = ssh_client.exec_command(f"cp {backup_path} {nginx_site_conf}")
+                                    error = stderr.read().decode('utf-8')
+                                    node_result = {
+                                        'node_id': node.id,
+                                        'node_name': node.name,
+                                        'status': 'failed',
+                                        'error': f"Nginx reload failed: {error}",
+                                        'action': 'restored backup'
+                                    }
+                                    site_result['nodes'].append(node_result)
+                                    site_result['status'] = 'failed'
+                                    results['failed_count'] += 1
+                            else:
+                                # Config test failed, restore backup
+                                stdin, stdout, stderr = ssh_client.exec_command(f"cp {backup_path} {nginx_site_conf}")
+                                error = nginx_test
+                                node_result = {
+                                    'node_id': node.id,
+                                    'node_name': node.name,
+                                    'status': 'failed',
+                                    'error': f"Nginx config test failed: {error}",
+                                    'action': 'restored backup'
+                                }
+                                site_result['nodes'].append(node_result)
+                                site_result['status'] = 'failed'
+                                results['failed_count'] += 1
+                        else:
+                            # No self-signed cert detected in config
+                            node_result = {
+                                'node_id': node.id,
+                                'node_name': node.name,
+                                'status': 'skipped',
+                                'reason': 'No self-signed certificate found in Nginx config'
+                            }
+                            site_result['nodes'].append(node_result)
+                    else:
+                        reason = []
+                        if not le_exists:
+                            reason.append("No Let's Encrypt certificate found")
+                        if not conf_exists:
+                            reason.append("No Nginx configuration found")
+                            
+                        node_result = {
+                            'node_id': node.id,
+                            'node_name': node.name,
+                            'status': 'skipped',
+                            'reason': ', '.join(reason)
+                        }
+                        site_result['nodes'].append(node_result)
+                    
+                except Exception as e:
+                    node_result = {
+                        'node_id': node.id,
+                        'node_name': node.name,
+                        'status': 'error',
+                        'error': str(e)
+                    }
+                    site_result['nodes'].append(node_result)
+                    site_result['status'] = 'failed'
+                    results['failed_count'] += 1
+                finally:
+                    # Ensure the SSH client is properly closed
+                    if ssh_client:
+                        ssh_client.close()
+            
+            results['sites'].append(site_result)
+            if site_result['status'] == 'replaced':
+                results['sites_updated'] += 1
+            results['sites_checked'] += 1
+        
+        return results
     
     @staticmethod
     def get_recommended_node(site_id):
@@ -2219,6 +2385,7 @@ subjectAltName = DNS:{domain}, DNS:www.{domain}
                     continue
                     
                 # Check if Let's Encrypt certificate exists
+                ssh_client = None
                 try:
                     import paramiko
                     
@@ -2409,6 +2576,10 @@ subjectAltName = DNS:{domain}, DNS:www.{domain}
                     site_result['nodes'].append(node_result)
                     site_result['status'] = 'failed'
                     results['failed'] += 1
+                finally:
+                    # Ensure the SSH client is properly closed
+                    if ssh_client:
+                        ssh_client.close()
             
             results['sites'].append(site_result)
         
@@ -2949,35 +3120,33 @@ nginx -t && systemctl reload nginx || echo "Nginx reload failed"
     @staticmethod
     def auto_replace_self_signed_certificates():
         """
-        Automatically replace self-signed certificates with Let's Encrypt certificates if available
-        This is meant to be run as a scheduled task
+        Automatically replace self-signed certificates with Let's Encrypt certificates
+        if they already exist on the node
         
         Returns:
             dict: Results of the replacement operation
         """
-        from app.models.models import Site, Node, SiteNode
+        # Get all self-signed certificates
+        self_signed_certs = SSLCertificate.query.filter_by(is_self_signed=True).all()
         
         results = {
-            'checked': 0,
-            'replaced': 0,
-            'failed': 0,
+            'self_signed_count': len(self_signed_certs),
+            'replaced_count': 0,
+            'failed_count': 0,
+            'sites_checked': 0,
+            'sites_updated': 0,
+            'failed_replacements': [],
             'sites': []
         }
         
-        # Get all sites with self-signed certificates
-        health_check = SSLCertificateService.certificate_health_check()
-        self_signed_sites = set()
+        replaced_count = 0
+        failed_replacements = []
         
-        for site_info in health_check.get('self_signed', []):
-            self_signed_sites.add(site_info.get('site_id'))
+        # Get unique sites with self-signed certificates
+        site_ids = set([cert.site_id for cert in self_signed_certs])
+        sites = Site.query.filter(Site.id.in_(site_ids)).all()
         
-        # For each site with self-signed certs, check if we can find a Let's Encrypt cert
-        for site_id in self_signed_sites:
-            site = Site.query.get(site_id)
-            if not site:
-                continue
-                
-            results['checked'] += 1
+        for site in sites:
             site_result = {
                 'site_id': site.id,
                 'domain': site.domain,
@@ -2993,6 +3162,7 @@ nginx -t && systemctl reload nginx || echo "Nginx reload failed"
                     continue
                     
                 # Check if Let's Encrypt certificate exists
+                ssh_client = None
                 try:
                     import paramiko
                     
@@ -3017,7 +3187,7 @@ nginx -t && systemctl reload nginx || echo "Nginx reload failed"
                             timeout=10
                         )
                     
-                    # Check for Let's Encrypt certificate
+                    # Check if Let's Encrypt certificate exists
                     le_cert_path = f"/etc/letsencrypt/live/{site.domain}/fullchain.pem"
                     le_key_path = f"/etc/letsencrypt/live/{site.domain}/privkey.pem"
                     
@@ -3118,7 +3288,7 @@ nginx -t && systemctl reload nginx || echo "Nginx reload failed"
                                     }
                                     site_result['nodes'].append(node_result)
                                     site_result['status'] = 'replaced'
-                                    results['replaced'] += 1
+                                    results['replaced_count'] += 1
                                 else:
                                     # Failed to reload, restore backup
                                     stdin, stdout, stderr = ssh_client.exec_command(f"cp {backup_path} {nginx_site_conf}")
@@ -3132,7 +3302,7 @@ nginx -t && systemctl reload nginx || echo "Nginx reload failed"
                                     }
                                     site_result['nodes'].append(node_result)
                                     site_result['status'] = 'failed'
-                                    results['failed'] += 1
+                                    results['failed_count'] += 1
                             else:
                                 # Config test failed, restore backup
                                 stdin, stdout, stderr = ssh_client.exec_command(f"cp {backup_path} {nginx_site_conf}")
@@ -3146,7 +3316,7 @@ nginx -t && systemctl reload nginx || echo "Nginx reload failed"
                                 }
                                 site_result['nodes'].append(node_result)
                                 site_result['status'] = 'failed'
-                                results['failed'] += 1
+                                results['failed_count'] += 1
                         else:
                             # No self-signed cert detected in config
                             node_result = {
@@ -3170,9 +3340,7 @@ nginx -t && systemctl reload nginx || echo "Nginx reload failed"
                             'reason': ', '.join(reason)
                         }
                         site_result['nodes'].append(node_result)
-                    
-                    ssh_client.close()
-                    
+                
                 except Exception as e:
                     node_result = {
                         'node_id': node.id,
@@ -3182,15 +3350,15 @@ nginx -t && systemctl reload nginx || echo "Nginx reload failed"
                     }
                     site_result['nodes'].append(node_result)
                     site_result['status'] = 'failed'
-                    results['failed'] += 1
-            
-            results['sites'].append(site_result)
+                    results['failed_count'] += 1
+                finally:
+                    # Ensure the SSH client is properly closed
+                    if ssh_client:
+                        ssh_client.close()
         
-        # Log results
-        log_activity(
-            'info',
-            f"Auto-replace self-signed certificates completed: "
-            f"{results['replaced']} replaced, {results['failed']} failed out of {results['checked']} sites"
-        )
-        
+        results['sites'].append(site_result)
+        if site_result['status'] == 'replaced':
+            results['sites_updated'] += 1
+        results['sites_checked'] += 1
+    
         return results

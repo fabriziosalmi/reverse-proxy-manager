@@ -4,6 +4,8 @@ import tempfile
 import paramiko
 import socket  # Add missing socket import
 import time    # Add missing time import
+import ssl     # Add SSL module for certificate verification
+from datetime import datetime  # Add for date parsing
 from app.models.models import db, Node, DeploymentLog
 from app.services.logger_service import log_activity
 
@@ -40,7 +42,7 @@ class NginxValidationService:
                 
             # Check if the line is missing a semicolon
             if not line_stripped.endswith(';'):
-                errors.append(f"Line {i+1} may be missing a semicolon: {line_stripped}")
+                errors.append(f"Line {i+1} may be missing a semolon: {line_stripped}")
         
         # Check for common directive issues
         location_pattern = re.compile(r'location\s+([^{]+)\s*{')
@@ -900,8 +902,13 @@ http {
             san_match = re.search(r'DNS:(.*)', cert_info)
             if san_match:
                 # Extract all DNS entries from SAN
-                domains = [d.strip() for d in san_match.group(1).split(',') if d.strip().startswith('DNS:')]
-                domains = [d.replace('DNS:', '') for d in domains]
+                all_sans = cert_info.split('DNS:')
+                # Skip the first element as it's before the first DNS: occurrence
+                for san in all_sans[1:]:
+                    # Extract the domain name part before any comma or end of line
+                    domain_part = san.split(',')[0].strip()
+                    if domain_part:
+                        domains.append(domain_part)
             
             return {
                 "certificate_path": cert_path,
