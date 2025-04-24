@@ -777,6 +777,20 @@ def deploy_to_node(site_id, node_id, nginx_config, test_only=False):
     if not site or not node:
         raise ValueError("Site or node not found")
     
+    # Handle containerized nodes
+    if node.is_container_node:
+        from app.services.container_service import ContainerService
+        if test_only:
+            return ContainerService.deploy_to_container(site_id, node_id, nginx_config, test_only=True)
+        else:
+            return ContainerService.deploy_to_container(site_id, node_id, nginx_config)
+    
+    # Create a backup of the current configuration before deploying
+    from app.services.config_rollback_service import ConfigRollbackService
+    backup_path = None
+    if not test_only:
+        backup_path = ConfigRollbackService.create_backup_config(site_id, node_id)
+    
     # Validate the configuration first
     from app.services.nginx_validation_service import NginxValidationService
     
@@ -1082,7 +1096,7 @@ echo "success"
                 # Return success with warnings
                 return True
             else:
-                # For other errors, log and raise exception
+                # For other errors, log and try to restore from backup if available
                 log = DeploymentLog(
                     site_id=site_id,
                     node_id=node_id,
@@ -1092,7 +1106,33 @@ echo "success"
                 )
                 db.session.add(log)
                 db.session.commit()
-                raise ValueError(f"Failed to reload nginx: {error}")
+                
+                # Try to restore from backup
+                error_message = f"Failed to reload nginx: {error}"
+                if backup_path:
+                    # Try to trigger an automatic rollback
+                    from app.services.config_rollback_service import ConfigRollbackService
+                    try:
+                        # Get current user
+                        try:
+                            from flask_login import current_user
+                            user_id = current_user.id if current_user and current_user.is_authenticated else None
+                        except:
+                            user_id = None
+                            
+                        rollback_result = ConfigRollbackService.auto_rollback_on_failure(site_id, node_id, error_message, user_id)
+                        if rollback_result['success']:
+                            # Rollback succeeded, raise an error with rollback info
+                            raise ValueError(f"{error_message}\nAutomatic rollback was performed successfully.")
+                        else:
+                            # Rollback failed, include this info in the error
+                            raise ValueError(f"{error_message}\nAutomatic rollback was attempted but failed: {rollback_result['message']}")
+                    except Exception as rollback_error:
+                        # If the rollback process itself fails, just report the original error
+                        raise ValueError(f"{error_message}\nAutomatic rollback failed: {str(rollback_error)}")
+                else:
+                    # No backup available, just raise the original error
+                    raise ValueError(error_message)
         
         # Update or create the site_node relationship
         site_node = SiteNode.query.filter_by(site_id=site_id, node_id=node_id).first()
@@ -1150,8 +1190,32 @@ echo "success"
         db.session.add(log)
         db.session.commit()
         
-        # Re-raise the exception
-        raise
+        # Try to restore from backup if available
+        if backup_path:
+            # Try to trigger an automatic rollback
+            from app.services.config_rollback_service import ConfigRollbackService
+            try:
+                # Get current user
+                try:
+                    from flask_login import current_user
+                    user_id = current_user.id if current_user and current_user.is_authenticated else None
+                except:
+                    user_id = None
+                    
+                log_activity('info', f"Attempting automatic rollback for {site.domain} on {node.name} after deployment error", 'site', site_id)
+                rollback_result = ConfigRollbackService.auto_rollback_on_failure(site_id, node_id, str(e), user_id)
+                if rollback_result['success']:
+                    # Rollback succeeded, raise an error with rollback info
+                    raise ValueError(f"Deployment error: {str(e)}\nAutomatic rollback was performed successfully.")
+                else:
+                    # Rollback failed, include this info in the error
+                    raise ValueError(f"Deployment error: {str(e)}\nAutomatic rollback was attempted but failed: {rollback_result['message']}")
+            except Exception as rollback_error:
+                # If the rollback process itself fails, just report the original error
+                raise ValueError(f"Deployment error: {str(e)}\nAutomatic rollback failed: {str(rollback_error)}")
+        else:
+            # No backup available, just re-raise the original exception
+            raise
     
     finally:
         # Clean up resources to prevent leaks

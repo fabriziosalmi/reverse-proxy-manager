@@ -104,6 +104,21 @@ class Node(db.Model):
     nginx_reload_command = db.Column(db.String(256), default='sudo systemctl reload nginx')
     detected_nginx_path = db.Column(db.String(256), nullable=True)  # Store detected nginx path
     
+    # Container-related fields
+    is_container_node = db.Column(db.Boolean, default=False)  # Whether this node is a container
+    container_connection_type = db.Column(db.String(10), default='socket')  # socket, tcp, ssh
+    container_port = db.Column(db.Integer, default=2375)  # Docker daemon port
+    container_name = db.Column(db.String(64), nullable=True)  # Name of the container
+    container_image = db.Column(db.String(256), default='nginx:latest')  # Docker image
+    container_id = db.Column(db.String(64), nullable=True)  # Docker container ID
+    container_http_port = db.Column(db.Integer, default=80)  # HTTP port mapping
+    container_https_port = db.Column(db.Integer, default=443)  # HTTPS port mapping
+    container_config_path = db.Column(db.String(256), default='/var/nginx/conf.d')  # Local path to config
+    container_certs_path = db.Column(db.String(256), default='/var/nginx/certs')  # Local path to certs
+    container_webroot_path = db.Column(db.String(256), default='/var/nginx/webroot')  # Local path to webroot
+    container_cache_path = db.Column(db.String(256), default='/var/nginx/cache')  # Local path to cache
+    container_timezone = db.Column(db.String(64), default='UTC')  # Container timezone
+    
     # Relationships
     site_nodes = db.relationship('SiteNode', backref='node', lazy='dynamic')
     
