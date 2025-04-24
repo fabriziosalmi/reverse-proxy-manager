@@ -2341,7 +2341,9 @@ def settings():
                     if setting:
                         setting.value = str(value)
                     else:
-                        db.session.add(SystemSetting(key=f"security_{key}", value=str(value)))
+                        # Create new setting if it doesn't exist
+                        new_setting = SystemSetting(key=f"security_{key}", value=str(value))
+                        db.session.add(new_setting)
                 db.session.commit()
                 flash('Security settings updated successfully', 'success')
             except Exception as e:
