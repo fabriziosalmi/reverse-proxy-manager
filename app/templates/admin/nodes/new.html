@@ -152,6 +152,7 @@
                     <p class="text-muted mb-4">Add a new server node to your proxy infrastructure. The node requires SSH access for configuration management.</p>
 
                     <form method="POST" action="{{ url_for('admin.new_node') }}" id="addNodeForm">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <!-- Basic Information Section -->
                         <div class="form-section">
                             <h4 class="form-section-title">
