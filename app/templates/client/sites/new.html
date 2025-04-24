@@ -2,6 +2,49 @@
 
 {% block title %}Add New Site - Reverse Proxy Manager{% endblock %}
 
+{% block head_extra %}
+<style>
+    .template-card {
+        transition: all 0.2s ease;
+        cursor: pointer;
+        border: 2px solid transparent;
+        height: 100%;
+        position: relative;
+    }
+    
+    .template-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.1);
+    }
+    
+    .template-card.selected {
+        border-color: var(--bs-primary);
+        background-color: var(--bs-primary-bg-subtle);
+    }
+    
+    .template-card .card-body {
+        padding: 1.25rem;
+    }
+    
+    .template-logo {
+        font-size: 2rem;
+        width: 48px;
+        height: 48px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 8px;
+        margin-bottom: 1rem;
+    }
+    
+    .template-radio {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+    }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="container py-4">
     <div class="row mb-4">
@@ -16,9 +59,105 @@
         </div>
     </div>
 
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-primary text-white">
+            <h2 class="h5 mb-0">Choose a Template</h2>
+        </div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-3">
+                    <div class="card template-card {% if not template or template == 'standard' %}selected{% endif %}" data-template="standard">
+                        <div class="card-body text-center">
+                            <input type="radio" name="template_select" class="template-radio" value="standard" {% if not template or template == 'standard' %}checked{% endif %}>
+                            <div class="template-logo bg-light mx-auto">
+                                <i class="fas fa-globe text-primary"></i>
+                            </div>
+                            <h5 class="mb-2">Standard</h5>
+                            <p class="text-muted small mb-0">Generic website with standard configuration</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-md-3">
+                    <div class="card template-card {% if template == 'wordpress' %}selected{% endif %}" data-template="wordpress">
+                        <div class="card-body text-center">
+                            <input type="radio" name="template_select" class="template-radio" value="wordpress" {% if template == 'wordpress' %}checked{% endif %}>
+                            <div class="template-logo bg-primary-subtle mx-auto">
+                                <i class="fab fa-wordpress text-primary"></i>
+                            </div>
+                            <h5 class="mb-2">WordPress</h5>
+                            <p class="text-muted small mb-0">Optimized for WordPress sites with proper caching rules</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-md-3">
+                    <div class="card template-card {% if template == 'nodejs' %}selected{% endif %}" data-template="nodejs">
+                        <div class="card-body text-center">
+                            <input type="radio" name="template_select" class="template-radio" value="nodejs" {% if template == 'nodejs' %}checked{% endif %}>
+                            <div class="template-logo bg-success-subtle mx-auto">
+                                <i class="fab fa-node-js text-success"></i>
+                            </div>
+                            <h5 class="mb-2">Node.js</h5>
+                            <p class="text-muted small mb-0">Configured for Node.js applications with websocket support</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-md-3">
+                    <div class="card template-card {% if template == 'laravel' %}selected{% endif %}" data-template="laravel">
+                        <div class="card-body text-center">
+                            <input type="radio" name="template_select" class="template-radio" value="laravel" {% if template == 'laravel' %}checked{% endif %}>
+                            <div class="template-logo bg-danger-subtle mx-auto">
+                                <i class="fab fa-laravel text-danger"></i>
+                            </div>
+                            <h5 class="mb-2">Laravel</h5>
+                            <p class="text-muted small mb-0">Optimized for Laravel PHP applications</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-md-3">
+                    <div class="card template-card {% if template == 'drupal' %}selected{% endif %}" data-template="drupal">
+                        <div class="card-body text-center">
+                            <input type="radio" name="template_select" class="template-radio" value="drupal" {% if template == 'drupal' %}checked{% endif %}>
+                            <div class="template-logo bg-info-subtle mx-auto">
+                                <i class="fab fa-drupal text-info"></i>
+                            </div>
+                            <h5 class="mb-2">Drupal</h5>
+                            <p class="text-muted small mb-0">Configured for Drupal CMS with performance optimizations</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-md-3">
+                    <div class="card template-card {% if template == 'static' %}selected{% endif %}" data-template="static">
+                        <div class="card-body text-center">
+                            <input type="radio" name="template_select" class="template-radio" value="static" {% if template == 'static' %}checked{% endif %}>
+                            <div class="template-logo bg-warning-subtle mx-auto">
+                                <i class="fas fa-file-code text-warning"></i>
+                            </div>
+                            <h5 class="mb-2">Static Site</h5>
+                            <p class="text-muted small mb-0">Optimized for static websites with aggressive caching</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="d-flex justify-content-end mt-3">
+                <button id="applyTemplateBtn" class="btn btn-primary">
+                    <i class="fas fa-check-circle me-1"></i> Apply Template
+                </button>
+            </div>
+        </div>
+    </div>
+
     <div class="card shadow-sm">
         <div class="card-body p-4">
-            <form method="POST" action="{{ url_for('client.new_site') }}{% if template %}?template={{ template }}{% endif %}">
+            <form method="POST" action="{{ url_for('client.new_site') }}{% if template %}?template={{ template }}{% endif %}" id="siteForm">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="template" id="templateInput" value="{{ template|default('standard') }}">
+                
                 <!-- Basic Information -->
                 <div class="mb-4">
                     <h4 class="fw-semibold mb-3">Basic Information</h4>
@@ -130,6 +269,272 @@
                 </div>
                 {% endif %}
                 
+                {% if template == 'nodejs' %}
+                <div class="card shadow-sm mb-4">
+                    <div class="card-header bg-success text-white">
+                        <h2 class="h5 mb-0">Node.js Settings</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label for="nodejs_app_port" class="form-label">Application Port</label>
+                                <input type="number" class="form-control" id="nodejs_app_port" name="nodejs_app_port" value="3000" min="1" max="65535">
+                                <div class="form-text">Internal port your Node.js app is running on (default: 3000)</div>
+                            </div>
+                            
+                            <div class="col-md-6">
+                                <div class="form-check form-switch mt-4">
+                                    <input class="form-check-input" type="checkbox" role="switch" id="nodejs_websocket" name="nodejs_websocket" checked>
+                                    <label class="form-check-label" for="nodejs_websocket">WebSocket Support</label>
+                                </div>
+                                <div class="form-text">Enable WebSocket protocol support (for Socket.io, etc.)</div>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3 mt-3">
+                            <label for="nodejs_api_path" class="form-label">API Path Prefix</label>
+                            <input type="text" class="form-control" id="nodejs_api_path" name="nodejs_api_path" value="/api">
+                            <div class="form-text">Path prefix for API routes (if applicable)</div>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+                
+                {% if template == 'laravel' %}
+                <div class="card shadow-sm mb-4">
+                    <div class="card-header bg-danger text-white">
+                        <h2 class="h5 mb-0">Laravel Settings</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label for="laravel_public_path" class="form-label">Public Path</label>
+                                <input type="text" class="form-control" id="laravel_public_path" name="laravel_public_path" value="public">
+                                <div class="form-text">Laravel public directory (default: public)</div>
+                            </div>
+                            
+                            <div class="col-md-6">
+                                <div class="form-check form-switch mt-4">
+                                    <input class="form-check-input" type="checkbox" role="switch" id="laravel_pretty_urls" name="laravel_pretty_urls" checked>
+                                    <label class="form-check-label" for="laravel_pretty_urls">Pretty URLs</label>
+                                </div>
+                                <div class="form-text">Enable Laravel's clean URL routing structure</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+                
+                {% if template == 'drupal' %}
+                <div class="card shadow-sm mb-4">
+                    <div class="card-header bg-info text-white">
+                        <h2 class="h5 mb-0">Drupal Settings</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label for="drupal_version" class="form-label">Drupal Version</label>
+                                <select class="form-select" id="drupal_version" name="drupal_version">
+                                    <option value="9">Drupal 9.x</option>
+                                    <option value="10" selected>Drupal 10.x</option>
+                                </select>
+                                <div class="form-text">Version determines configuration optimizations</div>
+                            </div>
+                            
+                            <div class="col-md-6">
+                                <div class="form-check form-switch mt-4">
+                                    <input class="form-check-input" type="checkbox" role="switch" id="drupal_clean_urls" name="drupal_clean_urls" checked>
+                                    <label class="form-check-label" for="drupal_clean_urls">Clean URLs</label>
+                                </div>
+                                <div class="form-text">Enable Drupal's clean URL structure</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+                
+                {% if template == 'static' %}
+                <div class="card shadow-sm mb-4">
+                    <div class="card-header bg-warning text-dark">
+                        <h2 class="h5 mb-0">Static Site Settings</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label for="static_cache_time" class="form-label">Max Cache Time (seconds)</label>
+                                <input type="number" class="form-control" id="static_cache_time" name="static_cache_time" value="604800" min="3600">
+                                <div class="form-text">Default: 604800 (1 week)</div>
+                            </div>
+                            
+                            <div class="col-md-6">
+                                <div class="form-check form-switch mt-4">
+                                    <input class="form-check-input" type="checkbox" role="switch" id="static_gzip" name="static_gzip" checked>
+                                    <label class="form-check-label" for="static_gzip">Gzip Compression</label>
+                                </div>
+                                <div class="form-text">Enable Gzip compression for faster delivery</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+                
+                <!-- Proxy-specific Configuration -->
+                <div class="card shadow-sm mb-4">
+                    <div class="card-header bg-secondary text-white">
+                        <h2 class="h5 mb-0">Proxy-specific Configuration</h2>
+                    </div>
+                    <div class="card-body">
+                        <ul class="nav nav-tabs" id="proxyConfigTabs" role="tablist">
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link active" id="nginx-tab" data-bs-toggle="tab" data-bs-target="#nginx-config" type="button" role="tab" aria-controls="nginx-config" aria-selected="true">
+                                    <i class="fas fa-server me-2"></i>Nginx
+                                </button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" id="caddy-tab" data-bs-toggle="tab" data-bs-target="#caddy-config" type="button" role="tab" aria-controls="caddy-config" aria-selected="false">
+                                    <i class="fas fa-truck me-2"></i>Caddy
+                                </button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" id="traefik-tab" data-bs-toggle="tab" data-bs-target="#traefik-config" type="button" role="tab" aria-controls="traefik-config" aria-selected="false">
+                                    <i class="fas fa-network-wired me-2"></i>Traefik
+                                </button>
+                            </li>
+                        </ul>
+                        
+                        <div class="tab-content p-3 border border-top-0 rounded-bottom" id="proxyConfigTabContent">
+                            <!-- Nginx Config -->
+                            <div class="tab-pane fade show active" id="nginx-config" role="tabpanel" aria-labelledby="nginx-tab">
+                                <div class="mb-3">
+                                    <label for="nginx_custom_config" class="form-label">Nginx Custom Configuration</label>
+                                    <textarea class="form-control" id="nginx_custom_config" name="nginx_custom_config" rows="4" 
+                                              placeholder="# Enter custom Nginx configuration directives here">{% if template == 'wordpress' %}# WordPress-specific optimizations
+location = /favicon.ico { access_log off; log_not_found off; }
+location = /robots.txt { access_log off; log_not_found off; }
+location ~* \.(css|gif|ico|jpeg|jpg|js|png)$ {
+    expires max;
+    log_not_found off;
+}{% elif template == 'nodejs' %}# Node.js-specific configuration
+# Enable WebSocket support
+location / {
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_cache_bypass $http_upgrade;
+}{% elif template == 'laravel' %}# Laravel-specific configuration
+# Pretty URLs
+location / {
+    try_files $uri $uri/ /index.php?$query_string;
+}{% elif template == 'drupal' %}# Drupal-specific configuration
+# Protect files and directories from prying eyes
+location ~* \.(engine|inc|install|make|module|profile|po|sh|.*sql|theme|twig|tpl(\.php)?|xtmpl|yml)(~|\.sw[op]|\.bak|\.orig|\.save)?$|^(\.(?!well-known).*|Entries.*|Repository|Root|Tag|Template|composer\.(json|lock)|web\.config)$|^#.*#$|\.php(~|\.sw[op]|\.bak|\.orig|\.save)$ {
+    deny all;
+    return 404;
+}{% elif template == 'static' %}# Static site optimizations
+location ~* \.(html|css|js|jpg|jpeg|png|gif|ico|svg|woff|woff2|ttf|eot)$ {
+    expires max;
+    add_header Cache-Control "public, max-age=31536000";
+}{% endif %}</textarea>
+                                </div>
+                                
+                                <div class="row g-3">
+                                    <div class="col-md-6">
+                                        <label for="nginx_worker_processes" class="form-label">Worker Processes</label>
+                                        <select class="form-select" id="nginx_worker_processes" name="nginx_worker_processes">
+                                            <option value="auto" selected>auto (recommended)</option>
+                                            <option value="1">1</option>
+                                            <option value="2">2</option>
+                                            <option value="4">4</option>
+                                            <option value="8">8</option>
+                                        </select>
+                                    </div>
+                                    
+                                    <div class="col-md-6">
+                                        <label for="nginx_worker_connections" class="form-label">Worker Connections</label>
+                                        <select class="form-select" id="nginx_worker_connections" name="nginx_worker_connections">
+                                            <option value="512">512</option>
+                                            <option value="1024" selected>1024 (recommended)</option>
+                                            <option value="2048">2048</option>
+                                            <option value="4096">4096</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Caddy Config -->
+                            <div class="tab-pane fade" id="caddy-config" role="tabpanel" aria-labelledby="caddy-tab">
+                                <div class="mb-3">
+                                    <label for="caddy_custom_config" class="form-label">Caddy Custom Configuration</label>
+                                    <textarea class="form-control" id="caddy_custom_config" name="caddy_custom_config" rows="4" 
+                                              placeholder="# Enter custom Caddyfile directives here">{% if template == 'wordpress' %}# WordPress-specific Caddy configuration
+@wordpress_admin {
+    path /wp-admin/*
+}
+header @wordpress_admin {
+    X-Frame-Options "SAMEORIGIN"
+    X-Content-Type-Options "nosniff"
+}{% elif template == 'nodejs' %}# Node.js-specific Caddy configuration
+reverse_proxy {
+    header_up Host {host}
+    header_up X-Real-IP {remote}
+    header_up X-Forwarded-For {remote}
+    header_up X-Forwarded-Proto {scheme}
+    transport http {
+        keepalive 30s
+    }
+}{% elif template == 'laravel' %}# Laravel-specific Caddy configuration
+@phpfiles {
+    path *.php
+}
+php_fastcgi @phpfiles unix//var/run/php-fpm.sock{% endif %}</textarea>
+                                </div>
+                                
+                                <div class="form-check mb-3">
+                                    <input class="form-check-input" type="checkbox" id="caddy_auto_https" name="caddy_auto_https" checked>
+                                    <label class="form-check-label" for="caddy_auto_https">
+                                        Enable Automatic HTTPS
+                                    </label>
+                                    <div class="form-text">Let Caddy handle SSL certificates automatically</div>
+                                </div>
+                            </div>
+                            
+                            <!-- Traefik Config -->
+                            <div class="tab-pane fade" id="traefik-config" role="tabpanel" aria-labelledby="traefik-tab">
+                                <div class="mb-3">
+                                    <label for="traefik_custom_config" class="form-label">Traefik Labels</label>
+                                    <textarea class="form-control" id="traefik_custom_config" name="traefik_custom_config" rows="4" 
+                                              placeholder="# Enter custom Traefik labels here">{% if template == 'wordpress' %}# WordPress-specific Traefik configuration
+"traefik.http.middlewares.wp-admin-secure.headers.customResponseHeaders.X-Frame-Options=SAMEORIGIN"
+"traefik.http.middlewares.wp-admin-secure.headers.customResponseHeaders.X-Content-Type-Options=nosniff"
+"traefik.http.routers.{{ domain }}-wp-admin.middlewares=wp-admin-secure@docker"{% elif template == 'nodejs' %}# Node.js-specific Traefik configuration
+"traefik.http.middlewares.{{ domain }}-websocket.headers.customResponseHeaders.Connection=Upgrade"
+"traefik.http.routers.{{ domain }}.middlewares={{ domain }}-websocket@docker"{% endif %}</textarea>
+                                </div>
+                                
+                                <div class="row g-3">
+                                    <div class="col-md-6">
+                                        <label for="traefik_entrypoint" class="form-label">Entrypoint</label>
+                                        <select class="form-select" id="traefik_entrypoint" name="traefik_entrypoint">
+                                            <option value="web" selected>web (HTTP)</option>
+                                            <option value="websecure">websecure (HTTPS)</option>
+                                            <option value="both">Both (HTTP and HTTPS)</option>
+                                        </select>
+                                    </div>
+                                    
+                                    <div class="col-md-6">
+                                        <div class="form-check form-switch mt-4">
+                                            <input class="form-check-input" type="checkbox" role="switch" id="traefik_tls" name="traefik_tls" checked>
+                                            <label class="form-check-label" for="traefik_tls">Enable TLS</label>
+                                        </div>
+                                        <div class="form-text">Enable TLS for HTTPS traffic</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
                 <!-- Cache Configuration -->
                 <div class="card shadow-sm mb-4">
                     <div class="card-header bg-primary text-white">
@@ -239,6 +644,25 @@ location ~* \.(css|gif|ico|jpeg|jpg|js|png)$ {
         
         // Add event listener for changes
         enableCacheCheckbox.addEventListener('change', toggleCacheOptions);
+        
+        // Template selection logic
+        const templateCards = document.querySelectorAll('.template-card');
+        const templateInput = document.getElementById('templateInput');
+        const applyTemplateBtn = document.getElementById('applyTemplateBtn');
+        
+        templateCards.forEach(card => {
+            card.addEventListener('click', function() {
+                templateCards.forEach(c => c.classList.remove('selected'));
+                this.classList.add('selected');
+                this.querySelector('.template-radio').checked = true;
+            });
+        });
+        
+        applyTemplateBtn.addEventListener('click', function() {
+            const selectedTemplate = document.querySelector('.template-card.selected .template-radio').value;
+            templateInput.value = selectedTemplate;
+            document.getElementById('siteForm').submit();
+        });
     });
 </script>
 {% endblock %}
