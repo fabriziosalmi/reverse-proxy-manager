@@ -39,6 +39,7 @@
             </p>
 
             <form method="POST" action="{{ url_for('admin.test_site_config', site_id=site.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <div class="mb-3">
                     <label for="node_id" class="form-label">Select Node for Testing</label>
                     <select class="form-select" id="node_id" name="node_id" required>
