@@ -722,16 +722,19 @@ location ~* \.(css|gif|ico|jpeg|jpg|js|png)$ {
 
         // Form validation to ensure at least one node is selected
         document.getElementById('siteForm').addEventListener('submit', function(event) {
-            const nodeCheckboxes = document.querySelectorAll('input[name="nodes[]"]:checked');
+            const nodeCheckboxes = document.querySelectorAll('input.node-checkbox:checked');
             if (nodeCheckboxes.length === 0) {
                 event.preventDefault();
                 alert('Please select at least one deployment node');
                 
                 // Scroll to the nodes section
-                document.querySelector('h4:contains("Deployment Nodes")').scrollIntoView({
-                    behavior: 'smooth',
-                    block: 'start'
-                });
+                const deploymentSection = document.querySelector('h4.fw-semibold:contains("Deployment Nodes")');
+                if (deploymentSection) {
+                    deploymentSection.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'start'
+                    });
+                }
             }
         });
 

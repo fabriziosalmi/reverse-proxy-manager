@@ -111,7 +111,7 @@
                     {% else %}
                         <div class="alert alert-info mb-0 d-flex align-items-center">
                             <i class="fas fa-info-circle fa-lg me-3"></i>
-                            <div>You don't have any sites configured yet. <a href="{{ url_for('client.add_site') }}" class="fw-bold">Add a site</a> to start seeing analytics.</div>
+                            <div>You don't have any sites configured yet. <a href="{{ url_for('client.new_site') }}" class="fw-bold">Add a site</a> to start seeing analytics.</div>
                         </div>
                     {% endif %}
                 </div>
@@ -365,7 +365,7 @@
                 </div>
                 <h2 class="h4 mb-3">No Analytics Data Available</h2>
                 <p class="text-muted mb-4">You don't have any sites configured yet, so there's no analytics data to display.</p>
-                <a href="{{ url_for('client.add_site') }}" class="btn btn-primary">
+                <a href="{{ url_for('client.new_site') }}" class="btn btn-primary">
                     <i class="fas fa-plus-circle me-2"></i>Add Your First Site
                 </a>
             </div>
