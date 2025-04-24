@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Client Dashboard - Italia CDN Proxy Manager{% endblock %}
+{% block title %}Client Dashboard - Reverse Proxy Manager{% endblock %}
 
 {% block head_extra %}
 <style>
@@ -132,16 +132,16 @@
 
     <!-- Recent Sites -->
     <div class="card shadow-sm mb-4">
-        <div class="card-header d-flex justify-content-between align-items-center bg-transparent">
-            <h5 class="card-title mb-0"><i class="fas fa-globe me-2 text-primary"></i>Recent Sites</h5>
-            <a href="{{ url_for('client.list_sites') }}" class="btn btn-sm btn-outline-primary">
+        <div class="card-header d-flex justify-content-between align-items-center bg-primary text-white">
+            <h5 class="card-title mb-0"><i class="fas fa-globe me-2"></i>Recent Sites</h5>
+            <a href="{{ url_for('client.list_sites') }}" class="btn btn-sm btn-light">
                 View All <i class="fas fa-arrow-right ms-1"></i>
             </a>
         </div>
         <div class="card-body p-0">
             {% if sites %}
             <div class="table-responsive">
-                <table class="table table-hover align-middle mb-0">
+                <table class="table table-striped table-hover align-middle mb-0">
                     <thead class="table-light">
                         <tr>
                             <th>Domain</th>
@@ -173,16 +173,16 @@
                             <td>
                                 {% if site.is_active %}
                                     {% if pending_deployment %}
-                                        <span class="badge rounded-pill bg-warning-subtle text-warning-emphasis border border-warning-subtle">
+                                        <span class="badge rounded-pill bg-warning text-dark">
                                             <i class="fas fa-hourglass-half me-1"></i>Pending Deployment
                                         </span>
                                     {% else %}
-                                        <span class="badge rounded-pill bg-success-subtle text-success-emphasis border border-success-subtle">
+                                        <span class="badge rounded-pill bg-success text-white">
                                             <i class="fas fa-check-circle me-1"></i>Active
                                         </span>
                                     {% endif %}
                                 {% else %}
-                                    <span class="badge rounded-pill bg-danger-subtle text-danger-emphasis border border-danger-subtle">
+                                    <span class="badge rounded-pill bg-danger text-white">
                                         <i class="fas fa-times-circle me-1"></i>Inactive
                                     </span>
                                 {% endif %}
@@ -228,13 +228,13 @@
 
     <!-- Recent Logs -->
     <div class="card shadow-sm">
-        <div class="card-header d-flex justify-content-between align-items-center bg-transparent">
-            <h5 class="card-title mb-0"><i class="fas fa-history me-2 text-primary"></i>Recent Deployment Logs</h5>
+        <div class="card-header d-flex justify-content-between align-items-center bg-primary text-white">
+            <h5 class="card-title mb-0"><i class="fas fa-history me-2"></i>Recent Deployment Logs</h5>
             <div>
-                <button id="toggleLogsRefresh" class="btn btn-sm btn-outline-success">
+                <button id="toggleLogsRefresh" class="btn btn-sm btn-light">
                     <i class="fas fa-sync-alt me-1"></i>Auto-Refresh
                 </button>
-                <span id="logsRefreshIndicator" style="display: none;" class="badge bg-success-subtle text-success-emphasis border border-success-subtle ms-2">
+                <span id="logsRefreshIndicator" style="display: none;" class="badge bg-light text-dark ms-2">
                     <i class="fas fa-sync fa-spin me-1"></i>
                     <small>Last: <span id="lastLogsRefreshTime">-</span></small>
                 </span>
@@ -243,7 +243,7 @@
         <div class="card-body p-0">
             {% if latest_logs %}
             <div class="table-responsive" id="logsTableContainer">
-                <table class="table table-hover align-middle mb-0">
+                <table class="table table-striped table-hover align-middle mb-0">
                     <thead class="table-light">
                         <tr>
                             <th>Time</th>
@@ -263,13 +263,13 @@
                                     {{ log.site.domain }}
                                 </a>
                             </td>
-                            <td><span class="badge rounded-pill bg-secondary-subtle">{{ log.node.name }}</span></td>
+                            <td><span class="badge rounded-pill bg-secondary text-white">{{ log.node.name }}</span></td>
                             <td>{{ log.action }}</td>
                             <td>
                                 <span class="badge rounded-pill 
-                                {% if log.status == 'success' %}bg-success-subtle text-success-emphasis border border-success-subtle
-                                {% elif log.status == 'error' %}bg-danger-subtle text-danger-emphasis border border-danger-subtle
-                                {% else %}bg-warning-subtle text-warning-emphasis border border-warning-subtle{% endif %}">
+                                {% if log.status == 'success' %}bg-success text-white
+                                {% elif log.status == 'error' %}bg-danger text-white
+                                {% else %}bg-warning text-dark{% endif %}">
                                     <i class="fas {% if log.status == 'success' %}fa-check-circle{% elif log.status == 'error' %}fa-exclamation-circle{% else %}fa-exclamation-triangle{% endif %} me-1"></i>
                                     {{ log.status }}
                                 </span>
@@ -352,7 +352,7 @@
         function updateLogsTable(logs) {
             // Create new table HTML
             let tableHtml = `
-                <table class="table table-hover align-middle mb-0">
+                <table class="table table-striped table-hover align-middle mb-0">
                     <thead class="table-light">
                         <tr>
                             <th>Time</th>
@@ -396,7 +396,7 @@
                                 ${log.site ? log.site.domain : 'Unknown Site'}
                             </a>
                         </td>
-                        <td><span class="badge rounded-pill bg-secondary-subtle">${log.node ? log.node.name : 'Unknown Node'}</span></td>
+                        <td><span class="badge rounded-pill bg-secondary text-white">${log.node ? log.node.name : 'Unknown Node'}</span></td>
                         <td>${log.action}</td>
                         <td>
                             <span class="badge rounded-pill ${statusClass}">
