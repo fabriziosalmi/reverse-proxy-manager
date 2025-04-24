@@ -1,8 +1,9 @@
-from flask import Blueprint, render_template, request, flash, redirect, url_for, jsonify, abort
+from flask import Blueprint, render_template, request, flash, redirect, url_for, jsonify, abort, session
 from flask_login import login_required, current_user
 from app.models.models import db, Site, Node, SiteNode, DeploymentLog, SSLCertificate
 from app.services.access_control import client_required
 from app.services.proxy_service_factory import ProxyServiceFactory
+from app.services.proxy_compatibility_service import ProxyCompatibilityService
 from datetime import datetime
 from app.services.analytics_service import AnalyticsService
 
@@ -44,7 +45,15 @@ def new_site():
     if request.method == 'GET':
         # Get all active nodes for selection
         nodes = Node.query.filter_by(is_active=True).all()
-        return render_template('client/sites/new.html', nodes=nodes)
+        
+        # Pass proxy type information for the documentation link
+        proxy_info = {
+            'nginx': ProxyCompatibilityService.get_proxy_type_info('nginx'),
+            'caddy': ProxyCompatibilityService.get_proxy_type_info('caddy'),
+            'traefik': ProxyCompatibilityService.get_proxy_type_info('traefik')
+        }
+        
+        return render_template('client/sites/new.html', nodes=nodes, proxy_info=proxy_info)
     
     if request.method == 'POST':
         name = request.form.get('name')
@@ -95,6 +104,24 @@ def new_site():
             geoip_countries=request.form.get('geoip_countries', '').strip()
         )
         
+        # Check compatibility before saving
+        node_ids = [int(nid) for nid in node_ids]
+        compatibility = ProxyCompatibilityService.check_nodes_compatibility(site, node_ids)
+        
+        # If there are compatibility warnings but the site is still compatible, show warnings but continue
+        if compatibility['warnings'] and compatibility['is_compatible']:
+            for warning in compatibility['warnings']:
+                flash(f"Compatibility warning: {warning}", 'warning')
+        
+        # If there are compatibility issues that make the site incompatible, alert the user
+        elif not compatibility['is_compatible']:
+            flash('The site configuration is not compatible with all selected nodes. Please review and adjust your settings.', 'error')
+            for warning in compatibility['warnings']:
+                flash(f"Compatibility error: {warning}", 'error')
+            
+            nodes = Node.query.filter_by(is_active=True).all()
+            return render_template('client/sites/new.html', nodes=nodes, site=site, compatibility=compatibility)
+        
         db.session.add(site)
         db.session.commit()
         
@@ -110,6 +137,12 @@ def new_site():
                 db.session.add(site_node)
         
         db.session.commit()
+        
+        # Store compatibility info in session for access in deployment logs
+        session['last_compatibility_check'] = {
+            'site_id': site.id,
+            'compatibility': compatibility
+        }
         
         # Initiate deployment process for the new site on all selected nodes
         # This would typically be done asynchronously in a real application
@@ -157,6 +190,7 @@ def view_site(site_id):
 
 @client.route('/sites/<int:site_id>/edit', methods=['GET', 'POST'])
 @login_required
+@client_required
 def edit_site(site_id):
     # Check if site exists and belongs to the current user
     site = Site.query.filter_by(id=site_id, user_id=current_user.id).first_or_404()
@@ -185,7 +219,7 @@ def edit_site(site_id):
         geoip_level = request.form.get('geoip_level', 'nginx')
         geoip_countries = request.form.get('geoip_countries', '').strip()
         
-        # Update site in database
+        # Update site in memory (don't commit yet)
         site.name = name
         site.protocol = protocol
         site.origin_protocol = origin_protocol
@@ -193,26 +227,52 @@ def edit_site(site_id):
         site.origin_port = origin_port
         site.use_waf = use_waf
         site.custom_config = custom_config
-        
-        # Update cache configuration
         site.enable_cache = enable_cache
         site.cache_time = cache_time
         site.cache_static_time = cache_static_time
         site.cache_browser_time = cache_browser_time
         site.custom_cache_rules = custom_cache_rules
-        
-        # Update GeoIP configuration
         site.use_geoip = use_geoip
         site.geoip_mode = geoip_mode
         site.geoip_level = geoip_level
         site.geoip_countries = geoip_countries
         
+        # Check compatibility before saving changes
+        node_ids = [int(nid) for nid in node_ids]
+        compatibility = ProxyCompatibilityService.check_nodes_compatibility(site, node_ids)
+        
+        # If there are compatibility warnings but the site is still compatible, show warnings but continue
+        if compatibility['warnings'] and compatibility['is_compatible']:
+            for warning in compatibility['warnings']:
+                flash(f"Compatibility warning: {warning}", 'warning')
+        
+        # If there are compatibility issues that make the site incompatible, alert the user
+        elif not compatibility['is_compatible']:
+            flash('The site configuration is not compatible with all selected nodes. Please review and adjust your settings.', 'error')
+            for warning in compatibility['warnings']:
+                flash(f"Compatibility error: {warning}", 'error')
+            
+            # Revert any changes we made to the site object
+            db.session.refresh(site)
+            
+            all_nodes = Node.query.filter_by(is_active=True).all()
+            assigned_node_ids = [sn.node_id for sn in SiteNode.query.filter_by(site_id=site_id).all()]
+            
+            return render_template(
+                'client/sites/edit.html', 
+                site=site, 
+                nodes=all_nodes, 
+                assigned_node_ids=assigned_node_ids,
+                compatibility=compatibility
+            )
+        
+        # Now commit the changes to the database
         db.session.commit()
         
         # Handle node associations
-        current_nodes = [sn.node_id for sn in site.site_nodes]
+        current_nodes = [sn.node_id for sn in SiteNode.query.filter_by(site_id=site_id).all()]
         nodes_to_add = [int(node_id) for node_id in node_ids if int(node_id) not in current_nodes]
-        nodes_to_remove = [node_id for node_id in current_nodes if node_id not in [int(id) for id in node_ids]]
+        nodes_to_remove = [node_id for node_id in current_nodes if node_id not in node_ids]
         
         # Remove nodes that are no longer selected
         for node_id in nodes_to_remove:
@@ -225,11 +285,17 @@ def edit_site(site_id):
         
         db.session.commit()
         
+        # Store compatibility info in session for access in deployment logs
+        session['last_compatibility_check'] = {
+            'site_id': site.id,
+            'compatibility': compatibility
+        }
+        
         # Generate configurations and deploy to all nodes
         try:
             # Deploy to each node using the appropriate proxy service
             for node_id in node_ids:
-                node = Node.query.get(int(node_id))
+                node = Node.query.get(node_id)
                 if not node:
                     continue
                 
@@ -252,10 +318,30 @@ def edit_site(site_id):
     all_nodes = Node.query.filter_by(is_active=True).all()
     assigned_node_ids = [sn.node_id for sn in SiteNode.query.filter_by(site_id=site_id).all()]
     
+    # Get proxy type information for the documentation link
+    proxy_info = {
+        'nginx': ProxyCompatibilityService.get_proxy_type_info('nginx'),
+        'caddy': ProxyCompatibilityService.get_proxy_type_info('caddy'),
+        'traefik': ProxyCompatibilityService.get_proxy_type_info('traefik')
+    }
+    
+    # Get assigned nodes' proxy types for compatibility UI
+    assigned_nodes = Node.query.filter(Node.id.in_(assigned_node_ids)).all()
+    assigned_proxy_types = {node.proxy_type for node in assigned_nodes}
+    
+    # Check compatibility with currently assigned nodes
+    if assigned_proxy_types:
+        compatibility = ProxyCompatibilityService.check_nodes_compatibility(site, assigned_node_ids)
+    else:
+        compatibility = None
+    
     return render_template('client/sites/edit.html', 
                            site=site, 
                            nodes=all_nodes, 
-                           assigned_node_ids=assigned_node_ids)
+                           assigned_node_ids=assigned_node_ids,
+                           proxy_info=proxy_info,
+                           compatibility=compatibility,
+                           assigned_proxy_types=assigned_proxy_types)
 
 @client.route('/sites/<int:site_id>/delete', methods=['POST'])
 @login_required
@@ -374,13 +460,13 @@ def manage_ssl_certificates(site_id):
                 elif dns_provider == 'godaddy':
                     dns_credentials['key'] = request.form.get('godaddy_key')
                     dns_credentials['secret'] = request.form.get('godaddy_secret')
-                    if not dns_credentials['key'] or not dns_credentials['secret']:
+                    if not dns_credentials['key'] or dns_credentials['secret']:
                         flash('Please provide both GoDaddy API Key and Secret', 'error')
                         return redirect(url_for('client.manage_ssl_certificates', site_id=site_id))
                 elif dns_provider == 'namecheap':
                     dns_credentials['username'] = request.form.get('namecheap_username')
                     dns_credentials['api_key'] = request.form.get('namecheap_api_key')
-                    if not dns_credentials['username'] or not dns_credentials['api_key']:
+                    if not dns_credentials['username'] or dns_credentials['api_key']:
                         flash('Please provide both Namecheap Username and API Key', 'error')
                         return redirect(url_for('client.manage_ssl_certificates', site_id=site_id))
             

@@ -217,23 +217,79 @@
                     <h4 class="fw-semibold mb-3">Deployment Nodes</h4>
                     <p class="text-muted mb-3">Select one or more nodes where this site will be deployed:</p>
                     
+                    <div class="alert alert-info" role="alert">
+                        <i class="fas fa-info-circle me-2"></i>
+                        <span id="node-compatibility-info">Selecting nodes with different proxy types may limit available features.</span>
+                        <a href="/docs/multi_proxy_system.md" target="_blank" class="ms-2 small">Learn more</a>
+                    </div>
+                    
+                    <div class="proxy-filter mb-3">
+                        <div class="btn-group" role="group" aria-label="Filter nodes by proxy type">
+                            <button type="button" class="btn btn-outline-secondary active" data-proxy-type="all">All Types</button>
+                            <button type="button" class="btn btn-outline-secondary" data-proxy-type="nginx">Nginx</button>
+                            <button type="button" class="btn btn-outline-secondary" data-proxy-type="caddy">Caddy</button>
+                            <button type="button" class="btn btn-outline-secondary" data-proxy-type="traefik">Traefik</button>
+                        </div>
+                    </div>
+                    
                     <div class="row g-3">
                         {% for node in nodes %}
-                        <div class="col-md-6 col-lg-4">
-                            <div class="card">
+                        <div class="col-md-6 col-lg-4 node-card" data-proxy-type="{{ node.proxy_type }}">
+                            <div class="card h-100">
+                                <div class="card-header d-flex justify-content-between align-items-center py-2 px-3 
+                                            {% if node.proxy_type == 'nginx' %}bg-primary-subtle text-primary-emphasis
+                                            {% elif node.proxy_type == 'caddy' %}bg-success-subtle text-success-emphasis
+                                            {% elif node.proxy_type == 'traefik' %}bg-info-subtle text-info-emphasis
+                                            {% else %}bg-secondary-subtle text-secondary-emphasis{% endif %}">
+                                    <span>
+                                        {% if node.proxy_type == 'nginx' %}<i class="fas fa-server me-1"></i>
+                                        {% elif node.proxy_type == 'caddy' %}<i class="fas fa-truck me-1"></i>
+                                        {% elif node.proxy_type == 'traefik' %}<i class="fas fa-network-wired me-1"></i>
+                                        {% else %}<i class="fas fa-question-circle me-1"></i>{% endif %}
+                                        <strong>{{ node.proxy_type|capitalize }}</strong>
+                                    </span>
+                                    <span class="badge rounded-pill bg-{{ 'success' if node.is_active else 'danger' }}">
+                                        {{ 'Active' if node.is_active else 'Inactive' }}
+                                    </span>
+                                </div>
                                 <div class="card-body">
                                     <div class="form-check">
-                                        <input class="form-check-input" type="checkbox" value="{{ node.id }}" 
-                                               id="node_{{ node.id }}" name="nodes[]" checked>
+                                        <input class="form-check-input node-checkbox" type="checkbox" value="{{ node.id }}" 
+                                               id="node_{{ node.id }}" name="nodes[]" checked
+                                               data-proxy-type="{{ node.proxy_type }}">
                                         <label class="form-check-label" for="node_{{ node.id }}">
-                                            <strong>{{ node.name }}</strong>
-                                            <div class="text-muted small">{{ node.ip_address }}</div>
-                                            <span class="badge bg-{% if node.is_active %}success{% else %}danger{% endif %} text-white mt-1">
-                                                {{ 'Active' if node.is_active else 'Inactive' }}
-                                            </span>
-                                            <span class="badge bg-secondary text-white mt-1">
-                                                {{ node.proxy_type }}
-                                            </span>
+                                            <h6 class="mb-1">{{ node.name }}</h6>
+                                            <div class="text-muted small mb-2">{{ node.ip_address }}</div>
+                                            
+                                            <div class="feature-compatibility mt-2">
+                                                <span class="d-block small fw-semibold mb-1">Feature Compatibility:</span>
+                                                <div class="d-flex flex-wrap gap-1">
+                                                    <span class="badge 
+                                                        {% if node.proxy_type == 'nginx' %}bg-success-subtle text-success-emphasis
+                                                        {% elif node.proxy_type == 'caddy' %}bg-warning-subtle text-warning-emphasis
+                                                        {% else %}bg-warning-subtle text-warning-emphasis{% endif %}">
+                                                        WAF
+                                                    </span>
+                                                    <span class="badge 
+                                                        {% if node.proxy_type == 'nginx' %}bg-success-subtle text-success-emphasis
+                                                        {% elif node.proxy_type == 'caddy' %}bg-success-subtle text-success-emphasis
+                                                        {% else %}bg-warning-subtle text-warning-emphasis{% endif %}">
+                                                        SSL
+                                                    </span>
+                                                    <span class="badge 
+                                                        {% if node.proxy_type == 'nginx' %}bg-success-subtle text-success-emphasis
+                                                        {% elif node.proxy_type == 'caddy' %}bg-warning-subtle text-warning-emphasis
+                                                        {% else %}bg-warning-subtle text-warning-emphasis{% endif %}">
+                                                        Cache
+                                                    </span>
+                                                    <span class="badge 
+                                                        {% if node.proxy_type == 'nginx' %}bg-success-subtle text-success-emphasis
+                                                        {% elif node.proxy_type == 'caddy' %}bg-success-subtle text-success-emphasis
+                                                        {% else %}bg-success-subtle text-success-emphasis{% endif %}">
+                                                        WebSockets
+                                                    </span>
+                                                </div>
+                                            </div>
                                         </label>
                                     </div>
                                 </div>
@@ -690,8 +746,122 @@ location ~* \.(css|gif|ico|jpeg|jpg|js|png)$ {
                     nodeCheckboxes[0].checked = true;
                     alert('At least one node must be selected. The first node has been automatically selected.');
                 }
+                
+                // Update compatibility warnings
+                updateCompatibilityWarnings();
             });
         });
+        
+        // Node filtering by proxy type
+        const proxyFilterButtons = document.querySelectorAll('.proxy-filter button');
+        const nodeCards = document.querySelectorAll('.node-card');
+        
+        proxyFilterButtons.forEach(button => {
+            button.addEventListener('click', function() {
+                // Update active button styling
+                proxyFilterButtons.forEach(btn => btn.classList.remove('active'));
+                this.classList.add('active');
+                
+                // Get selected proxy type
+                const proxyType = this.getAttribute('data-proxy-type');
+                
+                // Filter nodes
+                nodeCards.forEach(card => {
+                    if (proxyType === 'all' || card.getAttribute('data-proxy-type') === proxyType) {
+                        card.style.display = 'block';
+                    } else {
+                        card.style.display = 'none';
+                        
+                        // If a hidden node is checked, we'll keep it selected
+                        // but it won't be visible in the UI during filtering
+                    }
+                });
+            });
+        });
+        
+        // Function to update compatibility warnings based on selected nodes
+        function updateCompatibilityWarnings() {
+            const selectedNodes = document.querySelectorAll('input.node-checkbox:checked');
+            const compatibilityInfo = document.getElementById('node-compatibility-info');
+            
+            // Get all proxy types from selected nodes
+            const selectedProxyTypes = new Set();
+            selectedNodes.forEach(node => {
+                selectedProxyTypes.add(node.getAttribute('data-proxy-type'));
+            });
+            
+            // Check if WAF is enabled
+            const wafEnabled = document.getElementById('use_waf') && document.getElementById('use_waf').checked;
+            
+            // Update compatibility warning message
+            if (selectedProxyTypes.size > 1) {
+                compatibilityInfo.innerHTML = '<strong class="text-warning">Warning:</strong> You have selected nodes with different proxy types. Some features may not be available on all nodes.';
+                
+                // Check specific incompatibilities
+                if (wafEnabled && (!selectedProxyTypes.has('nginx') || selectedProxyTypes.size > 1)) {
+                    compatibilityInfo.innerHTML += ' <strong class="text-danger">WAF compatibility issue:</strong> Full WAF support is only available on Nginx nodes.';
+                }
+                
+                // Toggle tabs visibility based on selected proxy types
+                document.getElementById('nginx-tab').parentElement.style.display = selectedProxyTypes.has('nginx') ? 'block' : 'none';
+                document.getElementById('caddy-tab').parentElement.style.display = selectedProxyTypes.has('caddy') ? 'block' : 'none';
+                document.getElementById('traefik-tab').parentElement.style.display = selectedProxyTypes.has('traefik') ? 'block' : 'none';
+                
+                // Ensure at least one tab is active
+                if (selectedProxyTypes.has('nginx')) {
+                    document.getElementById('nginx-tab').click();
+                } else if (selectedProxyTypes.has('caddy')) {
+                    document.getElementById('caddy-tab').click();
+                } else if (selectedProxyTypes.has('traefik')) {
+                    document.getElementById('traefik-tab').click();
+                }
+            } else if (selectedProxyTypes.size === 1) {
+                // Only one proxy type selected
+                const proxyType = Array.from(selectedProxyTypes)[0];
+                
+                if (proxyType === 'nginx') {
+                    compatibilityInfo.innerHTML = 'Using Nginx nodes - all features supported.';
+                } else if (proxyType === 'caddy') {
+                    compatibilityInfo.innerHTML = 'Using Caddy nodes - automatic HTTPS but limited WAF capabilities.';
+                    
+                    if (wafEnabled) {
+                        compatibilityInfo.innerHTML += ' <strong class="text-warning">Note:</strong> WAF functionality is limited in Caddy.';
+                    }
+                } else if (proxyType === 'traefik') {
+                    compatibilityInfo.innerHTML = 'Using Traefik nodes - good for container environments but some features require plugins.';
+                    
+                    if (wafEnabled) {
+                        compatibilityInfo.innerHTML += ' <strong class="text-warning">Note:</strong> WAF requires additional plugins in Traefik.';
+                    }
+                }
+                
+                // Show only the relevant tab for the selected proxy type
+                document.getElementById('nginx-tab').parentElement.style.display = proxyType === 'nginx' ? 'block' : 'none';
+                document.getElementById('caddy-tab').parentElement.style.display = proxyType === 'caddy' ? 'block' : 'none';
+                document.getElementById('traefik-tab').parentElement.style.display = proxyType === 'traefik' ? 'block' : 'none';
+                
+                // Activate the relevant tab
+                if (proxyType === 'nginx') {
+                    document.getElementById('nginx-tab').click();
+                } else if (proxyType === 'caddy') {
+                    document.getElementById('caddy-tab').click();
+                } else if (proxyType === 'traefik') {
+                    document.getElementById('traefik-tab').click();
+                }
+            } else {
+                // No nodes selected (should not happen due to validation)
+                compatibilityInfo.innerHTML = 'Please select at least one node.';
+            }
+        }
+        
+        // WAF checkbox change handler for compatibility warnings
+        const wafCheckbox = document.getElementById('use_waf');
+        if (wafCheckbox) {
+            wafCheckbox.addEventListener('change', updateCompatibilityWarnings);
+        }
+        
+        // Initial compatibility check
+        updateCompatibilityWarnings();
     });
 </script>
 {% endblock %}
