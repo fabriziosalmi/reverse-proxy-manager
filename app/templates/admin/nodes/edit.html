@@ -139,19 +139,30 @@
                              </div>
                         </div>
 
-                        <!-- Nginx Configuration Section -->
+                        <!-- Proxy Configuration Section -->
                         <div class="form-section">
-                            <h4 class="form-section-title"><i class="fas fa-cogs"></i>Nginx Configuration</h4>
+                            <h4 class="form-section-title"><i class="fas fa-cogs"></i>Proxy Configuration</h4>
+                            
                             <div class="mb-3">
-                                <label for="nginx_config_path" class="form-label">Nginx Config Path</label>
-                                <input type="text" class="form-control" id="nginx_config_path" name="nginx_config_path" value="{{ node.nginx_config_path }}">
-                                <div class="form-text">Path to Nginx configuration directory on the node (e.g., <code>/etc/nginx/conf.d</code>).</div>
+                                <label for="proxy_type" class="form-label">Proxy Type<span class="required-indicator">*</span></label>
+                                <select class="form-select" id="proxy_type" name="proxy_type" required>
+                                    {% for type in proxy_types %}
+                                    <option value="{{ type }}" {% if node.proxy_type == type %}selected{% endif %}>{{ type|capitalize }}</option>
+                                    {% endfor %}
+                                </select>
+                                <div class="form-text">The type of proxy software running on this node.</div>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="proxy_config_path" class="form-label">Configuration Path<span class="required-indicator">*</span></label>
+                                <input type="text" class="form-control" id="proxy_config_path" name="proxy_config_path" value="{{ node.proxy_config_path }}" required>
+                                <div class="form-text">Path to configuration directory on the node (e.g., <code>/etc/nginx/conf.d</code>, <code>/etc/caddy</code>, <code>/etc/traefik/dynamic</code>).</div>
                             </div>
 
                             <div class="mb-3">
-                                <label for="nginx_reload_command" class="form-label">Nginx Reload Command</label>
-                                <input type="text" class="form-control" id="nginx_reload_command" name="nginx_reload_command" value="{{ node.nginx_reload_command }}">
-                                <div class="form-text">Command to reload Nginx configuration on the node (e.g., <code>sudo systemctl reload nginx</code>).</div>
+                                <label for="proxy_reload_command" class="form-label">Reload Command<span class="required-indicator">*</span></label>
+                                <input type="text" class="form-control" id="proxy_reload_command" name="proxy_reload_command" value="{{ node.proxy_reload_command }}" required>
+                                <div class="form-text">Command to reload proxy configuration (e.g., <code>sudo systemctl reload nginx</code>, <code>sudo systemctl reload caddy</code>).</div>
                             </div>
                         </div>
 

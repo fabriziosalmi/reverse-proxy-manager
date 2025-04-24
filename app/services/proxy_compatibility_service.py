@@ -1,5 +1,6 @@
 import json
 from app.models.models import Node, Site
+from app.services.proxy_service_factory import ProxyServiceFactory
 
 class ProxyCompatibilityService:
     """Service to check compatibility of site features across different proxy types"""
@@ -223,3 +224,33 @@ class ProxyCompatibilityService:
                 result["support"][proxy_type] = False
         
         return result
+
+    @staticmethod
+    def get_status(node: Node):
+        """
+        Get the status of the proxy software on the given node.
+        Args:
+            node (Node): The node object.
+        Returns:
+            dict: Status information from the proxy service.
+        """
+        proxy_service = ProxyServiceFactory.create(node)
+        if hasattr(proxy_service, 'get_status'):
+            return proxy_service.get_status(node)
+        return {'status': 'unknown', 'message': 'Status method not implemented for this proxy type.'}
+
+    @staticmethod
+    def install(node: Node):
+        """
+        Install the proxy software on the given node.
+        Args:
+            node (Node): The node object.
+        Returns:
+            dict: Installation result from the proxy service.
+        """
+        proxy_service = ProxyServiceFactory.create(node)
+        if hasattr(proxy_service, 'install'):
+            return proxy_service.install(node)
+        return {'status': 'unsupported', 'message': 'Install method not implemented for this proxy type.'}
+
+    # Add more methods as needed for compatibility operations

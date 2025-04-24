@@ -2851,3 +2851,252 @@ def deploy_site_to_node(site_id, node_id):
         return redirect(url_for('admin.view_site', site_id=site_id))
     else:
         return redirect(url_for('admin.view_node', node_id=node_id))
+
+@admin.route('/nodes/<int:node_id>/proxy-status')
+@login_required
+@admin_required
+def check_proxy_status(node_id):
+    """Check which proxy software is installed and running on a node"""
+    node = Node.query.get_or_404(node_id)
+    
+    try:
+        # Use the combined service to check available proxy services
+        from app.services.proxy_compatibility_service import ProxyCompatibilityService
+        
+        proxy_status = ProxyCompatibilityService.check_installed_proxies(node)
+        
+        return jsonify({
+            'success': True,
+            'proxy_status': proxy_status
+        })
+    except Exception as e:
+        # Log the error
+        from app.services.logger_service import log_activity
+        log_activity(
+            category='error',
+            action='check_proxy_status',
+            resource_type='node',
+            resource_id=node_id,
+            details=f"Failed to check proxy status: {str(e)}"
+        )
+        
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@admin.route('/nodes/<int:node_id>/install-proxy/<string:proxy_type>', methods=['POST'])
+@login_required
+@admin_required
+def install_proxy_software(node_id, proxy_type):
+    """Install proxy software (nginx, caddy, traefik) on a node"""
+    node = Node.query.get_or_404(node_id)
+    
+    # Validate proxy type
+    valid_proxy_types = ['nginx', 'caddy', 'traefik']
+    if proxy_type not in valid_proxy_types:
+        return jsonify({
+            'success': False,
+            'error': f"Invalid proxy type. Supported types: {', '.join(valid_proxy_types)}"
+        }), 400
+    
+    try:
+        # Use the compatibility service to install the requested proxy
+        from app.services.proxy_compatibility_service import ProxyCompatibilityService
+        
+        result = ProxyCompatibilityService.install_proxy(node, proxy_type, current_user.id)
+        
+        if result.get('success'):
+            # If successful, update the node's proxy type in the database
+            node.proxy_type = proxy_type
+            
+            # Set appropriate defaults for config path and reload command based on proxy type
+            if proxy_type == 'nginx':
+                node.proxy_config_path = '/etc/nginx/conf.d'
+                node.proxy_reload_command = 'sudo systemctl reload nginx'
+            elif proxy_type == 'caddy':
+                node.proxy_config_path = '/etc/caddy'
+                node.proxy_reload_command = 'sudo systemctl reload caddy'
+            elif proxy_type == 'traefik':
+                node.proxy_config_path = '/etc/traefik/dynamic'
+                node.proxy_reload_command = 'sudo systemctl reload traefik'
+                
+            db.session.commit()
+            
+            return jsonify({
+                'success': True,
+                'message': f"{proxy_type.capitalize()} installed successfully on {node.name}"
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': result.get('message', f"Failed to install {proxy_type}")
+            }), 500
+            
+    except Exception as e:
+        # Log the error
+        from app.services.logger_service import log_activity
+        log_activity(
+            category='error',
+            action='install_proxy',
+            resource_type='node',
+            resource_id=node_id,
+            details=f"Failed to install {proxy_type}: {str(e)}"
+        )
+        
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@admin.route('/nodes/<int:node_id>/proxy/<string:proxy_type>/<string:action>', methods=['POST'])
+@login_required
+@admin_required
+def toggle_proxy_service(node_id, proxy_type, action):
+    """Start or stop proxy services on a node"""
+    node = Node.query.get_or_404(node_id)
+    
+    # Validate proxy type
+    valid_proxy_types = ['nginx', 'caddy', 'traefik']
+    if proxy_type not in valid_proxy_types:
+        return jsonify({
+            'success': False,
+            'error': f"Invalid proxy type. Supported types: {', '.join(valid_proxy_types)}"
+        }), 400
+    
+    # Validate action
+    valid_actions = ['start', 'stop', 'restart']
+    if action not in valid_actions:
+        return jsonify({
+            'success': False,
+            'error': f"Invalid action. Supported actions: {', '.join(valid_actions)}"
+        }), 400
+    
+    try:
+        # Use the compatibility service to control the proxy service
+        from app.services.proxy_compatibility_service import ProxyCompatibilityService
+        
+        result = ProxyCompatibilityService.control_proxy_service(node, proxy_type, action)
+        
+        if result.get('success'):
+            # Log the action
+            from app.services.logger_service import log_activity
+            log_activity(
+                category='admin',
+                action=f'{action}_proxy',
+                resource_type='node',
+                resource_id=node_id,
+                user_id=current_user.id,
+                details=f"Successfully {action}ed {proxy_type} on node {node.name}"
+            )
+            
+            return jsonify({
+                'success': True,
+                'message': f"{proxy_type.capitalize()} {action}ed successfully on {node.name}"
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': result.get('message', f"Failed to {action} {proxy_type}")
+            }), 500
+            
+    except Exception as e:
+        # Log the error
+        from app.services.logger_service import log_activity
+        log_activity(
+            category='error',
+            action=f'{action}_proxy',
+            resource_type='node',
+            resource_id=node_id,
+            user_id=current_user.id,
+            details=f"Failed to {action} {proxy_type}: {str(e)}"
+        )
+        
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@admin.route('/nodes/<int:node_id>/update-proxy-type', methods=['POST'])
+@login_required
+@admin_required
+def update_node_proxy_type(node_id):
+    """Change the proxy type for a node (for sites already running with a different proxy)"""
+    node = Node.query.get_or_404(node_id)
+    
+    new_proxy_type = request.form.get('proxy_type')
+    new_config_path = request.form.get('proxy_config_path')
+    new_reload_command = request.form.get('proxy_reload_command')
+    
+    # Validation
+    if not new_proxy_type:
+        flash('Proxy type is required', 'error')
+        return redirect(url_for('admin.edit_node', node_id=node_id))
+    
+    valid_proxy_types = ['nginx', 'caddy', 'traefik']
+    if new_proxy_type not in valid_proxy_types:
+        flash(f"Invalid proxy type. Supported types: {', '.join(valid_proxy_types)}", 'error')
+        return redirect(url_for('admin.edit_node', node_id=node_id))
+    
+    if not new_config_path:
+        flash('Proxy configuration path is required', 'error')
+        return redirect(url_for('admin.edit_node', node_id=node_id))
+    
+    if not new_reload_command:
+        flash('Proxy reload command is required', 'error')
+        return redirect(url_for('admin.edit_node', node_id=node_id))
+    
+    try:
+        # Check if the proxy is actually installed
+        from app.services.proxy_compatibility_service import ProxyCompatibilityService
+        
+        proxy_status = ProxyCompatibilityService.check_installed_proxies(node)
+        installed_proxies = [p['type'] for p in proxy_status.get('installed_proxies', [])]
+        
+        if new_proxy_type not in installed_proxies:
+            flash(f"{new_proxy_type.capitalize()} is not installed on this node. Please install it first.", 'error')
+            return redirect(url_for('admin.view_node', node_id=node_id))
+        
+        # Update node configuration
+        node.proxy_type = new_proxy_type
+        node.proxy_config_path = new_config_path
+        node.proxy_reload_command = new_reload_command
+        node.updated_at = datetime.utcnow()
+        db.session.commit()
+        
+        # Log the change
+        from app.services.logger_service import log_activity
+        log_activity(
+            category='admin',
+            action='change_proxy_type',
+            resource_type='node',
+            resource_id=node_id,
+            user_id=current_user.id,
+            details=f"Changed proxy type to {new_proxy_type} on node {node.name}"
+        )
+        
+        # Check if we need to update site configurations on this node
+        site_nodes = SiteNode.query.filter_by(node_id=node_id).all()
+        if site_nodes:
+            flash(f"Node proxy type changed to {new_proxy_type}. You may need to redeploy sites to this node.", 'warning')
+        else:
+            flash(f"Node proxy type changed to {new_proxy_type}.", 'success')
+        
+        return redirect(url_for('admin.view_node', node_id=node_id))
+        
+    except Exception as e:
+        db.session.rollback()
+        
+        # Log the error
+        from app.services.logger_service import log_activity
+        log_activity(
+            category='error',
+            action='change_proxy_type',
+            resource_type='node',
+            resource_id=node_id,
+            user_id=current_user.id,
+            details=f"Failed to change proxy type: {str(e)}"
+        )
+        
+        flash(f"Error changing proxy type: {str(e)}", 'error')
+        return redirect(url_for('admin.edit_node', node_id=node_id))
