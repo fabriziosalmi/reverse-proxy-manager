@@ -4,8 +4,66 @@ from app.models.models import db, Site, Node, SiteNode, User, DeploymentLog
 from app.services.access_control import admin_required
 import datetime
 from flask_wtf.csrf import validate_csrf, CSRFError
+import re
+from functools import wraps
+import time
+from flask import current_app, g
 
 api = Blueprint('api', __name__)
+
+# Simple API rate limiter
+class RateLimiter:
+    """Basic rate limiter to prevent API abuse"""
+    
+    def __init__(self, max_calls=100, period=60):
+        self.max_calls = max_calls  # Max calls allowed in the period
+        self.period = period  # Period in seconds
+        self.cache = {}  # Store client IP and their call timestamps
+    
+    def is_allowed(self, client_ip):
+        """Check if client is allowed to make another request"""
+        now = time.time()
+        
+        # Create new entry for new clients
+        if client_ip not in self.cache:
+            self.cache[client_ip] = [now]
+            return True
+        
+        # Get existing timestamps for this client
+        timestamps = self.cache[client_ip]
+        
+        # Remove timestamps older than the period
+        while timestamps and timestamps[0] < now - self.period:
+            timestamps.pop(0)
+        
+        # Add current timestamp
+        timestamps.append(now)
+        
+        # Check if client exceeded max calls in the period
+        return len(timestamps) <= self.max_calls
+
+# Create rate limiter instance
+rate_limiter = RateLimiter(max_calls=100, period=60)
+
+# Rate limiter middleware
+def rate_limit(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # Get client IP address
+        client_ip = request.remote_addr
+        
+        # Check if client is allowed
+        if not rate_limiter.is_allowed(client_ip):
+            # Return 429 Too Many Requests if rate limit exceeded
+            return jsonify({
+                "error": "Rate limit exceeded. Please try again later.",
+                "retry_after": "60 seconds"
+            }), 429
+        
+        # Proceed with the request
+        return f(*args, **kwargs)
+    
+    return decorated_function
 
 # API Error Responses
 def error_response(message, status_code=400):
@@ -15,14 +73,23 @@ def error_response(message, status_code=400):
 def success_response(data, message="Success", status_code=200):
     return jsonify({"message": message, "data": data}), status_code
 
+# Validate domain name format
+def is_valid_domain(domain):
+    domain_regex = re.compile(
+        r'^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$'
+    )
+    return bool(domain_regex.match(domain))
+
 # Health check endpoint (no auth required)
 @api.route('/health', methods=['GET'])
+@rate_limit
 def health_check():
     return jsonify({"status": "healthy", "timestamp": datetime.datetime.utcnow().isoformat()}), 200
 
 # API endpoints that require authentication
 @api.route('/status', methods=['GET'])
 @login_required
+@rate_limit
 def api_status():
     role = 'admin' if current_user.is_admin() else 'client'
     return jsonify({
@@ -36,6 +103,7 @@ def api_status():
 @api.route('/admin/users', methods=['GET'])
 @login_required
 @admin_required
+@rate_limit
 def list_users():
     users = User.query.all()
     return success_response([user.to_dict() for user in users])
@@ -43,6 +111,7 @@ def list_users():
 @api.route('/admin/nodes', methods=['GET'])
 @login_required
 @admin_required
+@rate_limit
 def list_nodes():
     nodes = Node.query.all()
     return success_response([node.to_dict() for node in nodes])
@@ -50,6 +119,7 @@ def list_nodes():
 @api.route('/admin/sites', methods=['GET'])
 @login_required
 @admin_required
+@rate_limit
 def list_all_sites():
     sites = Site.query.all()
     return success_response([site.to_dict() for site in sites])
@@ -57,6 +127,7 @@ def list_all_sites():
 @api.route('/admin/logs', methods=['GET'])
 @login_required
 @admin_required
+@rate_limit
 def list_logs():
     logs = DeploymentLog.query.order_by(DeploymentLog.created_at.desc()).limit(100).all()
     return success_response([log.to_dict() for log in logs])
@@ -65,6 +136,7 @@ def list_logs():
 @api.route('/admin/nodes/<int:node_id>/sites', methods=['GET'])
 @login_required
 @admin_required
+@rate_limit
 def list_node_sites(node_id):
     # Get all site IDs for this node
     site_nodes = SiteNode.query.filter_by(node_id=node_id).all()
@@ -77,12 +149,14 @@ def list_node_sites(node_id):
 # User-specific API endpoints
 @api.route('/sites', methods=['GET'])
 @login_required
+@rate_limit
 def list_user_sites():
     sites = Site.query.filter_by(user_id=current_user.id).all()
     return success_response([site.to_dict() for site in sites])
 
 @api.route('/sites/<int:site_id>', methods=['GET'])
 @login_required
+@rate_limit
 def get_site(site_id):
     site = Site.query.get_or_404(site_id)
     
@@ -94,6 +168,7 @@ def get_site(site_id):
 
 @api.route('/sites/<int:site_id>/nodes', methods=['GET'])
 @login_required
+@rate_limit
 def get_site_nodes(site_id):
     site = Site.query.get_or_404(site_id)
     
@@ -106,6 +181,7 @@ def get_site_nodes(site_id):
 
 @api.route('/api/deployments/recent', methods=['GET'])
 @login_required
+@rate_limit
 def api_recent_deployments():
     """Get recent deployment logs for AJAX updates on dashboards"""
     # Get user ID for filtering if not admin
@@ -131,6 +207,7 @@ def api_recent_deployments():
 
 @api.route('/sites/<int:site_id>/waf', methods=['GET'])
 @login_required
+@rate_limit
 def get_site_waf(site_id):
     """Get WAF settings for a site"""
     site = Site.query.get_or_404(site_id)
@@ -156,6 +233,7 @@ def get_site_waf(site_id):
 
 @api.route('/sites/<int:site_id>/waf', methods=['PUT'])
 @login_required
+@rate_limit
 def update_site_waf(site_id):
     """Update WAF settings for a site"""
     site = Site.query.get_or_404(site_id)

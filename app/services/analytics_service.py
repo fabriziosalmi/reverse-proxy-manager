@@ -12,217 +12,274 @@ class AnalyticsService:
     @staticmethod
     def get_admin_analytics():
         """Get analytics data for the admin dashboard"""
-        today = datetime.datetime.utcnow().date()
-        yesterday = today - timedelta(days=1)
-        last_week = today - timedelta(days=7)
-        
-        # Get total sites and active sites
-        total_sites = Site.query.count()
-        active_sites = Site.query.filter_by(is_active=True).count()
-        
-        # Get total nodes and active nodes
-        total_nodes = Node.query.count()
-        active_nodes = Node.query.filter_by(is_active=True).count()
-        
-        # Get total users
-        total_users = User.query.count()
-        
-        # Calculate total traffic today
-        total_traffic_today = db.session.query(
-            func.sum(SiteAnalytics.bandwidth_bytes)
-        ).filter(
-            func.date(SiteAnalytics.date) == today
-        ).scalar() or 0
-        
-        # Calculate total traffic yesterday
-        total_traffic_yesterday = db.session.query(
-            func.sum(SiteAnalytics.bandwidth_bytes)
-        ).filter(
-            func.date(SiteAnalytics.date) == yesterday
-        ).scalar() or 0
-        
-        # Calculate traffic growth
-        traffic_growth = 0
-        if total_traffic_yesterday > 0:
-            traffic_growth = ((total_traffic_today - total_traffic_yesterday) / total_traffic_yesterday) * 100
-        
-        # Get top 5 sites by traffic
-        top_sites = db.session.query(
-            Site, func.sum(SiteAnalytics.bandwidth_bytes).label('total_bandwidth')
-        ).join(
-            SiteAnalytics
-        ).filter(
-            func.date(SiteAnalytics.date) >= last_week
-        ).group_by(
-            Site.id
-        ).order_by(
-            func.sum(SiteAnalytics.bandwidth_bytes).desc()
-        ).limit(5).all()
-        
-        # Get top 5 sites by requests
-        top_sites_by_requests = db.session.query(
-            Site, func.sum(SiteAnalytics.requests).label('total_requests')
-        ).join(
-            SiteAnalytics
-        ).filter(
-            func.date(SiteAnalytics.date) >= last_week
-        ).group_by(
-            Site.id
-        ).order_by(
-            func.sum(SiteAnalytics.requests).desc()
-        ).limit(5).all()
-        
-        # Get recent errors
-        recent_errors = ErrorLog.query.order_by(ErrorLog.timestamp.desc()).limit(10).all()
-        
-        # Prepare data for the dashboard charts
-        # Last 7 days traffic chart
-        last_7_days = []
-        traffic_7_days = []
-        
-        for i in range(6, -1, -1):
-            day = today - timedelta(days=i)
-            last_7_days.append(day.strftime('%d %b'))
+        try:
+            today = datetime.datetime.utcnow().date()
+            yesterday = today - timedelta(days=1)
+            last_week = today - timedelta(days=7)
             
-            traffic = db.session.query(
+            # Get total sites and active sites - use count() for efficiency
+            total_sites = Site.query.count()
+            active_sites = Site.query.filter_by(is_active=True).count()
+            
+            # Get total nodes and active nodes
+            total_nodes = Node.query.count()
+            active_nodes = Node.query.filter_by(is_active=True).count()
+            
+            # Get total users
+            total_users = User.query.count()
+            
+            # Calculate total traffic today - use scalar() for memory efficiency
+            total_traffic_today = db.session.query(
                 func.sum(SiteAnalytics.bandwidth_bytes)
             ).filter(
-                func.date(SiteAnalytics.date) == day
+                func.date(SiteAnalytics.date) == today
             ).scalar() or 0
             
-            # Convert bytes to MB for better readability
-            traffic_7_days.append(round(traffic / (1024 * 1024), 2))
-        
-        # Format traffic numbers for display
-        total_traffic_today_formatted = AnalyticsService.format_bytes(total_traffic_today)
-        total_traffic_yesterday_formatted = AnalyticsService.format_bytes(total_traffic_yesterday)
-        
-        # Return all data for the dashboard
-        return {
-            'total_sites': total_sites,
-            'active_sites': active_sites,
-            'total_nodes': total_nodes,
-            'active_nodes': active_nodes,
-            'total_users': total_users,
-            'total_traffic_today': total_traffic_today_formatted,
-            'total_traffic_yesterday': total_traffic_yesterday_formatted,
-            'traffic_growth': round(traffic_growth, 2),
-            'top_sites': [(site, AnalyticsService.format_bytes(total)) for site, total in top_sites],
-            'top_sites_by_requests': top_sites_by_requests,
-            'recent_errors': recent_errors,
-            'chart_labels': last_7_days,
-            'chart_data': traffic_7_days
-        }
+            # Calculate total traffic yesterday
+            total_traffic_yesterday = db.session.query(
+                func.sum(SiteAnalytics.bandwidth_bytes)
+            ).filter(
+                func.date(SiteAnalytics.date) == yesterday
+            ).scalar() or 0
+            
+            # Calculate traffic growth
+            traffic_growth = 0
+            if total_traffic_yesterday > 0:
+                traffic_growth = ((total_traffic_today - total_traffic_yesterday) / total_traffic_yesterday) * 100
+            
+            # Get top 5 sites by traffic - use specific columns instead of whole objects
+            top_sites_query = db.session.query(
+                Site.id, Site.domain, func.sum(SiteAnalytics.bandwidth_bytes).label('total_bandwidth')
+            ).join(
+                SiteAnalytics
+            ).filter(
+                func.date(SiteAnalytics.date) >= last_week
+            ).group_by(
+                Site.id, Site.domain  # Include all columns in GROUP BY for strict SQL modes
+            ).order_by(
+                func.sum(SiteAnalytics.bandwidth_bytes).desc()
+            ).limit(5)
+            
+            # Execute the query and get results
+            top_sites_data = top_sites_query.all()
+            
+            # Format the results
+            top_sites = []
+            for site_id, domain, bandwidth in top_sites_data:
+                site_info = {'id': site_id, 'domain': domain}
+                top_sites.append((site_info, AnalyticsService.format_bytes(bandwidth)))
+            
+            # Get top 5 sites by requests - optimize the same way
+            top_sites_by_requests_query = db.session.query(
+                Site.id, Site.domain, func.sum(SiteAnalytics.requests).label('total_requests')
+            ).join(
+                SiteAnalytics
+            ).filter(
+                func.date(SiteAnalytics.date) >= last_week
+            ).group_by(
+                Site.id, Site.domain
+            ).order_by(
+                func.sum(SiteAnalytics.requests).desc()
+            ).limit(5)
+            
+            top_sites_by_requests = []
+            for site_id, domain, requests in top_sites_by_requests_query.all():
+                site_info = {'id': site_id, 'domain': domain}
+                top_sites_by_requests.append((site_info, requests))
+            
+            # Get recent errors - only fetch needed columns
+            recent_errors = ErrorLog.query.with_entities(
+                ErrorLog.id, ErrorLog.site_id, ErrorLog.path, ErrorLog.status_code, 
+                ErrorLog.message, ErrorLog.timestamp
+            ).order_by(ErrorLog.timestamp.desc()).limit(10).all()
+            
+            # Prepare data for the dashboard charts
+            # Last 7 days traffic chart
+            last_7_days = []
+            traffic_7_days = []
+            
+            for i in range(6, -1, -1):
+                day = today - timedelta(days=i)
+                last_7_days.append(day.strftime('%d %b'))
+                
+                traffic = db.session.query(
+                    func.sum(SiteAnalytics.bandwidth_bytes)
+                ).filter(
+                    func.date(SiteAnalytics.date) == day
+                ).scalar() or 0
+                
+                # Convert bytes to MB for better readability
+                traffic_7_days.append(round(traffic / (1024 * 1024), 2))
+            
+            # Format traffic numbers for display
+            total_traffic_today_formatted = AnalyticsService.format_bytes(total_traffic_today)
+            total_traffic_yesterday_formatted = AnalyticsService.format_bytes(total_traffic_yesterday)
+            
+            # Return all data for the dashboard
+            return {
+                'total_sites': total_sites,
+                'active_sites': active_sites,
+                'total_nodes': total_nodes,
+                'active_nodes': active_nodes,
+                'total_users': total_users,
+                'total_traffic_today': total_traffic_today_formatted,
+                'total_traffic_yesterday': total_traffic_yesterday_formatted,
+                'traffic_growth': round(traffic_growth, 2),
+                'top_sites': top_sites,
+                'top_sites_by_requests': top_sites_by_requests,
+                'recent_errors': recent_errors,
+                'chart_labels': last_7_days,
+                'chart_data': traffic_7_days
+            }
+        except Exception as e:
+            # Log the error and return an empty data structure to prevent dashboard failure
+            current_app.logger.error(f"Error generating admin analytics: {str(e)}")
+            return {
+                'total_sites': 0,
+                'active_sites': 0,
+                'total_nodes': 0,
+                'active_nodes': 0,
+                'total_users': 0,
+                'total_traffic_today': '0 B',
+                'total_traffic_yesterday': '0 B',
+                'traffic_growth': 0,
+                'top_sites': [],
+                'top_sites_by_requests': [],
+                'recent_errors': [],
+                'chart_labels': [],
+                'chart_data': [],
+                'error': str(e)
+            }
     
     @staticmethod
     def get_client_analytics(user_id, site_id=None):
         """Get analytics data for a client's dashboard"""
-        today = datetime.datetime.utcnow().date()
-        yesterday = today - timedelta(days=1)
-        last_week = today - timedelta(days=7)
-        
-        # Get user's sites
-        if site_id:
-            sites = Site.query.filter(
-                Site.user_id == user_id,
-                Site.id == site_id
-            ).all()
-        else:
-            sites = Site.query.filter_by(user_id=user_id).all()
-        
-        site_ids = [site.id for site in sites]
-        
-        if not site_ids:
-            # No sites found
+        try:
+            today = datetime.datetime.utcnow().date()
+            yesterday = today - timedelta(days=1)
+            last_week = today - timedelta(days=7)
+            
+            # Get user's sites with only necessary fields
+            if site_id:
+                sites = Site.query.with_entities(Site.id, Site.domain, Site.protocol).filter(
+                    Site.user_id == user_id,
+                    Site.id == site_id
+                ).all()
+            else:
+                sites = Site.query.with_entities(Site.id, Site.domain, Site.protocol).filter_by(
+                    user_id=user_id
+                ).all()
+            
+            site_ids = [site.id for site in sites]
+            
+            if not site_ids:
+                # No sites found
+                return {
+                    'sites': [],
+                    'selected_site': None,
+                    'total_traffic': '0 B',
+                    'total_requests': 0,
+                    'traffic_growth': 0,
+                    'chart_labels': [],
+                    'chart_data': []
+                }
+            
+            # Get total traffic for all sites
+            total_traffic = db.session.query(
+                func.sum(SiteAnalytics.bandwidth_bytes)
+            ).filter(
+                SiteAnalytics.site_id.in_(site_ids),
+                func.date(SiteAnalytics.date) >= last_week
+            ).scalar() or 0
+            
+            # Get total traffic yesterday
+            total_traffic_yesterday = db.session.query(
+                func.sum(SiteAnalytics.bandwidth_bytes)
+            ).filter(
+                SiteAnalytics.site_id.in_(site_ids),
+                func.date(SiteAnalytics.date) == yesterday
+            ).scalar() or 0
+            
+            # Get total traffic today
+            total_traffic_today = db.session.query(
+                func.sum(SiteAnalytics.bandwidth_bytes)
+            ).filter(
+                SiteAnalytics.site_id.in_(site_ids),
+                func.date(SiteAnalytics.date) == today
+            ).scalar() or 0
+            
+            # Calculate traffic growth
+            traffic_growth = 0
+            if total_traffic_yesterday > 0:
+                traffic_growth = ((total_traffic_today - total_traffic_yesterday) / total_traffic_yesterday) * 100
+            
+            # Get total requests
+            total_requests = db.session.query(
+                func.sum(SiteAnalytics.requests)
+            ).filter(
+                SiteAnalytics.site_id.in_(site_ids),
+                func.date(SiteAnalytics.date) >= last_week
+            ).scalar() or 0
+            
+            # Prepare data for the charts
+            # Last 7 days traffic chart
+            last_7_days = []
+            traffic_7_days = []
+            
+            for i in range(6, -1, -1):
+                day = today - timedelta(days=i)
+                last_7_days.append(day.strftime('%d %b'))
+                
+                traffic = db.session.query(
+                    func.sum(SiteAnalytics.bandwidth_bytes)
+                ).filter(
+                    SiteAnalytics.site_id.in_(site_ids),
+                    func.date(SiteAnalytics.date) == day
+                ).scalar() or 0
+                
+                # Convert bytes to MB for better readability
+                traffic_7_days.append(round(traffic / (1024 * 1024), 2))
+            
+            # Get recent errors for these sites (only needed fields)
+            recent_errors = ErrorLog.query.with_entities(
+                ErrorLog.id, ErrorLog.site_id, ErrorLog.path, 
+                ErrorLog.status_code, ErrorLog.message, ErrorLog.timestamp
+            ).filter(
+                ErrorLog.site_id.in_(site_ids)
+            ).order_by(
+                ErrorLog.timestamp.desc()
+            ).limit(10).all()
+            
+            # Get selected site if site_id is provided
+            selected_site = None
+            if site_id:
+                selected_site = Site.query.get(site_id)
+            
+            # Return all data for the dashboard
+            return {
+                'sites': sites,
+                'selected_site': selected_site,
+                'total_traffic': AnalyticsService.format_bytes(total_traffic),
+                'total_requests': total_requests,
+                'traffic_growth': round(traffic_growth, 2),
+                'recent_errors': recent_errors,
+                'chart_labels': last_7_days,
+                'chart_data': traffic_7_days
+            }
+        except Exception as e:
+            # Log the error and return an empty data structure
+            current_app.logger.error(f"Error generating client analytics: {str(e)}")
             return {
                 'sites': [],
                 'selected_site': None,
                 'total_traffic': '0 B',
                 'total_requests': 0,
                 'traffic_growth': 0,
+                'recent_errors': [],
                 'chart_labels': [],
-                'chart_data': []
+                'chart_data': [],
+                'error': str(e)
             }
-        
-        # Get total traffic for all sites
-        total_traffic = db.session.query(
-            func.sum(SiteAnalytics.bandwidth_bytes)
-        ).filter(
-            SiteAnalytics.site_id.in_(site_ids),
-            func.date(SiteAnalytics.date) >= last_week
-        ).scalar() or 0
-        
-        # Get total traffic yesterday
-        total_traffic_yesterday = db.session.query(
-            func.sum(SiteAnalytics.bandwidth_bytes)
-        ).filter(
-            SiteAnalytics.site_id.in_(site_ids),
-            func.date(SiteAnalytics.date) == yesterday
-        ).scalar() or 0
-        
-        # Get total traffic today
-        total_traffic_today = db.session.query(
-            func.sum(SiteAnalytics.bandwidth_bytes)
-        ).filter(
-            SiteAnalytics.site_id.in_(site_ids),
-            func.date(SiteAnalytics.date) == today
-        ).scalar() or 0
-        
-        # Calculate traffic growth
-        traffic_growth = 0
-        if total_traffic_yesterday > 0:
-            traffic_growth = ((total_traffic_today - total_traffic_yesterday) / total_traffic_yesterday) * 100
-        
-        # Get total requests
-        total_requests = db.session.query(
-            func.sum(SiteAnalytics.requests)
-        ).filter(
-            SiteAnalytics.site_id.in_(site_ids),
-            func.date(SiteAnalytics.date) >= last_week
-        ).scalar() or 0
-        
-        # Prepare data for the charts
-        # Last 7 days traffic chart
-        last_7_days = []
-        traffic_7_days = []
-        
-        for i in range(6, -1, -1):
-            day = today - timedelta(days=i)
-            last_7_days.append(day.strftime('%d %b'))
-            
-            traffic = db.session.query(
-                func.sum(SiteAnalytics.bandwidth_bytes)
-            ).filter(
-                SiteAnalytics.site_id.in_(site_ids),
-                func.date(SiteAnalytics.date) == day
-            ).scalar() or 0
-            
-            # Convert bytes to MB for better readability
-            traffic_7_days.append(round(traffic / (1024 * 1024), 2))
-        
-        # Get recent errors for these sites
-        recent_errors = ErrorLog.query.filter(
-            ErrorLog.site_id.in_(site_ids)
-        ).order_by(
-            ErrorLog.timestamp.desc()
-        ).limit(10).all()
-        
-        # Get selected site if site_id is provided
-        selected_site = None
-        if site_id:
-            selected_site = Site.query.get(site_id)
-        
-        # Return all data for the dashboard
-        return {
-            'sites': sites,
-            'selected_site': selected_site,
-            'total_traffic': AnalyticsService.format_bytes(total_traffic),
-            'total_requests': total_requests,
-            'traffic_growth': round(traffic_growth, 2),
-            'recent_errors': recent_errors,
-            'chart_labels': last_7_days,
-            'chart_data': traffic_7_days
-        }
     
     @staticmethod
     def get_api_analytics_data(period='week', site_id=None, real_time=False):

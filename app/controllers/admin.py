@@ -61,7 +61,7 @@ def dashboard():
                            node_count=node_count,
                            active_node_count=active_node_count,
                            site_count=site_count,
-                           active_site_count=site_count,
+                           active_site_count=active_site_count,
                            latest_logs=latest_logs,
                            now=now,
                            error_log_count=error_log_count,
@@ -224,9 +224,47 @@ def new_node():
         nginx_reload_command = request.form.get('nginx_reload_command', 'sudo systemctl reload nginx')
         
         # Validation
-        if Node.query.filter_by(name=name).first():
-            flash('Node name already exists', 'error')
-            return redirect(url_for('admin.new_node'))
+        errors = []
+        
+        if not name or not name.strip():
+            errors.append('Node name is required')
+        elif Node.query.filter_by(name=name).first():
+            errors.append('Node name already exists')
+        
+        # Validate IP address format
+        import re
+        ip_pattern = re.compile(r'^(\d{1,3}\.){3}\d{1,3}$')
+        if not ip_address or not ip_pattern.match(ip_address):
+            errors.append('Invalid IP address format')
+        else:
+            # Check if each octet is in valid range
+            octets = ip_address.split('.')
+            for octet in octets:
+                if int(octet) > 255:
+                    errors.append('Invalid IP address, octets must be between 0-255')
+                    break
+        
+        # Validate SSH port
+        try:
+            ssh_port = int(ssh_port)
+            if ssh_port < 1 or ssh_port > 65535:
+                errors.append('SSH port must be between 1 and 65535')
+        except (ValueError, TypeError):
+            errors.append('Invalid SSH port number')
+        
+        # Validate username
+        if not ssh_user or not ssh_user.strip():
+            errors.append('SSH username is required')
+        
+        # Validate auth method - at least one of SSH key or password must be provided
+        if not ssh_key_path and not ssh_password:
+            errors.append('Either SSH key path or password must be provided')
+        
+        # Display errors if any
+        if errors:
+            for error in errors:
+                flash(error, 'error')
+            return render_template('admin/nodes/new.html')
         
         # Create new node
         node = Node(
@@ -267,10 +305,48 @@ def edit_node(node_id):
         nginx_reload_command = request.form.get('nginx_reload_command')
         is_active = 'is_active' in request.form
         
-        # Check for name uniqueness if changed
-        if name != node.name and Node.query.filter_by(name=name).first():
-            flash('Node name already exists', 'error')
-            return redirect(url_for('admin.edit_node', node_id=node_id))
+        # Validation
+        errors = []
+        
+        if not name or not name.strip():
+            errors.append('Node name is required')
+        elif name != node.name and Node.query.filter_by(name=name).first():
+            errors.append('Node name already exists')
+        
+        # Validate IP address format
+        import re
+        ip_pattern = re.compile(r'^(\d{1,3}\.){3}\d{1,3}$')
+        if not ip_address or not ip_pattern.match(ip_address):
+            errors.append('Invalid IP address format')
+        else:
+            # Check if each octet is in valid range
+            octets = ip_address.split('.')
+            for octet in octets:
+                if int(octet) > 255:
+                    errors.append('Invalid IP address, octets must be between 0-255')
+                    break
+        
+        # Validate SSH port
+        try:
+            ssh_port = int(ssh_port)
+            if ssh_port < 1 or ssh_port > 65535:
+                errors.append('SSH port must be between 1 and 65535')
+        except (ValueError, TypeError):
+            errors.append('Invalid SSH port number')
+        
+        # Validate username
+        if not ssh_user or not ssh_user.strip():
+            errors.append('SSH username is required')
+        
+        # Validate auth method - at least one of SSH key or password must be provided
+        if not ssh_key_path and not ssh_password:
+            errors.append('Either SSH key path or password must be provided')
+        
+        # Display errors if any
+        if errors:
+            for error in errors:
+                flash(error, 'error')
+            return render_template('admin/nodes/edit.html', node=node)
         
         # Update node
         node.name = name
@@ -347,6 +423,16 @@ def view_node(node_id):
         # Get Nginx version and configuration info
         nginx_info = get_nginx_info(node)
     except Exception as e:
+        # Log the error
+        from app.services.logger_service import log_activity
+        log_activity(
+            category='error',
+            action='view_node',
+            resource_type='node',
+            resource_id=node.id,
+            details=f"Error fetching node stats: {str(e)}"
+        )
+        
         # Fallback to mock data if real stats can't be retrieved
         server_stats = {
             'cpu_usage': '32%',
@@ -1393,20 +1479,34 @@ def ssl_dashboard():
     """Dashboard view for all SSL certificates across sites"""
     from app.services.ssl_certificate_service import SSLCertificateService
     
-    # Get certificate health dashboard data
-    cert_health = SSLCertificateService.get_certificates_health_dashboard()
-    
-    # Get sites with SSL certificates
-    from app.models.models import SSLCertificate, Site
-    sites_with_certs = db.session.query(Site).join(
-        SSLCertificate, SSLCertificate.site_id == Site.id
-    ).distinct().all()
-    
-    return render_template(
-        'admin/ssl_dashboard.html',
-        cert_health=cert_health,
-        sites_with_certs=sites_with_certs
-    )
+    try:
+        # Get certificate health dashboard data
+        cert_health = SSLCertificateService.get_certificates_health_dashboard()
+        
+        # Get sites with SSL certificates
+        from app.models.models import SSLCertificate, Site
+        sites_with_certs = db.session.query(Site).join(
+            SSLCertificate, SSLCertificate.site_id == Site.id
+        ).distinct().all()
+        
+        return render_template(
+            'admin/ssl_dashboard.html',
+            cert_health=cert_health,
+            sites_with_certs=sites_with_certs
+        )
+    except Exception as e:
+        # Log the error
+        from app.services.logger_service import log_activity
+        log_activity(
+            category='error',
+            action='view_ssl_dashboard',
+            resource_type='ssl',
+            details=f"Error loading SSL dashboard: {str(e)}"
+        )
+        
+        # Show error to admin
+        flash(f"Error loading SSL dashboard: {str(e)}", 'error')
+        return redirect(url_for('admin.dashboard'))
 
 @admin.route('/templates')
 @login_required
