@@ -4,7 +4,8 @@ import logging
 from datetime import datetime
 from app.models.models import Node
 from app import db
-import paramiko
+from app.services.ssh_connection_service import SSHConnectionService
+from app.services.logger_service import log_activity
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +118,6 @@ class NodeDiscoveryService:
         Returns:
             dict: Verification result with node details
         """
-        import paramiko
         import socket
         import time
         
@@ -133,141 +133,105 @@ class NodeDiscoveryService:
                 "success": False,
                 "message": "Either SSH password or key path is required"
             }
+
+        # Create a temporary Node object to use with SSHConnectionService
+        temp_node = Node(
+            ip_address=ip_address,
+            ssh_port=port,
+            ssh_user=username,
+            ssh_password=password,
+            ssh_key_path=key_path
+        )
         
         # Try to connect via SSH with retry logic
         max_attempts = 2
         connection_delay = 1  # seconds
         
-        ssh = paramiko.SSHClient()
-        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        
         for attempt in range(max_attempts):
             try:
-                # Try to connect with password or key
-                if key_path:
-                    ssh.connect(
-                        hostname=ip_address,
-                        port=port,
-                        username=username,
-                        key_filename=key_path,
-                        timeout=timeout
-                    )
-                else:
-                    ssh.connect(
-                        hostname=ip_address,
-                        port=port,
-                        username=username,
-                        password=password,
-                        timeout=timeout
-                    )
-                
-                # If connection succeeded, get system information
-                result = {
-                    "success": True,
-                    "ip_address": ip_address,
-                    "ssh_port": port,
-                    "ssh_user": username,
-                    "ssh_key_path": key_path,
-                    "system_info": {}
-                }
-                
-                # Get system information
-                try:
-                    # Get OS information
-                    stdin, stdout, stderr = ssh.exec_command(
-                        "lsb_release -ds 2>/dev/null || "
-                        "cat /etc/os-release 2>/dev/null | grep PRETTY_NAME | cut -d '\"' -f 2 || "
-                        "cat /etc/redhat-release 2>/dev/null || "
-                        "cat /etc/issue 2>/dev/null | head -1 || "
-                        "echo 'Unknown OS'"
-                    )
-                    os_info = stdout.read().decode('utf-8').strip()
-                    result["system_info"]["os"] = os_info
+                with SSHConnectionService.get_connection(temp_node, timeout=timeout) as ssh_client:
+                    # If connection succeeded, get system information
+                    result = {
+                        "success": True,
+                        "ip_address": ip_address,
+                        "ssh_port": port,
+                        "ssh_user": username,
+                        "ssh_key_path": key_path,
+                        "system_info": {}
+                    }
                     
-                    # Get hostname
-                    stdin, stdout, stderr = ssh.exec_command("hostname")
-                    hostname = stdout.read().decode('utf-8').strip()
-                    result["hostname"] = hostname
+                    # Get system information
+                    try:
+                        # Get OS information
+                        exit_code, stdout, stderr = SSHConnectionService.execute_command(
+                            ssh_client,
+                            "lsb_release -ds 2>/dev/null || "
+                            "cat /etc/os-release 2>/dev/null | grep PRETTY_NAME | cut -d '\"' -f 2 || "
+                            "cat /etc/redhat-release 2>/dev/null || "
+                            "cat /etc/issue 2>/dev/null | head -1 || "
+                            "echo 'Unknown OS'"
+                        )
+                        os_info = stdout.strip()
+                        result["system_info"]["os"] = os_info
+                        
+                        # Get hostname
+                        exit_code, stdout, stderr = SSHConnectionService.execute_command(ssh_client, "hostname")
+                        hostname = stdout.strip()
+                        result["hostname"] = hostname
+                        
+                        # Check if Nginx is installed and get its version
+                        exit_code, stdout, stderr = SSHConnectionService.execute_command(ssh_client, "nginx -v 2>&1 || echo 'Not installed'")
+                        nginx_version = stdout.strip()
+                        result["system_info"]["nginx_installed"] = "Not installed" not in nginx_version
+                        result["system_info"]["nginx_version"] = nginx_version if "Not installed" not in nginx_version else None
+                        
+                        # Get Nginx configuration path
+                        exit_code, stdout, stderr = SSHConnectionService.execute_command(ssh_client, "find /etc -type d -name 'nginx' 2>/dev/null | grep -v modules")
+                        nginx_paths = stdout.strip().split('\n')
+                        
+                        for path in nginx_paths:
+                            if path and os.path.exists(path):
+                                # Check if this contains configuration files
+                                exit_code, stdout, stderr = SSHConnectionService.execute_command(ssh_client, f"find {path} -name '*.conf' | wc -l")
+                                conf_count = int(stdout.strip() or 0)
+                                
+                                if conf_count > 0:
+                                    result["nginx_conf_path"] = path
+                                    break
+                        
+                        # Get available disk space
+                        exit_code, stdout, stderr = SSHConnectionService.execute_command(ssh_client, "df -h / | tail -1 | awk '{print $4}'")
+                        disk_space = stdout.strip()
+                        result["system_info"]["available_disk"] = disk_space
+                        
+                        # Get total memory
+                        exit_code, stdout, stderr = SSHConnectionService.execute_command(ssh_client, "free -h | grep Mem | awk '{print $2}'")
+                        total_memory = stdout.strip()
+                        result["system_info"]["total_memory"] = total_memory
+                        
+                        # Get CPU info
+                        exit_code, stdout, stderr = SSHConnectionService.execute_command(ssh_client, "grep 'model name' /proc/cpuinfo | head -1 | cut -d: -f2")
+                        cpu_model = stdout.strip()
+                        result["system_info"]["cpu_model"] = cpu_model
+                        
+                        exit_code, stdout, stderr = SSHConnectionService.execute_command(ssh_client, "grep -c processor /proc/cpuinfo")
+                        cpu_cores = stdout.strip()
+                        result["system_info"]["cpu_cores"] = cpu_cores
+                        
+                    except Exception as info_error:
+                        log_activity('warning', f"Error getting system information for {ip_address}: {str(info_error)}")
+                        result["system_info"]["error"] = str(info_error)
                     
-                    # Check if Nginx is installed and get its version
-                    stdin, stdout, stderr = ssh.exec_command("nginx -v 2>&1 || echo 'Not installed'")
-                    nginx_version = stdout.read().decode('utf-8').strip()
-                    result["system_info"]["nginx_installed"] = "Not installed" not in nginx_version
-                    result["system_info"]["nginx_version"] = nginx_version if "Not installed" not in nginx_version else None
+                    return result
                     
-                    # Get Nginx configuration path
-                    stdin, stdout, stderr = ssh.exec_command("find /etc -type d -name 'nginx' 2>/dev/null | grep -v modules")
-                    nginx_paths = stdout.read().decode('utf-8').strip().split('\n')
-                    
-                    for path in nginx_paths:
-                        if path and os.path.exists(path):
-                            # Check if this contains configuration files
-                            stdin, stdout, stderr = ssh.exec_command(f"find {path} -name '*.conf' | wc -l")
-                            conf_count = int(stdout.read().decode('utf-8').strip() or 0)
-                            
-                            if conf_count > 0:
-                                result["nginx_conf_path"] = path
-                                break
-                    
-                    # Get available disk space
-                    stdin, stdout, stderr = ssh.exec_command("df -h / | tail -1 | awk '{print $4}'")
-                    disk_space = stdout.read().decode('utf-8').strip()
-                    result["system_info"]["available_disk"] = disk_space
-                    
-                    # Get total memory
-                    stdin, stdout, stderr = ssh.exec_command("free -h | grep Mem | awk '{print $2}'")
-                    total_memory = stdout.read().decode('utf-8').strip()
-                    result["system_info"]["total_memory"] = total_memory
-                    
-                    # Get CPU info
-                    stdin, stdout, stderr = ssh.exec_command("grep 'model name' /proc/cpuinfo | head -1 | cut -d: -f2")
-                    cpu_model = stdout.read().decode('utf-8').strip()
-                    result["system_info"]["cpu_model"] = cpu_model
-                    
-                    stdin, stdout, stderr = ssh.exec_command("grep -c processor /proc/cpuinfo")
-                    cpu_cores = stdout.read().decode('utf-8').strip()
-                    result["system_info"]["cpu_cores"] = cpu_cores
-                    
-                except Exception as info_error:
-                    log_activity('warning', f"Error getting system information for {ip_address}: {str(info_error)}")
-                    result["system_info"]["error"] = str(info_error)
-                
-                ssh.close()
-                return result
-                
-            except (paramiko.AuthenticationException, paramiko.SSHException) as auth_error:
-                error_message = f"Authentication failed for {username}@{ip_address}: {str(auth_error)}"
-                log_activity('warning', error_message)
-                
-                if attempt < max_attempts - 1:
-                    time.sleep(connection_delay)
-                    continue
-                    
-                ssh.close()
-                return {
-                    "success": False,
-                    "message": error_message
-                }
-                
-            except (socket.timeout, socket.error, ConnectionError) as conn_error:
-                error_message = f"Connection error to {ip_address}:{port}: {str(conn_error)}"
-                log_activity('warning', error_message)
-                
-                if attempt < max_attempts - 1:
-                    time.sleep(connection_delay)
-                    continue
-                    
-                ssh.close()
-                return {
-                    "success": False,
-                    "message": error_message
-                }
-                
             except Exception as e:
-                error_message = f"Error verifying SSH access to {ip_address}: {str(e)}"
+                error_message = f"Error connecting to {ip_address}:{port}: {str(e)}"
                 log_activity('warning', error_message)
                 
-                ssh.close()
+                if attempt < max_attempts - 1:
+                    time.sleep(connection_delay)
+                    continue
+                    
                 return {
                     "success": False,
                     "message": error_message
@@ -495,178 +459,159 @@ class NodeDiscoveryService:
                 "message": f"Node {node.name} is not active. Verify SSH access first."
             }
         
-        import paramiko
-        import time
-        
-        ssh = paramiko.SSHClient()
-        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        
         try:
-            # Connect to the node
-            if node.ssh_key_path:
-                ssh.connect(
-                    hostname=node.ip_address,
-                    port=node.ssh_port,
-                    username=node.ssh_user,
-                    key_filename=node.ssh_key_path
-                )
-            else:
-                ssh.connect(
-                    hostname=node.ip_address,
-                    port=node.ssh_port,
-                    username=node.ssh_user,
-                    password=node.ssh_password
-                )
-            
-            # Check if Nginx is installed
-            stdin, stdout, stderr = ssh.exec_command("which nginx || echo 'Not installed'")
-            nginx_check = stdout.read().decode('utf-8').strip()
-            
-            if nginx_check == 'Not installed':
-                # Install Nginx
-                log_activity('info', f"Installing Nginx on node {node.name}")
-                
-                # Check OS to determine installation method
-                stdin, stdout, stderr = ssh.exec_command(
-                    "if [ -f /etc/debian_version ]; then "
-                    "echo 'debian'; "
-                    "elif [ -f /etc/redhat-release ]; then "
-                    "echo 'redhat'; "
-                    "elif [ -f /etc/alpine-release ]; then "
-                    "echo 'alpine'; "
-                    "else "
-                    "echo 'unknown'; "
-                    "fi"
-                )
-                os_type = stdout.read().decode('utf-8').strip()
-                
-                if os_type == 'debian':
-                    stdin, stdout, stderr = ssh.exec_command(
-                        "apt-get update && apt-get install -y nginx"
-                    )
-                elif os_type == 'redhat':
-                    stdin, stdout, stderr = ssh.exec_command(
-                        "yum install -y nginx"
-                    )
-                elif os_type == 'alpine':
-                    stdin, stdout, stderr = ssh.exec_command(
-                        "apk add --no-cache nginx"
-                    )
-                else:
-                    ssh.close()
-                    return {
-                        "success": False,
-                        "message": f"Unsupported OS type: {os_type}"
-                    }
-                
-                # Wait for installation to complete
-                exit_status = stdout.channel.recv_exit_status()
-                
-                if exit_status != 0:
-                    error = stderr.read().decode('utf-8')
-                    ssh.close()
-                    return {
-                        "success": False,
-                        "message": f"Failed to install Nginx: {error}"
-                    }
-                
-                # Check Nginx again
-                stdin, stdout, stderr = ssh.exec_command("which nginx || echo 'Not installed'")
-                nginx_check = stdout.read().decode('utf-8').strip()
+            # Connect to the node using SSHConnectionService
+            with SSHConnectionService.get_connection(node) as ssh_client:
+                # Check if Nginx is installed
+                exit_code, stdout, stderr = SSHConnectionService.execute_command(ssh_client, "which nginx || echo 'Not installed'")
+                nginx_check = stdout.strip()
                 
                 if nginx_check == 'Not installed':
-                    ssh.close()
-                    return {
-                        "success": False,
-                        "message": "Failed to install Nginx"
-                    }
-            
-            # Get Nginx version
-            stdin, stdout, stderr = ssh.exec_command("nginx -v 2>&1")
-            nginx_version = stdout.read().decode('utf-8').strip()
-            
-            # Detect Nginx configuration paths
-            stdin, stdout, stderr = ssh.exec_command("find /etc -name nginx.conf 2>/dev/null | head -1")
-            nginx_conf = stdout.read().decode('utf-8').strip()
-            
-            nginx_conf_path = None
-            nginx_sites_path = None
-            
-            if nginx_conf:
-                nginx_conf_path = os.path.dirname(nginx_conf)
+                    # Install Nginx
+                    log_activity('info', f"Installing Nginx on node {node.name}")
+                    
+                    # Check OS to determine installation method
+                    exit_code, stdout, stderr = SSHConnectionService.execute_command(
+                        ssh_client,
+                        "if [ -f /etc/debian_version ]; then "
+                        "echo 'debian'; "
+                        "elif [ -f /etc/redhat-release ]; then "
+                        "echo 'redhat'; "
+                        "elif [ -f /etc/alpine-release ]; then "
+                        "echo 'alpine'; "
+                        "else "
+                        "echo 'unknown'; "
+                        "fi"
+                    )
+                    os_type = stdout.strip()
+                    
+                    if os_type == 'debian':
+                        commands = [
+                            "apt-get update",
+                            "apt-get install -y nginx"
+                        ]
+                    elif os_type == 'redhat':
+                        commands = [
+                            "yum install -y nginx"
+                        ]
+                    elif os_type == 'alpine':
+                        commands = [
+                            "apk add --no-cache nginx"
+                        ]
+                    else:
+                        return {
+                            "success": False,
+                            "message": f"Unsupported OS type: {os_type}"
+                        }
+                    
+                    # Execute installation commands
+                    success, results = SSHConnectionService.execute_commands(ssh_client, commands)
+                    
+                    if not success:
+                        for cmd, exit_code, stdout, stderr in results:
+                            if exit_code != 0:
+                                return {
+                                    "success": False,
+                                    "message": f"Failed to install Nginx: {stderr}"
+                                }
+                    
+                    # Check Nginx again
+                    exit_code, stdout, stderr = SSHConnectionService.execute_command(ssh_client, "which nginx || echo 'Not installed'")
+                    nginx_check = stdout.strip()
+                    
+                    if nginx_check == 'Not installed':
+                        return {
+                            "success": False,
+                            "message": "Failed to install Nginx"
+                        }
                 
-                # Check for common sites directories
-                potential_sites_paths = [
-                    f"{nginx_conf_path}/sites-available",
-                    f"{nginx_conf_path}/conf.d",
-                    f"{nginx_conf_path}/sites-enabled"
-                ]
+                # Get Nginx version
+                exit_code, stdout, stderr = SSHConnectionService.execute_command(ssh_client, "nginx -v 2>&1")
+                nginx_version = stdout.strip()
                 
-                for path in potential_sites_paths:
-                    stdin, stdout, stderr = ssh.exec_command(f"test -d {path} && echo 'exists' || echo 'not found'")
-                    if stdout.read().decode('utf-8').strip() == 'exists':
-                        nginx_sites_path = path
-                        break
+                # Detect Nginx configuration paths
+                exit_code, stdout, stderr = SSHConnectionService.execute_command(ssh_client, "find /etc -name nginx.conf 2>/dev/null | head -1")
+                nginx_conf = stdout.strip()
                 
-                # If sites path not found, use conf.d
-                if not nginx_sites_path:
-                    # Create conf.d directory if it doesn't exist
-                    nginx_sites_path = f"{nginx_conf_path}/conf.d"
-                    stdin, stdout, stderr = ssh.exec_command(f"mkdir -p {nginx_sites_path}")
-            
-            # Update node record
-            if nginx_conf_path:
-                node.nginx_conf_path = nginx_conf_path
-            if nginx_sites_path:
-                node.nginx_sites_path = nginx_sites_path
-            
-            # Get Nginx reload command
-            stdin, stdout, stderr = ssh.exec_command("which systemctl >/dev/null 2>&1 && echo 'systemctl' || echo 'service'")
-            service_manager = stdout.read().decode('utf-8').strip()
-            
-            if service_manager == 'systemctl':
-                node.nginx_reload_command = "systemctl reload nginx"
-            else:
-                node.nginx_reload_command = "service nginx reload"
-            
-            # Create necessary directories for hosting
-            stdin, stdout, stderr = ssh.exec_command("mkdir -p /var/www/html")
-            
-            # Create test file
-            timestamp = int(time.time())
-            test_content = f"Node {node.name} is ready for hosting. Configured at {timestamp}"
-            
-            stdin, stdout, stderr = ssh.exec_command(f"echo '{test_content}' > /var/www/html/cdntest.txt")
-            
-            # Make node active
-            node.is_active = True
-            node.auto_configured = True
-            node.nginx_version = nginx_version
-            node.updated_at = datetime.utcnow()
-            
-            db.session.commit()
-            ssh.close()
-            
-            log_activity('info', f"Node {node.name} has been auto-configured for hosting")
-            
-            return {
-                "success": True,
-                "message": f"Node {node.name} has been auto-configured for hosting",
-                "nginx_conf_path": nginx_conf_path,
-                "nginx_sites_path": nginx_sites_path,
-                "nginx_version": nginx_version,
-                "test_file": "/var/www/html/cdntest.txt"
-            }
-            
+                nginx_conf_path = None
+                nginx_sites_path = None
+                
+                if nginx_conf:
+                    nginx_conf_path = os.path.dirname(nginx_conf)
+                    
+                    # Check for common sites directories
+                    potential_sites_paths = [
+                        f"{nginx_conf_path}/sites-available",
+                        f"{nginx_conf_path}/conf.d",
+                        f"{nginx_conf_path}/sites-enabled"
+                    ]
+                    
+                    for path in potential_sites_paths:
+                        exit_code, stdout, stderr = SSHConnectionService.execute_command(
+                            ssh_client, 
+                            f"test -d {path} && echo 'exists' || echo 'not found'"
+                        )
+                        if stdout.strip() == 'exists':
+                            nginx_sites_path = path
+                            break
+                    
+                    # If sites path not found, use conf.d
+                    if not nginx_sites_path:
+                        # Create conf.d directory if it doesn't exist
+                        nginx_sites_path = f"{nginx_conf_path}/conf.d"
+                        exit_code, stdout, stderr = SSHConnectionService.execute_command(ssh_client, f"mkdir -p {nginx_sites_path}")
+                
+                # Update node record
+                if nginx_conf_path:
+                    node.nginx_conf_path = nginx_conf_path
+                if nginx_sites_path:
+                    node.nginx_sites_path = nginx_sites_path
+                
+                # Get Nginx reload command
+                exit_code, stdout, stderr = SSHConnectionService.execute_command(
+                    ssh_client, 
+                    "which systemctl >/dev/null 2>&1 && echo 'systemctl' || echo 'service'"
+                )
+                service_manager = stdout.strip()
+                
+                if service_manager == 'systemctl':
+                    node.nginx_reload_command = "systemctl reload nginx"
+                else:
+                    node.nginx_reload_command = "service nginx reload"
+                
+                # Create necessary directories for hosting
+                exit_code, stdout, stderr = SSHConnectionService.execute_command(ssh_client, "mkdir -p /var/www/html")
+                
+                # Create test file
+                import time
+                timestamp = int(time.time())
+                test_content = f"Node {node.name} is ready for hosting. Configured at {timestamp}"
+                
+                exit_code, stdout, stderr = SSHConnectionService.execute_command(ssh_client, f"echo '{test_content}' > /var/www/html/cdntest.txt")
+                
+                # Make node active
+                node.is_active = True
+                node.auto_configured = True
+                node.nginx_version = nginx_version
+                node.updated_at = datetime.utcnow()
+                
+                db.session.commit()
+                
+                log_activity('info', f"Node {node.name} has been auto-configured for hosting")
+                
+                return {
+                    "success": True,
+                    "message": f"Node {node.name} has been auto-configured for hosting",
+                    "nginx_conf_path": nginx_conf_path,
+                    "nginx_sites_path": nginx_sites_path,
+                    "nginx_version": nginx_version,
+                    "test_file": "/var/www/html/cdntest.txt"
+                }
+                
         except Exception as e:
             db.session.rollback()
             log_activity('error', f"Error auto-configuring node {node.name}: {str(e)}")
             
-            try:
-                ssh.close()
-            except:
-                pass
-                
             return {
                 "success": False,
                 "message": f"Error auto-configuring node: {str(e)}"
@@ -706,7 +651,6 @@ class NodeDiscoveryService:
             dict: Results of the connectivity check with node statuses
         """
         import socket
-        import paramiko
         import time
         
         # Initialize results
@@ -738,7 +682,6 @@ class NodeDiscoveryService:
             ssh_connection_successful = False
             connection_error = None
             start_time = time.time()
-            ssh_client = None
             
             try:
                 # Port connectivity check with timeout
@@ -756,90 +699,61 @@ class NodeDiscoveryService:
                     
                     for attempt in range(max_retries):
                         try:
-                            ssh_client = paramiko.SSHClient()
-                            ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                            
-                            # Set a reasonable timeout for SSH connection
-                            if node.ssh_key_path:
-                                ssh_client.connect(
-                                    hostname=node.ip_address,
-                                    port=node.ssh_port,
-                                    username=node.ssh_user,
-                                    key_filename=node.ssh_key_path,
-                                    timeout=5
-                                )
-                            else:
-                                ssh_client.connect(
-                                    hostname=node.ip_address,
-                                    port=node.ssh_port,
-                                    username=node.ssh_user,
-                                    password=node.ssh_password,
-                                    timeout=5
+                            # Use SSHConnectionService to establish connection
+                            with SSHConnectionService.get_connection(node, timeout=5) as ssh_client:
+                                # If we get here, connection successful
+                                ssh_connection_successful = True
+                                
+                                # Get basic system info for validation
+                                exit_code, stdout, stderr = SSHConnectionService.execute_command(
+                                    ssh_client,
+                                    "hostname && uptime && uname -a"
                                 )
                                 
-                            # If we get here, connection successful
-                            ssh_connection_successful = True
-                            
-                            # Get basic system info for validation
-                            stdin, stdout, stderr = ssh_client.exec_command(
-                                "hostname && uptime && uname -a"
-                            )
-                            
-                            # Wait for command to complete (with timeout)
-                            if stdout.channel.recv_exit_status() == 0:
-                                system_info = stdout.read().decode('utf-8').strip()
-                                node_result['system_info'] = system_info
-                                
-                                # Check for Nginx
-                                stdin, stdout, stderr = ssh_client.exec_command(
-                                    "which nginx 2>/dev/null || echo 'not installed'"
-                                )
-                                nginx_status = stdout.read().decode('utf-8').strip()
-                                node_result['has_nginx'] = nginx_status != 'not installed'
-                                
-                                # Check Nginx configuration directory
-                                if node.nginx_config_path:
-                                    stdin, stdout, stderr = ssh_client.exec_command(
-                                        f"test -d {node.nginx_config_path} && echo 'exists' || echo 'not found'"
+                                # Only process output if command succeeded
+                                if exit_code == 0:
+                                    system_info = stdout.strip()
+                                    node_result['system_info'] = system_info
+                                    
+                                    # Check for Nginx
+                                    exit_code, stdout, stderr = SSHConnectionService.execute_command(
+                                        ssh_client,
+                                        "which nginx 2>/dev/null || echo 'not installed'"
                                     )
-                                    config_dir_status = stdout.read().decode('utf-8').strip()
-                                    node_result['nginx_config_path_exists'] = config_dir_status == 'exists'
+                                    nginx_status = stdout.strip()
+                                    node_result['has_nginx'] = nginx_status != 'not installed'
+                                    
+                                    # Check Nginx configuration directory
+                                    if node.nginx_config_path:
+                                        exit_code, stdout, stderr = SSHConnectionService.execute_command(
+                                            ssh_client,
+                                            f"test -d {node.nginx_config_path} && echo 'exists' || echo 'not found'"
+                                        )
+                                        config_dir_status = stdout.strip()
+                                        node_result['nginx_config_path_exists'] = config_dir_status == 'exists'
+                                    
+                                    # Check disk space
+                                    exit_code, stdout, stderr = SSHConnectionService.execute_command(
+                                        ssh_client,
+                                        "df -h / | tail -1 | awk '{print $5}'"
+                                    )
+                                    disk_usage = stdout.strip()
+                                    if disk_usage.endswith('%'):
+                                        disk_usage_pct = int(disk_usage.rstrip('%'))
+                                        node_result['disk_usage'] = disk_usage
+                                        if disk_usage_pct > 90:
+                                            node_result['disk_warning'] = True
                                 
-                                # Check disk space
-                                stdin, stdout, stderr = ssh_client.exec_command(
-                                    "df -h / | tail -1 | awk '{print $5}'"
-                                )
-                                disk_usage = stdout.read().decode('utf-8').strip()
-                                if disk_usage.endswith('%'):
-                                    disk_usage_pct = int(disk_usage.rstrip('%'))
-                                    node_result['disk_usage'] = disk_usage
-                                    if disk_usage_pct > 90:
-                                        node_result['disk_warning'] = True
-                            
-                            ssh_client.close()
-                            ssh_client = None
-                            break
-                            
+                                break
+                                
                         except Exception as ssh_error:
                             connection_error = str(ssh_error)
                             if attempt < max_retries - 1:
                                 time.sleep(retry_delay)
-                            if ssh_client:
-                                ssh_client.close()
-                                ssh_client = None
                                 
             except Exception as e:
                 connection_error = str(e)
-                if ssh_client:
-                    ssh_client.close()
-                    ssh_client = None
                 
-            finally:
-                # Ensure ssh_client is closed in all cases
-                if ssh_client:
-                    ssh_client.close()
-                    ssh_client = None
-                    
             # Calculate response time
             response_time = time.time() - start_time
             node_result['response_time'] = round(response_time * 1000)  # in milliseconds
