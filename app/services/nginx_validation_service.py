@@ -810,3 +810,344 @@ http {
                 result["suggestion"] = f"There are duplicate listen directives for {listen_match.group(1)}. Check for conflicts with other server blocks."
         
         return result
+    
+    @staticmethod
+    def check_available_certificates(ssh_client, domain):
+        """
+        Check all available certificate storage locations for a given domain
+        
+        Args:
+            ssh_client: Connected SSH client
+            domain: Domain to check certificates for
+            
+        Returns:
+            dict: Dictionary with certificate details if found
+        """
+        cert_locations = [
+            # Standard Let's Encrypt location
+            f"/etc/letsencrypt/live/{domain}/fullchain.pem",
+            # Alternative Let's Encrypt location for renewed certs
+            f"/etc/letsencrypt/renewal/{domain}.conf",
+            # Certbot webroot style
+            f"/var/lib/letsencrypt/certificates/{domain}/fullchain.pem",
+            # Traditional self-signed or manually placed location
+            f"/etc/ssl/certs/{domain}.crt",
+            # Common manual location
+            f"/etc/nginx/ssl/{domain}/fullchain.pem",
+            # cPanel style certificate location
+            f"/var/cpanel/ssl/installed/certs/{domain}.crt",
+            # Apache style
+            f"/etc/apache2/ssl/{domain}.crt",
+            # Plesk style
+            f"/var/www/vhosts/{domain}/ssl/ssl.crt",
+            # Wildcard domain certificate check
+            f"/etc/letsencrypt/live/*.{domain.split('.',1)[-1]}/fullchain.pem"
+        ]
+        
+        # Check for existence of certificate files
+        for cert_path in cert_locations:
+            # Handle wildcard paths separately with find command
+            if '*' in cert_path:
+                base_dir = cert_path.split('*')[0]
+                pattern = cert_path.split('/')[-1]
+                cmd = f"find {base_dir} -name '{pattern}' 2>/dev/null | head -1 || echo 'not found'"
+                stdin, stdout, stderr = ssh_client.exec_command(cmd)
+                result = stdout.read().decode('utf-8').strip()
+                if result != 'not found':
+                    cert_path = result
+                    log_activity('info', f"Found wildcard certificate at {cert_path}")
+            else:
+                # Regular path check
+                stdin, stdout, stderr = ssh_client.exec_command(f"test -f {cert_path} && echo 'exists' || echo 'not found'")
+                result = stdout.read().decode('utf-8').strip()
+                if result != 'exists':
+                    continue
+            
+            # If we get here, we found a certificate
+            log_activity('info', f"Found certificate for {domain} at {cert_path}")
+            
+            # Determine related key and chain files based on the found certificate
+            cert_dir = os.path.dirname(cert_path)
+            cert_name = os.path.basename(cert_path).replace('fullchain.pem', '').replace('.crt', '')
+            
+            # Check common key naming patterns
+            key_paths = [
+                os.path.join(cert_dir, 'privkey.pem'),
+                os.path.join(cert_dir, f'{cert_name}.key'),
+                os.path.join(cert_dir, 'private.key'),
+                cert_path.replace('fullchain.pem', 'privkey.pem').replace('.crt', '.key')
+            ]
+            
+            # Find the key file
+            key_path = None
+            for kp in key_paths:
+                stdin, stdout, stderr = ssh_client.exec_command(f"test -f {kp} && echo 'exists' || echo 'not found'")
+                if stdout.read().decode('utf-8').strip() == 'exists':
+                    key_path = kp
+                    break
+            
+            # Check certificate details like expiration and domains
+            cert_info_cmd = f"openssl x509 -in {cert_path} -noout -dates -subject -ext subjectAltName 2>/dev/null || echo 'cert info failed'"
+            stdin, stdout, stderr = ssh_client.exec_command(cert_info_cmd)
+            cert_info = stdout.read().decode('utf-8').strip()
+            
+            # Extract expiration date
+            expiry_match = re.search(r'notAfter=(.*)', cert_info)
+            expiry_date = expiry_match.group(1).strip() if expiry_match else "Unknown"
+            
+            # Extract domains
+            domains = []
+            san_match = re.search(r'DNS:(.*)', cert_info)
+            if san_match:
+                # Extract all DNS entries from SAN
+                domains = [d.strip() for d in san_match.group(1).split(',') if d.strip().startswith('DNS:')]
+                domains = [d.replace('DNS:', '') for d in domains]
+            
+            return {
+                "certificate_path": cert_path,
+                "key_path": key_path,
+                "found": True,
+                "expiry_date": expiry_date,
+                "domains": domains
+            }
+        
+        # No certificates found
+        return {
+            "found": False
+        }
+    
+    @staticmethod
+    def validate_upstream_configs(config_content, ssh_client=None):
+        """
+        Validate upstream server references in the Nginx config
+        
+        Args:
+            config_content: String containing the Nginx configuration
+            ssh_client: Optional SSH client for resolving hostnames on the target server
+            
+        Returns:
+            tuple: (is_valid, warnings, upstream_info)
+        """
+        warnings = []
+        upstream_info = {}
+        
+        # Check for upstream blocks
+        upstream_blocks = re.findall(r'upstream\s+([^\s{]+)\s*{([^}]+)}', config_content)
+        
+        # Extract servers from each upstream block
+        for upstream_name, upstream_content in upstream_blocks:
+            servers = []
+            server_matches = re.findall(r'server\s+([^;]+);', upstream_content)
+            
+            for server_line in server_matches:
+                # Parse server address and options
+                parts = server_line.split()
+                server_addr = parts[0]
+                
+                # Handle optional weight, max_fails, fail_timeout parameters
+                options = {}
+                for part in parts[1:]:
+                    if '=' in part:
+                        key, value = part.split('=', 1)
+                        options[key] = value
+                
+                servers.append({
+                    "address": server_addr,
+                    "options": options
+                })
+            
+            upstream_info[upstream_name] = {
+                "name": upstream_name,
+                "servers": servers
+            }
+            
+            # Validate each server in the upstream
+            for server in servers:
+                server_addr = server["address"]
+                
+                # Check if it's an IP:PORT format
+                if re.match(r'^[\d\.]+:\d+$', server_addr):
+                    ip, port = server_addr.split(':')
+                    
+                    # Basic IP validation
+                    try:
+                        socket.inet_aton(ip)
+                    except socket.error:
+                        warnings.append(f"Invalid IP address in upstream {upstream_name}: {ip}")
+                    
+                    # Port validation
+                    try:
+                        port_num = int(port)
+                        if port_num < 1 or port_num > 65535:
+                            warnings.append(f"Invalid port in upstream {upstream_name}: {port}")
+                    except ValueError:
+                        warnings.append(f"Invalid port in upstream {upstream_name}: {port}")
+                
+                # Check if it's a hostname:PORT format
+                elif ':' in server_addr:
+                    hostname, port = server_addr.split(':', 1)
+                    
+                    # Resolve hostname on target server if SSH client provided
+                    if ssh_client:
+                        # Run a quick DNS check to see if the hostname resolves
+                        cmd = f"getent hosts {hostname} || host {hostname} || echo 'not found'"
+                        stdin, stdout, stderr = ssh_client.exec_command(cmd)
+                        result = stdout.read().decode('utf-8').strip()
+                        
+                        if 'not found' in result and 'has address' not in result:
+                            warnings.append(f"Unable to resolve hostname in upstream {upstream_name}: {hostname}")
+                    
+                    # Port validation
+                    try:
+                        port_num = int(port)
+                        if port_num < 1 or port_num > 65535:
+                            warnings.append(f"Invalid port in upstream {upstream_name}: {port}")
+                    except ValueError:
+                        warnings.append(f"Invalid port in upstream {upstream_name}: {port}")
+                
+                # Unix socket validation
+                elif server_addr.startswith('unix:'):
+                    socket_path = server_addr[5:]
+                    
+                    # Check if socket file exists on target server if SSH client provided
+                    if ssh_client:
+                        cmd = f"test -S {socket_path} && echo 'exists' || echo 'not found'"
+                        stdin, stdout, stderr = ssh_client.exec_command(cmd)
+                        result = stdout.read().decode('utf-8').strip()
+                        
+                        if result == 'not found':
+                            warnings.append(f"Unix socket not found in upstream {upstream_name}: {socket_path}")
+        
+        # Check for references to upstreams in proxy_pass directives
+        proxy_pass_matches = re.findall(r'proxy_pass\s+http[s]?://([^/;]+)', config_content)
+        
+        for proxy_target in proxy_pass_matches:
+            # Check if it's a reference to a defined upstream
+            if proxy_target in upstream_info:
+                continue
+            
+            # Not a defined upstream, so it should be a valid hostname, IP, or unix socket
+            if ':' in proxy_target:
+                host, port = proxy_target.split(':', 1)
+                
+                # Try to resolve the hostname if SSH client provided
+                if ssh_client and not re.match(r'^[\d\.]+$', host):
+                    cmd = f"getent hosts {host} || host {host} || echo 'not found'"
+                    stdin, stdout, stderr = ssh_client.exec_command(cmd)
+                    result = stdout.read().decode('utf-8').strip()
+                    
+                    if 'not found' in result and 'has address' not in result:
+                        warnings.append(f"Unable to resolve proxy_pass target: {host}")
+            
+        is_valid = len(warnings) == 0
+        return is_valid, warnings, upstream_info
+    
+    @staticmethod
+    def validate_ssl_chain(config_content, ssh_client=None):
+        """
+        Validate SSL certificate chain configuration
+        
+        Args:
+            config_content: String containing the Nginx configuration
+            ssh_client: Optional SSH client for checking certificates on a remote server
+            
+        Returns:
+            tuple: (is_valid, warnings, chain_info)
+        """
+        warnings = []
+        chain_info = {
+            "has_chain": False,
+            "chain_complete": False,
+            "chain_verified": False,
+            "chain_length": 0,
+            "issues": []
+        }
+        
+        # Extract SSL certificate paths from config
+        ssl_certificate, ssl_certificate_key = NginxValidationService.extract_ssl_file_paths(config_content)
+        
+        if not ssl_certificate:
+            return True, [], chain_info  # No SSL certificate to validate
+        
+        # Check if SSL chain is configured
+        chain_info["has_chain"] = "ssl_trusted_certificate" in config_content
+        
+        # Extract SSL trusted certificate path if present
+        trusted_cert_match = re.search(r'ssl_trusted_certificate\s+([^;]+);', config_content)
+        trusted_cert_path = trusted_cert_match.group(1).strip() if trusted_cert_match else None
+        
+        # If there's no SSH client or certificates, we can't perform remote validation
+        if not ssh_client:
+            if trusted_cert_path:
+                chain_info["has_chain"] = True
+                warnings.append("SSL chain is configured but cannot be verified without server access")
+            return len(warnings) == 0, warnings, chain_info
+        
+        # Check if we can access the certificate on the remote server
+        if ssl_certificate:
+            # Check if certificate exists
+            stdin, stdout, stderr = ssh_client.exec_command(f"test -f {ssl_certificate} && echo 'exists' || echo 'not found'")
+            cert_exists = stdout.read().decode('utf-8').strip() == 'exists'
+            
+            if not cert_exists:
+                warnings.append(f"SSL certificate file not found: {ssl_certificate}")
+                chain_info["issues"].append("certificate_missing")
+                return False, warnings, chain_info
+            
+            # Check certificate chain completeness
+            cmd = f"openssl x509 -in {ssl_certificate} -noout -issuer -subject 2>/dev/null"
+            stdin, stdout, stderr = ssh_client.exec_command(cmd)
+            cert_info = stdout.read().decode('utf-8').strip()
+            
+            issuer_match = re.search(r'issuer=([^\n]+)', cert_info)
+            subject_match = re.search(r'subject=([^\n]+)', cert_info)
+            
+            if issuer_match and subject_match:
+                issuer = issuer_match.group(1)
+                subject = subject_match.group(1)
+                
+                # If issuer == subject, it's self-signed
+                if issuer == subject:
+                    chain_info["self_signed"] = True
+                    warnings.append("Certificate appears to be self-signed. This may cause browser warnings.")
+                    chain_info["issues"].append("self_signed")
+            
+            # Verify certificate chain if it's a fullchain.pem file or has a separate chain
+            is_fullchain = "fullchain" in ssl_certificate
+            chain_file = trusted_cert_path
+            
+            if is_fullchain or chain_file:
+                # Determine the target file to verify
+                check_file = ssl_certificate if is_fullchain else chain_file
+                
+                # Use openssl to verify the certificate chain
+                cmd = f"openssl verify -CAfile {check_file} {ssl_certificate} 2>&1 || echo 'verification failed'"
+                stdin, stdout, stderr = ssh_client.exec_command(cmd)
+                verify_result = stdout.read().decode('utf-8').strip()
+                
+                if "OK" in verify_result:
+                    chain_info["chain_verified"] = True
+                else:
+                    chain_info["issues"].append("chain_verification_failed")
+                    warnings.append(f"SSL certificate chain verification failed: {verify_result}")
+            
+            # Count certificates in the chain
+            if is_fullchain:
+                cmd = f"grep -c 'BEGIN CERTIFICATE' {ssl_certificate} || echo '0'"
+                stdin, stdout, stderr = ssh_client.exec_command(cmd)
+                cert_count = stdout.read().decode('utf-8').strip()
+                
+                try:
+                    chain_info["chain_length"] = int(cert_count)
+                    
+                    # Generally, a complete chain should have at least 2 certificates (leaf + CA)
+                    if chain_info["chain_length"] >= 2:
+                        chain_info["chain_complete"] = True
+                    else:
+                        warnings.append("SSL certificate chain may be incomplete (only contains leaf certificate)")
+                        chain_info["issues"].append("incomplete_chain")
+                except ValueError:
+                    pass
+        
+        is_valid = len(warnings) == 0
+        return is_valid, warnings, chain_info
