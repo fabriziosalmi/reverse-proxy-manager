@@ -216,7 +216,7 @@
                                     {% else %}
                                     bg-secondary-subtle text-secondary-emphasis border border-secondary-subtle
                                     {% endif %}">
-                                    <i class="fas {% if site.use_waf %}fa-shield-alt{% else %}fa-shield-alt{% endif %} me-1"></i>
+                                    <i class="fas {% if site.use_waf %}fa-shield-alt{% else %}fa-shield-slash{% endif %} me-1"></i>
                                     {{ 'Enabled' if site.use_waf else 'Disabled' }}
                                 </span>
                             </td>
@@ -334,6 +334,7 @@
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                 <form id="toggleSiteForm" method="POST" action="">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit" class="btn" id="toggleSiteButton">Confirm</button>
                 </form>
             </div>
@@ -362,6 +363,7 @@
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                 <form id="deleteSiteForm" method="POST" action="">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit" class="btn btn-danger">
                         <i class="fas fa-trash me-1"></i>Delete Site
                     </button>

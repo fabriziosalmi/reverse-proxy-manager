@@ -299,27 +299,35 @@
     
     <!-- Forms for POST actions -->
     <form id="activateSelectedForm" action="{{ url_for('admin.bulk_toggle_sites') }}" method="POST" class="d-none">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="action" value="activate">
         <input type="hidden" name="site_ids" id="activateSiteIds">
     </form>
     
     <form id="deactivateSelectedForm" action="{{ url_for('admin.bulk_toggle_sites') }}" method="POST" class="d-none">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="action" value="deactivate">
         <input type="hidden" name="site_ids" id="deactivateSiteIds">
     </form>
     
     <form id="blockSelectedForm" action="{{ url_for('admin.bulk_toggle_sites') }}" method="POST" class="d-none">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="action" value="block">
         <input type="hidden" name="site_ids" id="blockSiteIds">
     </form>
     
     <form id="unblockSelectedForm" action="{{ url_for('admin.bulk_toggle_sites') }}" method="POST" class="d-none">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="action" value="unblock">
         <input type="hidden" name="site_ids" id="unblockSiteIds">
     </form>
     
-    <form id="toggleStatusForm" action="" method="POST" class="d-none"></form>
-    <form id="toggleBlockedForm" action="" method="POST" class="d-none"></form>
+    <form id="toggleStatusForm" action="" method="POST" class="d-none">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    </form>
+    <form id="toggleBlockedForm" action="" method="POST" class="d-none">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    </form>
 </div>
 {% endblock %}
 

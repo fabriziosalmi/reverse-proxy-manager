@@ -1,25 +1,85 @@
 {% extends 'base.html' %}
 
-{% block title %}SSL Certificate Dashboard{% endblock %}
+{% block title %}SSL Certificate Dashboard - Italia CDN Proxy{% endblock %}
+
+{% block head_extra %}
+<style>
+    .card-stat {
+        border-radius: 0.5rem;
+        overflow: hidden;
+        transition: transform 0.2s ease-in-out;
+    }
+    .card-stat:hover {
+        transform: translateY(-5px);
+    }
+    .card-icon {
+        color: var(--bs-gray-400);
+    }
+    .status-badge {
+        font-size: 0.8rem;
+    }
+</style>
+{% endblock %}
 
 {% block content %}
-<div class="container-fluid">
-    <h1 class="h3 mb-4 text-gray-800">SSL Certificate Dashboard</h1>
+<div class="container py-4">
+    <nav aria-label="breadcrumb" class="mb-4">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{{ url_for('admin.dashboard') }}"><i class="fas fa-tachometer-alt me-1"></i>Dashboard</a></li>
+            <li class="breadcrumb-item active" aria-current="page"><i class="fas fa-shield-alt me-1"></i>SSL Certificate Dashboard</li>
+        </ol>
+    </nav>
+
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+        <h1 class="h3 mb-0">SSL Certificate Dashboard</h1>
+        <div class="d-flex gap-2">
+            <a href="{{ url_for('admin.initiate_certificate_request') }}" class="btn btn-success">
+                <i class="fas fa-plus-circle me-1"></i> Request New Certificate
+            </a>
+        </div>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                {% set alert_class = 'alert-info' %}
+                {% set icon_class = 'fa-info-circle' %}
+                {% if category == 'success' %}
+                    {% set alert_class = 'alert-success' %}
+                    {% set icon_class = 'fa-check-circle' %}
+                {% elif category == 'error' %}
+                    {% set alert_class = 'alert-danger' %}
+                    {% set icon_class = 'fa-exclamation-circle' %}
+                {% elif category == 'warning' %}
+                    {% set alert_class = 'alert-warning' %}
+                    {% set icon_class = 'fa-exclamation-triangle' %}
+                {% endif %}
+                <div class="alert {{ alert_class }} alert-dismissible fade show" role="alert">
+                    <div class="d-flex align-items-center">
+                        <i class="fas {{ icon_class }} me-2"></i>
+                        <div>{{ message }}</div>
+                    </div>
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
     
     <!-- Overview Cards -->
-    <div class="row">
+    <div class="row g-4 mb-4">
         <!-- Total Certificates Card -->
-        <div class="col-xl-3 col-md-6 mb-4">
-            <div class="card border-left-primary shadow h-100 py-2">
+        <div class="col-xl-3 col-md-6">
+            <div class="card shadow-sm card-stat h-100 border-start border-primary border-4">
                 <div class="card-body">
-                    <div class="row no-gutters align-items-center">
-                        <div class="col mr-2">
-                            <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
-                                Total Certificates</div>
-                            <div class="h5 mb-0 font-weight-bold text-gray-800">{{ cert_health.total_certificates }}</div>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <h6 class="text-primary fw-bold text-uppercase mb-1">
+                                Total Certificates
+                            </h6>
+                            <div class="h3 mb-0 fw-bold">{{ cert_health.total_certificates }}</div>
                         </div>
-                        <div class="col-auto">
-                            <i class="fas fa-certificate fa-2x text-gray-300"></i>
+                        <div class="card-icon">
+                            <i class="fas fa-certificate fa-2x"></i>
                         </div>
                     </div>
                 </div>
@@ -27,17 +87,18 @@
         </div>
 
         <!-- Valid Certificates Card -->
-        <div class="col-xl-3 col-md-6 mb-4">
-            <div class="card border-left-success shadow h-100 py-2">
+        <div class="col-xl-3 col-md-6">
+            <div class="card shadow-sm card-stat h-100 border-start border-success border-4">
                 <div class="card-body">
-                    <div class="row no-gutters align-items-center">
-                        <div class="col mr-2">
-                            <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
-                                Valid Certificates</div>
-                            <div class="h5 mb-0 font-weight-bold text-gray-800">{{ cert_health.valid_certificates }}</div>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <h6 class="text-success fw-bold text-uppercase mb-1">
+                                Valid Certificates
+                            </h6>
+                            <div class="h3 mb-0 fw-bold">{{ cert_health.valid_certificates }}</div>
                         </div>
-                        <div class="col-auto">
-                            <i class="fas fa-check-circle fa-2x text-gray-300"></i>
+                        <div class="card-icon">
+                            <i class="fas fa-check-circle fa-2x"></i>
                         </div>
                     </div>
                 </div>
@@ -45,17 +106,18 @@
         </div>
 
         <!-- Expiring Soon Card -->
-        <div class="col-xl-3 col-md-6 mb-4">
-            <div class="card border-left-warning shadow h-100 py-2">
+        <div class="col-xl-3 col-md-6">
+            <div class="card shadow-sm card-stat h-100 border-start border-warning border-4">
                 <div class="card-body">
-                    <div class="row no-gutters align-items-center">
-                        <div class="col mr-2">
-                            <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">
-                                Expiring Soon</div>
-                            <div class="h5 mb-0 font-weight-bold text-gray-800">{{ cert_health.expiring_soon|length }}</div>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <h6 class="text-warning fw-bold text-uppercase mb-1">
+                                Expiring Soon
+                            </h6>
+                            <div class="h3 mb-0 fw-bold">{{ cert_health.expiring_soon|length }}</div>
                         </div>
-                        <div class="col-auto">
-                            <i class="fas fa-exclamation-triangle fa-2x text-gray-300"></i>
+                        <div class="card-icon">
+                            <i class="fas fa-exclamation-triangle fa-2x"></i>
                         </div>
                     </div>
                 </div>
@@ -63,17 +125,18 @@
         </div>
 
         <!-- Expired Card -->
-        <div class="col-xl-3 col-md-6 mb-4">
-            <div class="card border-left-danger shadow h-100 py-2">
+        <div class="col-xl-3 col-md-6">
+            <div class="card shadow-sm card-stat h-100 border-start border-danger border-4">
                 <div class="card-body">
-                    <div class="row no-gutters align-items-center">
-                        <div class="col mr-2">
-                            <div class="text-xs font-weight-bold text-danger text-uppercase mb-1">
-                                Expired</div>
-                            <div class="h5 mb-0 font-weight-bold text-gray-800">{{ cert_health.expired|length }}</div>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <h6 class="text-danger fw-bold text-uppercase mb-1">
+                                Expired
+                            </h6>
+                            <div class="h3 mb-0 fw-bold">{{ cert_health.expired|length }}</div>
                         </div>
-                        <div class="col-auto">
-                            <i class="fas fa-times-circle fa-2x text-gray-300"></i>
+                        <div class="card-icon">
+                            <i class="fas fa-times-circle fa-2x"></i>
                         </div>
                     </div>
                 </div>
@@ -81,269 +144,204 @@
         </div>
     </div>
 
-    <div class="row">
-        <!-- Expiring Soon Certificates -->
-        <div class="col-lg-6 mb-4">
-            <div class="card shadow mb-4">
-                <div class="card-header py-3">
-                    <h6 class="m-0 font-weight-bold text-primary">Certificates Expiring Soon</h6>
-                </div>
-                <div class="card-body">
-                    {% if cert_health.expiring_soon %}
-                        <div class="table-responsive">
-                            <table class="table table-bordered" width="100%" cellspacing="0">
-                                <thead>
-                                    <tr>
-                                        <th>Domain</th>
-                                        <th>Node</th>
-                                        <th>Expires</th>
-                                        <th>Days Left</th>
-                                        <th>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {% for cert in cert_health.expiring_soon %}
-                                    <tr>
-                                        <td>
-                                            {% if cert.is_wildcard %}<span class="badge badge-info">Wildcard</span>{% endif %}
-                                            <a href="{{ url_for('admin.view_site', site_id=cert.site_id) }}">{{ cert.domain }}</a>
-                                        </td>
-                                        <td>{{ cert.node_name }}</td>
-                                        <td>{{ cert.valid_until.strftime('%Y-%m-%d') }}</td>
-                                        <td>
-                                            <span class="badge badge-warning">{{ cert.days_remaining }} days</span>
-                                        </td>
-                                        <td>
-                                            <a href="{{ url_for('admin.manage_ssl_certificates', site_id=cert.site_id) }}" class="btn btn-sm btn-primary">Manage</a>
-                                        </td>
-                                    </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
-                    {% else %}
-                        <div class="alert alert-success">
-                            No certificates are expiring soon.
-                        </div>
-                    {% endif %}
-                </div>
-            </div>
+    <!-- Expiring Soon Table -->
+    {% if cert_health.expiring_soon %}
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-warning-subtle text-warning-emphasis">
+            <h5 class="card-title mb-0">
+                <i class="fas fa-clock me-2"></i>Certificates Expiring Soon
+            </h5>
         </div>
-
-        <!-- Expired Certificates -->
-        <div class="col-lg-6 mb-4">
-            <div class="card shadow mb-4">
-                <div class="card-header py-3">
-                    <h6 class="m-0 font-weight-bold text-primary">Expired Certificates</h6>
-                </div>
-                <div class="card-body">
-                    {% if cert_health.expired %}
-                        <div class="table-responsive">
-                            <table class="table table-bordered" width="100%" cellspacing="0">
-                                <thead>
-                                    <tr>
-                                        <th>Domain</th>
-                                        <th>Node</th>
-                                        <th>Expired On</th>
-                                        <th>Status</th>
-                                        <th>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {% for cert in cert_health.expired %}
-                                    <tr>
-                                        <td>
-                                            {% if cert.is_wildcard %}<span class="badge badge-info">Wildcard</span>{% endif %}
-                                            <a href="{{ url_for('admin.view_site', site_id=cert.site_id) }}">{{ cert.domain }}</a>
-                                        </td>
-                                        <td>{{ cert.node_name }}</td>
-                                        <td>{{ cert.valid_until.strftime('%Y-%m-%d') }}</td>
-                                        <td>
-                                            <span class="badge badge-danger">Expired</span>
-                                        </td>
-                                        <td>
-                                            <a href="{{ url_for('admin.manage_ssl_certificates', site_id=cert.site_id) }}" class="btn btn-sm btn-primary">Renew</a>
-                                        </td>
-                                    </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
-                    {% else %}
-                        <div class="alert alert-success">
-                            No expired certificates found.
-                        </div>
-                    {% endif %}
-                </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Domain</th>
+                            <th>Expires</th>
+                            <th>Days Left</th>
+                            <th>Nodes</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for cert in cert_health.expiring_soon %}
+                        <tr>
+                            <td>
+                                <strong>{{ cert.domain }}</strong>
+                                {% if cert.san %}
+                                <div class="small text-muted">+ {{ cert.san|length }} alternate names</div>
+                                {% endif %}
+                            </td>
+                            <td>{{ cert.expiry_date.strftime('%Y-%m-%d') }}</td>
+                            <td>
+                                <span class="badge rounded-pill bg-warning text-dark">{{ cert.days_left }} days</span>
+                            </td>
+                            <td>
+                                {% for node in cert.nodes %}
+                                <span class="badge bg-secondary">{{ node.name }}</span>
+                                {% endfor %}
+                            </td>
+                            <td>
+                                <div class="btn-group btn-group-sm">
+                                    <a href="{{ url_for('admin.view_certificate', cert_id=cert.id) }}" class="btn btn-outline-secondary" title="View Certificate">
+                                        <i class="fas fa-eye"></i>
+                                    </a>
+                                    <a href="{{ url_for('admin.renew_certificate', cert_id=cert.id) }}" class="btn btn-warning" title="Renew Certificate">
+                                        <i class="fas fa-sync-alt"></i> Renew
+                                    </a>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
         </div>
     </div>
+    {% endif %}
 
-    <!-- Self-Signed Certificates -->
-    <div class="row">
-        <div class="col-lg-12 mb-4">
-            <div class="card shadow mb-4">
-                <div class="card-header py-3">
-                    <h6 class="m-0 font-weight-bold text-primary">Self-Signed Certificates</h6>
-                </div>
-                <div class="card-body">
-                    {% if cert_health.self_signed %}
-                        <div class="alert alert-warning mb-3">
-                            <h5>Self-signed certificates are detected</h5>
-                            <p>These certificates are temporary placeholders and should be replaced with valid Let's Encrypt certificates. 
-                            Self-signed certificates will show browser warnings to your visitors.</p>
-                        </div>
-                        <div class="table-responsive">
-                            <table class="table table-bordered" width="100%" cellspacing="0">
-                                <thead>
-                                    <tr>
-                                        <th>Domain</th>
-                                        <th>Node</th>
-                                        <th>Valid Until</th>
-                                        <th>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {% for cert in cert_health.self_signed %}
-                                    <tr>
-                                        <td>
-                                            <a href="{{ url_for('admin.view_site', site_id=cert.site_id) }}">{{ cert.domain }}</a>
-                                        </td>
-                                        <td>{{ cert.node_name }}</td>
-                                        <td>{{ cert.valid_until.strftime('%Y-%m-%d') }}</td>
-                                        <td>
-                                            <a href="{{ url_for('admin.manage_ssl_certificates', site_id=cert.site_id) }}" class="btn btn-sm btn-primary">Replace with Real Certificate</a>
-                                        </td>
-                                    </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
-                    {% else %}
-                        <div class="alert alert-success">
-                            No self-signed certificates found.
-                        </div>
-                    {% endif %}
-                </div>
+    <!-- Expired Certificates Table -->
+    {% if cert_health.expired %}
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-danger-subtle text-danger-emphasis">
+            <h5 class="card-title mb-0">
+                <i class="fas fa-exclamation-circle me-2"></i>Expired Certificates
+            </h5>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Domain</th>
+                            <th>Expired On</th>
+                            <th>Days Expired</th>
+                            <th>Nodes</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for cert in cert_health.expired %}
+                        <tr>
+                            <td>
+                                <strong>{{ cert.domain }}</strong>
+                                {% if cert.san %}
+                                <div class="small text-muted">+ {{ cert.san|length }} alternate names</div>
+                                {% endif %}
+                            </td>
+                            <td>{{ cert.expiry_date.strftime('%Y-%m-%d') }}</td>
+                            <td>
+                                <span class="badge rounded-pill bg-danger">{{ -cert.days_left }} days ago</span>
+                            </td>
+                            <td>
+                                {% for node in cert.nodes %}
+                                <span class="badge bg-secondary">{{ node.name }}</span>
+                                {% endfor %}
+                            </td>
+                            <td>
+                                <div class="btn-group btn-group-sm">
+                                    <a href="{{ url_for('admin.view_certificate', cert_id=cert.id) }}" class="btn btn-outline-secondary" title="View Certificate">
+                                        <i class="fas fa-eye"></i>
+                                    </a>
+                                    <a href="{{ url_for('admin.renew_certificate', cert_id=cert.id) }}" class="btn btn-danger" title="Renew Certificate">
+                                        <i class="fas fa-sync-alt"></i> Renew Now
+                                    </a>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
         </div>
     </div>
+    {% endif %}
 
-    <!-- Certificate Renewal Status -->
-    <div class="row">
-        <div class="col-lg-12 mb-4">
-            <div class="card shadow mb-4">
-                <div class="card-header py-3">
-                    <h6 class="m-0 font-weight-bold text-primary">Certificate Renewal Status</h6>
-                </div>
-                <div class="card-body">
-                    <div class="row">
-                        <div class="col-md-4">
-                            <div class="card mb-4">
-                                <div class="card-body text-center">
-                                    <h4 class="text-success">{{ cert_health.renewal_status.configured }}</h4>
-                                    <p>Nodes with auto-renewal configured</p>
+    <!-- All Certificates Table -->
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-primary-subtle text-primary-emphasis d-flex justify-content-between align-items-center">
+            <h5 class="card-title mb-0">
+                <i class="fas fa-certificate me-2"></i>All Certificates
+            </h5>
+            <form method="GET" action="{{ url_for('admin.ssl_dashboard') }}" class="d-flex align-items-center">
+                <select name="filter" class="form-select form-select-sm me-2" style="width: 120px;">
+                    <option value="all" {% if request.args.get('filter') == 'all' %}selected{% endif %}>All</option>
+                    <option value="valid" {% if request.args.get('filter') == 'valid' %}selected{% endif %}>Valid</option>
+                    <option value="expiring" {% if request.args.get('filter') == 'expiring' %}selected{% endif %}>Expiring</option>
+                    <option value="expired" {% if request.args.get('filter') == 'expired' %}selected{% endif %}>Expired</option>
+                </select>
+                <button type="submit" class="btn btn-sm btn-outline-primary">
+                    <i class="fas fa-filter"></i>
+                </button>
+            </form>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Domain</th>
+                            <th>Issued On</th>
+                            <th>Expires On</th>
+                            <th>Status</th>
+                            <th>Issuer</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for cert in certificates %}
+                        <tr>
+                            <td>
+                                <strong>{{ cert.domain }}</strong>
+                                {% if cert.san %}
+                                <div class="small text-muted">+ {{ cert.san|length }} alternate names</div>
+                                {% endif %}
+                            </td>
+                            <td>{{ cert.issue_date.strftime('%Y-%m-%d') }}</td>
+                            <td>{{ cert.expiry_date.strftime('%Y-%m-%d') }}</td>
+                            <td>
+                                {% if cert.days_left < 0 %}
+                                <span class="badge bg-danger status-badge">Expired</span>
+                                {% elif cert.days_left < 30 %}
+                                <span class="badge bg-warning text-dark status-badge">Expiring in {{ cert.days_left }} days</span>
+                                {% else %}
+                                <span class="badge bg-success status-badge">Valid for {{ cert.days_left }} days</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <span class="badge bg-light text-dark border">{{ cert.issuer }}</span>
+                            </td>
+                            <td>
+                                <div class="btn-group btn-group-sm">
+                                    <a href="{{ url_for('admin.view_certificate', cert_id=cert.id) }}" class="btn btn-outline-secondary" title="View Certificate">
+                                        <i class="fas fa-eye"></i>
+                                    </a>
+                                    <a href="{{ url_for('admin.renew_certificate', cert_id=cert.id) }}" class="btn btn-outline-primary" title="Renew Certificate">
+                                        <i class="fas fa-sync-alt"></i>
+                                    </a>
+                                    <a href="{{ url_for('admin.revoke_certificate', cert_id=cert.id) }}" class="btn btn-outline-danger" 
+                                       title="Revoke Certificate" 
+                                       onclick="return confirm('Are you sure you want to revoke this certificate? This cannot be undone.');">
+                                        <i class="fas fa-trash-alt"></i>
+                                    </a>
                                 </div>
-                            </div>
-                        </div>
-                        <div class="col-md-4">
-                            <div class="card mb-4">
-                                <div class="card-body text-center">
-                                    <h4 class="text-danger">{{ cert_health.renewal_status.not_configured }}</h4>
-                                    <p>Nodes without auto-renewal</p>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-4">
-                            <div class="card mb-4">
-                                <div class="card-body text-center">
-                                    <a href="#" class="btn btn-primary mb-2">Configure Auto-Renewal</a>
-                                    <p>Set up automatic renewal for all nodes</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
         </div>
-    </div>
-
-    <!-- Sites with Certificates -->
-    <div class="row">
-        <div class="col-lg-12 mb-4">
-            <div class="card shadow mb-4">
-                <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
-                    <h6 class="m-0 font-weight-bold text-primary">Sites with SSL Certificates</h6>
-                    <div class="dropdown no-arrow">
-                        <a class="dropdown-toggle" href="#" role="button" id="dropdownMenuLink"
-                            data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-                            <i class="fas fa-ellipsis-v fa-sm fa-fw text-gray-400"></i>
-                        </a>
-                        <div class="dropdown-menu dropdown-menu-right shadow animated--fade-in"
-                            aria-labelledby="dropdownMenuLink">
-                            <div class="dropdown-header">Certificate Actions:</div>
-                            <a class="dropdown-item" href="#"><i class="fas fa-sync fa-sm fa-fw mr-2 text-gray-400"></i>Check All Certificates</a>
-                            <a class="dropdown-item" href="#"><i class="fas fa-cog fa-sm fa-fw mr-2 text-gray-400"></i>Configure Auto-renewal</a>
-                            <div class="dropdown-divider"></div>
-                            <a class="dropdown-item" href="#"><i class="fas fa-download fa-sm fa-fw mr-2 text-gray-400"></i>Export Certificate Report</a>
-                        </div>
-                    </div>
-                </div>
-                <div class="card-body">
-                    {% if sites_with_certs %}
-                        <div class="table-responsive">
-                            <table class="table table-bordered" id="sitesTable" width="100%" cellspacing="0">
-                                <thead>
-                                    <tr>
-                                        <th>Domain</th>
-                                        <th>Status</th>
-                                        <th>Certificates</th>
-                                        <th>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {% for site in sites_with_certs %}
-                                    <tr>
-                                        <td>{{ site.domain }}</td>
-                                        <td>
-                                            {% if site.is_active %}
-                                                <span class="badge badge-success">Active</span>
-                                            {% else %}
-                                                <span class="badge badge-secondary">Inactive</span>
-                                            {% endif %}
-                                            
-                                            {% if site.is_blocked %}
-                                                <span class="badge badge-danger">Blocked</span>
-                                            {% endif %}
-                                        </td>
-                                        <td>
-                                            {% set site_stats = cert_health.by_site.get(site.id, {}) %}
-                                            {% if site_stats %}
-                                                <span class="badge badge-success">{{ site_stats.valid }}</span> valid,
-                                                <span class="badge badge-warning">{{ site_stats.expiring_soon }}</span> expiring,
-                                                <span class="badge badge-danger">{{ site_stats.expired }}</span> expired,
-                                                <span class="badge badge-info">{{ site_stats.self_signed }}</span> self-signed
-                                            {% else %}
-                                                No certificate data
-                                            {% endif %}
-                                        </td>
-                                        <td>
-                                            <a href="{{ url_for('admin.manage_ssl_certificates', site_id=site.id) }}" class="btn btn-sm btn-primary">Manage SSL</a>
-                                            <a href="{{ url_for('admin.view_site', site_id=site.id) }}" class="btn btn-sm btn-info">View Site</a>
-                                        </td>
-                                    </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
-                    {% else %}
-                        <div class="alert alert-info">
-                            No sites with SSL certificates found.
-                        </div>
-                    {% endif %}
-                </div>
-            </div>
+        {% if not certificates %}
+        <div class="card-body text-center py-5">
+            <i class="fas fa-certificate fa-3x text-muted mb-3"></i>
+            <p class="mb-0">No certificates found matching your filter criteria.</p>
+            <a href="{{ url_for('admin.ssl_dashboard') }}" class="btn btn-sm btn-outline-primary mt-3">
+                <i class="fas fa-sync-alt me-1"></i> Clear filters
+            </a>
         </div>
+        {% endif %}
     </div>
 </div>
 {% endblock %}
