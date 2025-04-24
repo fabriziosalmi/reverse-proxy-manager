@@ -2,6 +2,8 @@ import os
 import re
 import tempfile
 import paramiko
+import socket  # Add missing socket import
+import time    # Add missing time import
 from app.models.models import db, Node, DeploymentLog
 from app.services.logger_service import log_activity
 
@@ -548,6 +550,11 @@ http {
             ("X-Frame-Options", "Prevents clickjacking"),
             ("X-XSS-Protection", "Helps prevent XSS attacks"),
             ("Content-Security-Policy", "Restricts resource loading"),
+            ("Referrer-Policy", "Controls the Referer header"),
+            ("Permissions-Policy", "Controls browser features"),
+            ("Cross-Origin-Opener-Policy", "Protects against cross-origin attacks"),
+            ("Cross-Origin-Embedder-Policy", "Ensures resources are same-origin or explicitly allowed"),
+            ("Cross-Origin-Resource-Policy", "Prevents other domains from embedding the resource")
         ]
         
         for header, description in important_headers:
@@ -576,22 +583,37 @@ http {
                 f.write(config.encode('utf-8'))
                 temp_file = f.name
             
-            # Test the configuration with nginx -t
+            # If skipping SSL checks, create a modified version
             if skip_ssl_check:
-                # Use -c option only to avoid loading other configs with SSL directives
-                cmd = f"nginx -t -c {temp_file}"
-            else:
-                cmd = f"nginx -t -c {temp_file}"
+                with open(temp_file, 'r') as original_file:
+                    modified_content = original_file.read()
+                    
+                # Comment out SSL certificate directives to prevent failures
+                modified_content = re.sub(
+                    r'(\s*)(ssl_certificate|ssl_certificate_key|ssl_trusted_certificate)(.+?);',
+                    r'\1# \2\3; # Commented for testing',
+                    modified_content
+                )
                 
-            result = os.system(cmd)
+                # Write the modified content back
+                with open(temp_file, 'w') as modified_file:
+                    modified_file.write(modified_content)
+            
+            # Test the configuration with nginx -t (capture stderr for better error messages)
+            cmd = f"nginx -t -c {temp_file} 2>&1"
+            nginx_proc = os.popen(cmd)
+            output = nginx_proc.read()
+            result = nginx_proc.close()
             
             # Clean up
             os.unlink(temp_file)
             
-            if result == 0:
+            if result is None or result == 0:
                 return True, None
             else:
-                return False, "Configuration test failed. Check nginx syntax."
+                # Parse the error for more useful feedback
+                error_analysis = NginxValidationService.analyze_validation_error(output)
+                return False, f"Configuration test failed: {error_analysis['suggestion']}"
                 
         except Exception as e:
             return False, str(e)
@@ -618,6 +640,21 @@ http {
         key_match = re.search(r'ssl_certificate_key\s+([^;]+);', config)
         if key_match:
             ssl_certificate_key = key_match.group(1).strip()
+            
+        # Check for variable references and resolve common patterns
+        if ssl_certificate and ssl_certificate.startswith('$'):
+            # Check for common variable patterns and suggest fallbacks
+            var_name = ssl_certificate[1:]
+            if var_name == 'server_name' or var_name == 'host' or var_name == 'hostname':
+                log_activity('warning', f"SSL certificate path uses variable {ssl_certificate}, assuming standard Let's Encrypt path")
+                ssl_certificate = "/etc/letsencrypt/live/$server_name/fullchain.pem"
+        
+        if ssl_certificate_key and ssl_certificate_key.startswith('$'):
+            # Check for common variable patterns and suggest fallbacks
+            var_name = ssl_certificate_key[1:]
+            if var_name == 'server_name' or var_name == 'host' or var_name == 'hostname':
+                log_activity('warning', f"SSL certificate key path uses variable {ssl_certificate_key}, assuming standard Let's Encrypt path")
+                ssl_certificate_key = "/etc/letsencrypt/live/$server_name/privkey.pem"
         
         return ssl_certificate, ssl_certificate_key
     
