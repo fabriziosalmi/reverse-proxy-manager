@@ -188,31 +188,52 @@
                 // Get text without HTML tags
                 const text = diffContent.innerText;
                 
-                // Create a temporary textarea element
-                const textarea = document.createElement('textarea');
-                textarea.value = text;
-                textarea.setAttribute('readonly', '');
-                textarea.style.position = 'absolute';
-                textarea.style.left = '-9999px';
-                document.body.appendChild(textarea);
-                
-                // Select and copy
-                textarea.select();
-                document.execCommand('copy');
-                
-                // Remove the textarea
-                document.body.removeChild(textarea);
-                
-                // Show feedback
-                const originalText = copyButton.innerHTML;
-                copyButton.innerHTML = '<i class="fas fa-check me-1"></i>Copied!';
-                copyButton.classList.replace('btn-outline-secondary', 'btn-success');
-                
-                // Reset button after a delay
-                setTimeout(function() {
-                    copyButton.innerHTML = originalText;
-                    copyButton.classList.replace('btn-success', 'btn-outline-secondary');
-                }, 2000);
+                // Use modern Clipboard API with fallback
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(text)
+                        .then(() => {
+                            // Show feedback
+                            const originalText = copyButton.innerHTML;
+                            copyButton.innerHTML = '<i class="fas fa-check me-1"></i>Copied!';
+                            copyButton.classList.replace('btn-outline-secondary', 'btn-success');
+                            
+                            // Reset button after a delay
+                            setTimeout(function() {
+                                copyButton.innerHTML = originalText;
+                                copyButton.classList.replace('btn-success', 'btn-outline-secondary');
+                            }, 2000);
+                        })
+                        .catch(err => {
+                            console.error('Failed to copy: ', err);
+                            alert('Failed to copy to clipboard. Please try manually selecting and copying the text.');
+                        });
+                } else {
+                    // Fallback for browsers that don't support clipboard API
+                    const textarea = document.createElement('textarea');
+                    textarea.value = text;
+                    textarea.setAttribute('readonly', '');
+                    textarea.style.position = 'absolute';
+                    textarea.style.left = '-9999px';
+                    document.body.appendChild(textarea);
+                    
+                    // Select and copy
+                    textarea.select();
+                    document.execCommand('copy');
+                    
+                    // Remove the textarea
+                    document.body.removeChild(textarea);
+                    
+                    // Show feedback
+                    const originalText = copyButton.innerHTML;
+                    copyButton.innerHTML = '<i class="fas fa-check me-1"></i>Copied!';
+                    copyButton.classList.replace('btn-outline-secondary', 'btn-success');
+                    
+                    // Reset button after a delay
+                    setTimeout(function() {
+                        copyButton.innerHTML = originalText;
+                        copyButton.classList.replace('btn-success', 'btn-outline-secondary');
+                    }, 2000);
+                }
             });
         }
     });

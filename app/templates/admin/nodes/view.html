@@ -500,7 +500,7 @@
                 systemHtml += `
                     <div class="col-md-6 mb-3">
                         <h6><i class="fas fa-microchip me-1"></i>CPU Usage</h6>
-                        ${cpuUsage !== null ? `
+                        ${cpuUsage !== null && !isNaN(cpuUsage) ? `
                         <div class="progress" role="progressbar" aria-label="CPU Usage" aria-valuenow="${cpuUsage}" aria-valuemin="0" aria-valuemax="100">
                             <div class="progress-bar ${getProgressColor(cpuUsage)}" style="width: ${cpuUsage}%"></div>
                         </div>
@@ -511,7 +511,7 @@
                 // Memory Usage
                 const memUsed = serverStats.memory_used_bytes;
                 const memTotal = serverStats.memory_total_bytes;
-                const memPercent = (memTotal && memUsed) ? (memUsed / memTotal * 100) : null;
+                const memPercent = (memTotal && memUsed && !isNaN(memTotal) && !isNaN(memUsed) && memTotal > 0) ? (memUsed / memTotal * 100) : null;
                  systemHtml += `
                     <div class="col-md-6 mb-3">
                         <h6><i class="fas fa-memory me-1"></i>Memory Usage</h6>
@@ -529,7 +529,7 @@
                 // Disk Usage
                 const diskUsed = serverStats.disk_used_bytes;
                 const diskTotal = serverStats.disk_total_bytes;
-                const diskPercent = (diskTotal && diskUsed) ? (diskUsed / diskTotal * 100) : null;
+                const diskPercent = (diskTotal && diskUsed && !isNaN(diskTotal) && !isNaN(diskUsed) && diskTotal > 0) ? (diskUsed / diskTotal * 100) : null;
                  systemHtml += `
                     <div class="col-md-6 mb-3">
                         <h6><i class="far fa-hdd me-1"></i>Disk Usage (Root)</h6>

@@ -392,7 +392,8 @@
                     let statsHtml = '<div class="mt-1 node-status-info small">'; // Use small text
 
                     if (serverStats.cpu_usage && serverStats.cpu_usage !== 'N/A') {
-                        statsHtml += `<div class="mb-1"><i class="fas fa-microchip text-muted me-1" title="CPU Usage"></i><span class="badge bg-${getCpuBadgeColor(serverStats.cpu_usage)} rounded-pill">${serverStats.cpu_usage}</span></div>`;
+                        const cpuUsage = parseFloat(serverStats.cpu_usage);
+                        statsHtml += `<div class="mb-1"><i class="fas fa-microchip text-muted me-1" title="CPU Usage"></i><span class="badge bg-${!isNaN(cpuUsage) ? getCpuBadgeColor(cpuUsage) : 'secondary-subtle text-secondary-emphasis border border-secondary-subtle'} rounded-pill">${serverStats.cpu_usage}</span></div>`;
                     }
 
                     if (serverStats.memory_usage && serverStats.memory_usage !== 'N/A') {
