@@ -204,6 +204,26 @@
                                         <a href="{{ url_for('admin.edit_node', node_id=node.id) }}" class="btn btn-outline-primary" title="Edit Node">
                                             <i class="fas fa-edit"></i>
                                         </a>
+                                        <div class="btn-group">
+                                            <button type="button" class="btn btn-outline-success dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" title="Install Proxy Software">
+                                                <i class="fas fa-download"></i>
+                                            </button>
+                                            <ul class="dropdown-menu dropdown-menu-end">
+                                                <li><button class="dropdown-item" onclick="installProxySoftware({{ node.id }}, 'nginx')">
+                                                    <i class="fas fa-server me-2 text-success"></i>Install Nginx
+                                                </button></li>
+                                                <li><button class="dropdown-item" onclick="installProxySoftware({{ node.id }}, 'caddy')">
+                                                    <i class="fas fa-server me-2 text-info"></i>Install Caddy
+                                                </button></li>
+                                                <li><button class="dropdown-item" onclick="installProxySoftware({{ node.id }}, 'traefik')">
+                                                    <i class="fas fa-server me-2 text-primary"></i>Install Traefik
+                                                </button></li>
+                                                <li><hr class="dropdown-divider"></li>
+                                                <li><button class="dropdown-item" onclick="checkProxyStatus({{ node.id }})">
+                                                    <i class="fas fa-sync-alt me-2 text-secondary"></i>Check Proxy Status
+                                                </button></li>
+                                            </ul>
+                                        </div>
                                         <button type="button" class="btn btn-outline-danger"
                                                 data-bs-toggle="modal"
                                                 data-bs-target="#deleteNodeModal"
