@@ -787,15 +787,33 @@ class SSLCertificateService:
                 # Create credentials file content based on provider
                 creds_content = ""
                 if dns_provider == 'cloudflare':
-                    creds_content = f"dns_cloudflare_api_token = {dns_credentials['token']}"
+                    creds_content = f"""
+# Cloudflare API credentials for certbot
+dns_cloudflare_api_token = {dns_credentials.get('api_token', '')}
+"""
                 elif dns_provider == 'route53':
-                    creds_content = f"dns_route53_access_key = {dns_credentials['access_key']}\ndns_route53_secret_key = {dns_credentials['secret_key']}"
+                    creds_content = f"""
+# AWS Route 53 credentials for certbot
+dns_route53_access_key = {dns_credentials.get('access_key', '')}
+dns_route53_secret_key = {dns_credentials.get('secret_key', '')}
+"""
                 elif dns_provider == 'digitalocean':
-                    creds_content = f"dns_digitalocean_token = {dns_credentials['token']}"
+                    creds_content = f"""
+# DigitalOcean API credentials for certbot
+dns_digitalocean_token = {dns_credentials.get('api_token', '')}
+"""
                 elif dns_provider == 'godaddy':
-                    creds_content = f"dns_godaddy_key = {dns_credentials['key']}\ndns_godaddy_secret = {dns_credentials['secret']}"
+                    creds_content = f"""
+# GoDaddy API credentials for certbot
+dns_godaddy_key = {dns_credentials.get('api_key', '')}
+dns_godaddy_secret = {dns_credentials.get('api_secret', '')}
+"""
                 elif dns_provider == 'namecheap':
-                    creds_content = f"dns_namecheap_username = {dns_credentials['username']}\ndns_namecheap_api_key = {dns_credentials['api_key']}"
+                    creds_content = f"""
+# Namecheap API credentials for certbot
+dns_namecheap_username = {dns_credentials.get('username', '')}
+dns_namecheap_api_key = {dns_credentials.get('api_key', '')}
+"""
                 
                 # Write the credentials file
                 sftp = ssh_client.open_sftp()

@@ -93,7 +93,7 @@ class NginxValidationService:
         if site_name is None:
             site_name = domain
             
-        # Initialize SSH client with proper cleanup
+        # Initialize variables for proper cleanup in finally block
         ssh_client = None
         sftp = None
         temp_file_path = None
@@ -406,19 +406,35 @@ http {
             return False, f"Error testing config: {str(e)}", None
         
         finally:
-            # Clean up resources to prevent leaks
+            # Clean up resources to prevent memory leaks
             try:
-                if remote_temp_path and ssh_client:
-                    ssh_client.exec_command(f"rm -f {remote_temp_path}")
+                # Clean up remote temporary file
+                if remote_temp_path and ssh_client and ssh_client.get_transport() and ssh_client.get_transport().is_active():
+                    try:
+                        ssh_client.exec_command(f"rm -f {remote_temp_path}")
+                    except Exception as cleanup_error:
+                        log_activity('warning', f"Error removing remote temp file: {str(cleanup_error)}")
                 
+                # Clean up local temporary file
                 if temp_file_path:
-                    os.unlink(temp_file_path)
+                    try:
+                        os.unlink(temp_file_path)
+                    except Exception as cleanup_error:
+                        log_activity('warning', f"Error removing local temp file: {str(cleanup_error)}")
                 
+                # Close SFTP connection if open
                 if sftp:
-                    sftp.close()
+                    try:
+                        sftp.close()
+                    except Exception as cleanup_error:
+                        log_activity('warning', f"Error closing SFTP connection: {str(cleanup_error)}")
                 
+                # Close SSH connection if open
                 if ssh_client:
-                    ssh_client.close()
+                    try:
+                        ssh_client.close()
+                    except Exception as cleanup_error:
+                        log_activity('warning', f"Error closing SSH connection: {str(cleanup_error)}")
             except Exception as cleanup_error:
                 log_activity('warning', f"Error during cleanup after Nginx config test: {str(cleanup_error)}")
     

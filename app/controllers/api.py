@@ -15,14 +15,21 @@ api = Blueprint('api', __name__)
 class RateLimiter:
     """Basic rate limiter to prevent API abuse"""
     
-    def __init__(self, max_calls=100, period=60):
+    def __init__(self, max_calls=100, period=60, cleanup_interval=300):
         self.max_calls = max_calls  # Max calls allowed in the period
         self.period = period  # Period in seconds
         self.cache = {}  # Store client IP and their call timestamps
+        self.last_cleanup = time.time()  # Last cache cleanup time
+        self.cleanup_interval = cleanup_interval  # Cleanup every 5 minutes by default
     
     def is_allowed(self, client_ip):
         """Check if client is allowed to make another request"""
         now = time.time()
+        
+        # Periodically clean up expired entries to prevent memory leaks
+        if now - self.last_cleanup > self.cleanup_interval:
+            self._cleanup_expired_entries(now)
+            self.last_cleanup = now
         
         # Create new entry for new clients
         if client_ip not in self.cache:
@@ -33,14 +40,35 @@ class RateLimiter:
         timestamps = self.cache[client_ip]
         
         # Remove timestamps older than the period
-        while timestamps and timestamps[0] < now - self.period:
-            timestamps.pop(0)
+        cutoff = now - self.period
+        self.cache[client_ip] = [ts for ts in timestamps if ts > cutoff]
         
         # Add current timestamp
-        timestamps.append(now)
+        self.cache[client_ip].append(now)
         
         # Check if client exceeded max calls in the period
-        return len(timestamps) <= self.max_calls
+        return len(self.cache[client_ip]) <= self.max_calls
+    
+    def _cleanup_expired_entries(self, current_time):
+        """Remove expired entries from the cache to prevent memory leaks"""
+        cutoff = current_time - self.period
+        expired_ips = []
+        
+        # Find expired entries
+        for ip, timestamps in self.cache.items():
+            # Keep only timestamps within the rate limit period
+            valid_timestamps = [ts for ts in timestamps if ts > cutoff]
+            
+            if valid_timestamps:
+                # Update with only valid timestamps
+                self.cache[ip] = valid_timestamps
+            else:
+                # If no valid timestamps, mark for removal
+                expired_ips.append(ip)
+        
+        # Remove expired entries
+        for ip in expired_ips:
+            del self.cache[ip]
 
 # Create rate limiter instance
 rate_limiter = RateLimiter(max_calls=100, period=60)

@@ -9,109 +9,668 @@ import paramiko
 logger = logging.getLogger(__name__)
 
 class NodeDiscoveryService:
-    """Service for discovering and importing nodes from YAML configuration files"""
+    """Service for discovering nodes in the network"""
     
     @staticmethod
-    def discover_nodes_from_yaml(yaml_path, auto_activate=True):
+    def discover_nodes(network_range, port=22, timeout=2, max_threads=10):
         """
-        Discovers nodes from a YAML file and adds them to the database if they don't exist
+        Discover SSH-enabled nodes in a network range
         
         Args:
-            yaml_path (str): Path to the YAML file containing node information
-            auto_activate (bool): Whether to automatically set discovered nodes as active
+            network_range: Network range in CIDR notation (e.g., 192.168.1.0/24)
+            port: Port to scan (default 22 for SSH)
+            timeout: Connection timeout in seconds
+            max_threads: Maximum number of concurrent threads
             
         Returns:
-            tuple: (num_added, num_updated, num_failed, messages)
-                - num_added: Number of new nodes added
-                - num_updated: Number of existing nodes updated
-                - num_failed: Number of nodes that failed to add/update
-                - messages: List of result messages for reporting
+            list: Discovered nodes with their IP addresses
         """
-        if not os.path.exists(yaml_path):
-            return 0, 0, 1, [f"YAML file not found: {yaml_path}"]
+        import ipaddress
+        import socket
+        import concurrent.futures
         
+        # Parse network range
         try:
-            with open(yaml_path, 'r') as file:
-                nodes_data = yaml.safe_load(file)
+            network = ipaddress.ip_network(network_range)
+        except ValueError as e:
+            log_activity('error', f"Invalid network range format: {str(e)}")
+            return {
+                "success": False,
+                "message": f"Invalid network range format: {str(e)}"
+            }
+        
+        # Check if network is too large
+        network_size = network.num_addresses
+        if network_size > 1024:  # Arbitrary limit to prevent massive scans
+            return {
+                "success": False,
+                "message": f"Network range too large ({network_size} addresses). Maximum allowed is 1024."
+            }
+        
+        nodes = []
+        active_ips = []
+        
+        # Function to check a single IP
+        def check_ip(ip):
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(timeout)
+                result = sock.connect_ex((str(ip), port))
+                sock.close()
                 
-            if not nodes_data or not isinstance(nodes_data, list):
-                return 0, 0, 1, ["Invalid YAML format. Expected a list of nodes."]
+                if result == 0:
+                    return str(ip)
+                return None
+            except Exception as e:
+                log_activity('warning', f"Error checking {ip}: {str(e)}")
+                return None
+        
+        # Use ThreadPoolExecutor for concurrent scanning with controlled resources
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_threads) as executor:
+            # Submit all IP addresses for checking
+            future_to_ip = {executor.submit(check_ip, ip): ip for ip in network.hosts()}
             
-            num_added = 0
-            num_updated = 0
-            num_failed = 0
-            messages = []
+            # Process results as they complete
+            for future in concurrent.futures.as_completed(future_to_ip):
+                ip = future.result()
+                if ip:
+                    active_ips.append(ip)
+        
+        # For each active IP, gather basic information
+        for ip in active_ips:
+            try:
+                hostname = socket.getfqdn(ip)
+                nodes.append({
+                    "ip_address": ip,
+                    "hostname": hostname if hostname != ip else "Unknown",
+                    "ssh_port": port,
+                    "status": "discovered"
+                })
+            except Exception as e:
+                log_activity('warning', f"Error resolving hostname for {ip}: {str(e)}")
+                nodes.append({
+                    "ip_address": ip,
+                    "hostname": "Unknown",
+                    "ssh_port": port,
+                    "status": "discovered"
+                })
+        
+        return {
+            "success": True,
+            "message": f"Discovered {len(nodes)} nodes in network {network_range}",
+            "nodes": nodes
+        }
+    
+    @staticmethod
+    def verify_ssh_access(ip_address, port=22, username=None, password=None, key_path=None, timeout=5):
+        """
+        Verify SSH access to a node
+        
+        Args:
+            ip_address: IP address of the node
+            port: SSH port
+            username: SSH username
+            password: SSH password (optional)
+            key_path: Path to SSH private key (optional)
+            timeout: Connection timeout in seconds
             
-            for node_data in nodes_data:
+        Returns:
+            dict: Verification result with node details
+        """
+        import paramiko
+        import socket
+        import time
+        
+        # Validate required parameters
+        if not username:
+            return {
+                "success": False,
+                "message": "SSH username is required"
+            }
+        
+        if not password and not key_path:
+            return {
+                "success": False,
+                "message": "Either SSH password or key path is required"
+            }
+        
+        # Try to connect via SSH with retry logic
+        max_attempts = 2
+        connection_delay = 1  # seconds
+        
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        
+        for attempt in range(max_attempts):
+            try:
+                # Try to connect with password or key
+                if key_path:
+                    ssh.connect(
+                        hostname=ip_address,
+                        port=port,
+                        username=username,
+                        key_filename=key_path,
+                        timeout=timeout
+                    )
+                else:
+                    ssh.connect(
+                        hostname=ip_address,
+                        port=port,
+                        username=username,
+                        password=password,
+                        timeout=timeout
+                    )
+                
+                # If connection succeeded, get system information
+                result = {
+                    "success": True,
+                    "ip_address": ip_address,
+                    "ssh_port": port,
+                    "ssh_user": username,
+                    "ssh_key_path": key_path,
+                    "system_info": {}
+                }
+                
+                # Get system information
                 try:
-                    # Basic validation
-                    required_fields = ['name', 'ip_address', 'ssh_user']
-                    missing_fields = [field for field in required_fields if field not in node_data]
+                    # Get OS information
+                    stdin, stdout, stderr = ssh.exec_command(
+                        "lsb_release -ds 2>/dev/null || "
+                        "cat /etc/os-release 2>/dev/null | grep PRETTY_NAME | cut -d '\"' -f 2 || "
+                        "cat /etc/redhat-release 2>/dev/null || "
+                        "cat /etc/issue 2>/dev/null | head -1 || "
+                        "echo 'Unknown OS'"
+                    )
+                    os_info = stdout.read().decode('utf-8').strip()
+                    result["system_info"]["os"] = os_info
                     
-                    if missing_fields:
-                        num_failed += 1
-                        messages.append(f"Node missing required fields: {', '.join(missing_fields)}. Skipping.")
-                        continue
+                    # Get hostname
+                    stdin, stdout, stderr = ssh.exec_command("hostname")
+                    hostname = stdout.read().decode('utf-8').strip()
+                    result["hostname"] = hostname
                     
-                    # Check if node already exists
-                    existing_node = Node.query.filter_by(name=node_data['name']).first()
+                    # Check if Nginx is installed and get its version
+                    stdin, stdout, stderr = ssh.exec_command("nginx -v 2>&1 || echo 'Not installed'")
+                    nginx_version = stdout.read().decode('utf-8').strip()
+                    result["system_info"]["nginx_installed"] = "Not installed" not in nginx_version
+                    result["system_info"]["nginx_version"] = nginx_version if "Not installed" not in nginx_version else None
                     
-                    if existing_node:
-                        if existing_node.is_discovered:
-                            # Update existing node
-                            existing_node.ip_address = node_data['ip_address']
-                            existing_node.ssh_port = node_data.get('ssh_port', 22)
-                            existing_node.ssh_user = node_data['ssh_user']
+                    # Get Nginx configuration path
+                    stdin, stdout, stderr = ssh.exec_command("find /etc -type d -name 'nginx' 2>/dev/null | grep -v modules")
+                    nginx_paths = stdout.read().decode('utf-8').strip().split('\n')
+                    
+                    for path in nginx_paths:
+                        if path and os.path.exists(path):
+                            # Check if this contains configuration files
+                            stdin, stdout, stderr = ssh.exec_command(f"find {path} -name '*.conf' | wc -l")
+                            conf_count = int(stdout.read().decode('utf-8').strip() or 0)
                             
-                            if 'ssh_key_path' in node_data:
-                                existing_node.ssh_key_path = node_data['ssh_key_path']
-                            
-                            if 'ssh_password' in node_data:
-                                existing_node.ssh_password = node_data['ssh_password']
-                                
-                            if 'nginx_config_path' in node_data:
-                                existing_node.nginx_config_path = node_data.get('nginx_config_path', '/etc/nginx/conf.d')
-                                
-                            if 'nginx_reload_command' in node_data:
-                                existing_node.nginx_reload_command = node_data.get('nginx_reload_command', 'sudo systemctl reload nginx')
-                            
-                            existing_node.updated_at = datetime.utcnow()
-                            num_updated += 1
-                            messages.append(f"Updated existing node: {node_data['name']}")
-                        else:
-                            # Skip non-discovered nodes to prevent overwriting manual changes
-                            messages.append(f"Node {node_data['name']} exists but was not originally discovered. Skipping update.")
-                            continue
-                    else:
-                        # Create new node
-                        new_node = Node(
-                            name=node_data['name'],
-                            ip_address=node_data['ip_address'],
-                            ssh_port=node_data.get('ssh_port', 22),
-                            ssh_user=node_data['ssh_user'],
-                            ssh_key_path=node_data.get('ssh_key_path'),
-                            ssh_password=node_data.get('ssh_password'),
-                            nginx_config_path=node_data.get('nginx_config_path', '/etc/nginx/conf.d'),
-                            nginx_reload_command=node_data.get('nginx_reload_command', 'sudo systemctl reload nginx'),
-                            is_active=auto_activate,
-                            is_discovered=True
-                        )
-                        
-                        db.session.add(new_node)
-                        num_added += 1
-                        messages.append(f"Added new node: {node_data['name']}")
-                        
-                except Exception as e:
-                    num_failed += 1
-                    messages.append(f"Error processing node {node_data.get('name', 'unknown')}: {str(e)}")
+                            if conf_count > 0:
+                                result["nginx_conf_path"] = path
+                                break
+                    
+                    # Get available disk space
+                    stdin, stdout, stderr = ssh.exec_command("df -h / | tail -1 | awk '{print $4}'")
+                    disk_space = stdout.read().decode('utf-8').strip()
+                    result["system_info"]["available_disk"] = disk_space
+                    
+                    # Get total memory
+                    stdin, stdout, stderr = ssh.exec_command("free -h | grep Mem | awk '{print $2}'")
+                    total_memory = stdout.read().decode('utf-8').strip()
+                    result["system_info"]["total_memory"] = total_memory
+                    
+                    # Get CPU info
+                    stdin, stdout, stderr = ssh.exec_command("grep 'model name' /proc/cpuinfo | head -1 | cut -d: -f2")
+                    cpu_model = stdout.read().decode('utf-8').strip()
+                    result["system_info"]["cpu_model"] = cpu_model
+                    
+                    stdin, stdout, stderr = ssh.exec_command("grep -c processor /proc/cpuinfo")
+                    cpu_cores = stdout.read().decode('utf-8').strip()
+                    result["system_info"]["cpu_cores"] = cpu_cores
+                    
+                except Exception as info_error:
+                    log_activity('warning', f"Error getting system information for {ip_address}: {str(info_error)}")
+                    result["system_info"]["error"] = str(info_error)
+                
+                ssh.close()
+                return result
+                
+            except (paramiko.AuthenticationException, paramiko.SSHException) as auth_error:
+                error_message = f"Authentication failed for {username}@{ip_address}: {str(auth_error)}"
+                log_activity('warning', error_message)
+                
+                if attempt < max_attempts - 1:
+                    time.sleep(connection_delay)
+                    continue
+                    
+                ssh.close()
+                return {
+                    "success": False,
+                    "message": error_message
+                }
+                
+            except (socket.timeout, socket.error, ConnectionError) as conn_error:
+                error_message = f"Connection error to {ip_address}:{port}: {str(conn_error)}"
+                log_activity('warning', error_message)
+                
+                if attempt < max_attempts - 1:
+                    time.sleep(connection_delay)
+                    continue
+                    
+                ssh.close()
+                return {
+                    "success": False,
+                    "message": error_message
+                }
+                
+            except Exception as e:
+                error_message = f"Error verifying SSH access to {ip_address}: {str(e)}"
+                log_activity('warning', error_message)
+                
+                ssh.close()
+                return {
+                    "success": False,
+                    "message": error_message
+                }
+        
+        # If we get here, all attempts failed with different errors
+        return {
+            "success": False,
+            "message": f"Failed to connect to {ip_address} after {max_attempts} attempts"
+        }
+    
+    @staticmethod
+    def add_discovered_nodes(nodes, auto_verify=False, username=None, password=None, key_path=None):
+        """
+        Add discovered nodes to the database
+        
+        Args:
+            nodes: List of node dictionaries with IP addresses
+            auto_verify: Whether to automatically verify SSH access
+            username: SSH username for verification
+            password: SSH password for verification
+            key_path: Path to SSH private key for verification
             
-            # Commit all changes
+        Returns:
+            dict: Result of adding nodes
+        """
+        from app.models.models import Node, db
+        
+        added_count = 0
+        updated_count = 0
+        verified_count = 0
+        failed_count = 0
+        failures = []
+        
+        for node_info in nodes:
+            ip_address = node_info.get("ip_address")
+            if not ip_address:
+                failed_count += 1
+                failures.append({
+                    "node": node_info,
+                    "reason": "Missing IP address"
+                })
+                continue
+            
+            # Check if node already exists
+            existing_node = Node.query.filter_by(ip_address=ip_address).first()
+            
+            if existing_node:
+                # Update existing node with discovered information
+                existing_node.hostname = node_info.get("hostname") or existing_node.hostname
+                existing_node.ssh_port = node_info.get("ssh_port") or existing_node.ssh_port
+                existing_node.updated_at = datetime.utcnow()
+                existing_node.is_discovered = True
+                
+                # Add/update other fields from node_info if present
+                for field in ["nginx_conf_path", "nginx_sites_path"]:
+                    if field in node_info and node_info.get(field):
+                        setattr(existing_node, field, node_info.get(field))
+                
+                updated_count += 1
+                node = existing_node
+            else:
+                # Create new node
+                node = Node(
+                    name=node_info.get("hostname") or f"Node-{ip_address.replace('.', '-')}",
+                    ip_address=ip_address,
+                    ssh_port=node_info.get("ssh_port") or 22,
+                    ssh_user=username,  # Set default username if provided
+                    ssh_password=password,  # Set default password if provided
+                    ssh_key_path=key_path,  # Set default key path if provided
+                    is_active=False,  # Nodes start as inactive until verified
+                    is_discovered=True,
+                    created_at=datetime.utcnow(),
+                    updated_at=datetime.utcnow()
+                )
+                
+                # Set other fields from node_info if present
+                if "nginx_conf_path" in node_info:
+                    node.nginx_conf_path = node_info.get("nginx_conf_path")
+                if "nginx_sites_path" in node_info:
+                    node.nginx_sites_path = node_info.get("nginx_sites_path")
+                
+                db.session.add(node)
+                added_count += 1
+            
+            # Auto-verify if requested
+            if auto_verify:
+                if not username:
+                    # Skip verification if no username provided
+                    continue
+                
+                # Use node's credentials or provided credentials
+                node_username = node.ssh_user or username
+                node_password = node.ssh_password or password
+                node_key_path = node.ssh_key_path or key_path
+                
+                # Verify SSH access
+                verification_result = NodeDiscoveryService.verify_ssh_access(
+                    ip_address=node.ip_address,
+                    port=node.ssh_port,
+                    username=node_username,
+                    password=node_password,
+                    key_path=node_key_path
+                )
+                
+                if verification_result.get("success"):
+                    # Update node with verification information
+                    node.is_active = True
+                    node.verified_at = datetime.utcnow()
+                    node.hostname = verification_result.get("hostname") or node.hostname
+                    
+                    # Update system information if available
+                    system_info = verification_result.get("system_info") or {}
+                    if system_info:
+                        node.os_info = system_info.get("os")
+                        
+                        # Update Nginx information if available
+                        if system_info.get("nginx_installed"):
+                            node.nginx_version = system_info.get("nginx_version")
+                            node.nginx_conf_path = verification_result.get("nginx_conf_path") or node.nginx_conf_path
+                    
+                    verified_count += 1
+                else:
+                    failed_count += 1
+                    failures.append({
+                        "node": node_info,
+                        "reason": verification_result.get("message")
+                    })
+        
+        # Commit changes to database
+        try:
             db.session.commit()
-            return num_added, num_updated, num_failed, messages
+            
+            return {
+                "success": True,
+                "added": added_count,
+                "updated": updated_count,
+                "verified": verified_count,
+                "failed": failed_count,
+                "failures": failures
+            }
+        except Exception as e:
+            db.session.rollback()
+            log_activity('error', f"Error adding discovered nodes: {str(e)}")
+            
+            return {
+                "success": False,
+                "message": f"Error adding discovered nodes: {str(e)}"
+            }
+    
+    @staticmethod
+    def scan_local_network():
+        """
+        Scan the local network for nodes
+        
+        Returns:
+            dict: Scan results
+        """
+        import socket
+        import ipaddress
+        
+        # Get current host IP
+        try:
+            # Get the local IP address
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            local_ip = s.getsockname()[0]
+            s.close()
+            
+            # Calculate network range
+            ip_obj = ipaddress.ip_address(local_ip)
+            network = ipaddress.ip_network(f"{local_ip}/24", strict=False)
+            network_range = str(network)
+            
+            log_activity('info', f"Scanning local network: {network_range}")
+            
+            # Discover nodes
+            discovery_results = NodeDiscoveryService.discover_nodes(network_range)
+            
+            if not discovery_results.get("success"):
+                return discovery_results
+            
+            nodes = discovery_results.get("nodes", [])
+            
+            return {
+                "success": True,
+                "local_ip": local_ip,
+                "network_range": network_range,
+                "nodes_found": len(nodes),
+                "nodes": nodes
+            }
             
         except Exception as e:
-            logger.error(f"Error reading YAML file: {str(e)}")
-            return 0, 0, 1, [f"Error reading YAML file: {str(e)}"]
+            log_activity('error', f"Error scanning local network: {str(e)}")
+            
+            return {
+                "success": False,
+                "message": f"Error scanning local network: {str(e)}"
+            }
+    
+    @staticmethod
+    def auto_configure_node(node_id):
+        """
+        Automatically configure a node for hosting
+        
+        Args:
+            node_id: ID of the node to configure
+            
+        Returns:
+            dict: Configuration result
+        """
+        from app.models.models import Node, db
+        
+        node = Node.query.get(node_id)
+        if not node:
+            return {
+                "success": False,
+                "message": f"Node ID {node_id} not found"
+            }
+        
+        # Check if node is active
+        if not node.is_active:
+            return {
+                "success": False,
+                "message": f"Node {node.name} is not active. Verify SSH access first."
+            }
+        
+        import paramiko
+        import time
+        
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        
+        try:
+            # Connect to the node
+            if node.ssh_key_path:
+                ssh.connect(
+                    hostname=node.ip_address,
+                    port=node.ssh_port,
+                    username=node.ssh_user,
+                    key_filename=node.ssh_key_path
+                )
+            else:
+                ssh.connect(
+                    hostname=node.ip_address,
+                    port=node.ssh_port,
+                    username=node.ssh_user,
+                    password=node.ssh_password
+                )
+            
+            # Check if Nginx is installed
+            stdin, stdout, stderr = ssh.exec_command("which nginx || echo 'Not installed'")
+            nginx_check = stdout.read().decode('utf-8').strip()
+            
+            if nginx_check == 'Not installed':
+                # Install Nginx
+                log_activity('info', f"Installing Nginx on node {node.name}")
+                
+                # Check OS to determine installation method
+                stdin, stdout, stderr = ssh.exec_command(
+                    "if [ -f /etc/debian_version ]; then "
+                    "echo 'debian'; "
+                    "elif [ -f /etc/redhat-release ]; then "
+                    "echo 'redhat'; "
+                    "elif [ -f /etc/alpine-release ]; then "
+                    "echo 'alpine'; "
+                    "else "
+                    "echo 'unknown'; "
+                    "fi"
+                )
+                os_type = stdout.read().decode('utf-8').strip()
+                
+                if os_type == 'debian':
+                    stdin, stdout, stderr = ssh.exec_command(
+                        "apt-get update && apt-get install -y nginx"
+                    )
+                elif os_type == 'redhat':
+                    stdin, stdout, stderr = ssh.exec_command(
+                        "yum install -y nginx"
+                    )
+                elif os_type == 'alpine':
+                    stdin, stdout, stderr = ssh.exec_command(
+                        "apk add --no-cache nginx"
+                    )
+                else:
+                    ssh.close()
+                    return {
+                        "success": False,
+                        "message": f"Unsupported OS type: {os_type}"
+                    }
+                
+                # Wait for installation to complete
+                exit_status = stdout.channel.recv_exit_status()
+                
+                if exit_status != 0:
+                    error = stderr.read().decode('utf-8')
+                    ssh.close()
+                    return {
+                        "success": False,
+                        "message": f"Failed to install Nginx: {error}"
+                    }
+                
+                # Check Nginx again
+                stdin, stdout, stderr = ssh.exec_command("which nginx || echo 'Not installed'")
+                nginx_check = stdout.read().decode('utf-8').strip()
+                
+                if nginx_check == 'Not installed':
+                    ssh.close()
+                    return {
+                        "success": False,
+                        "message": "Failed to install Nginx"
+                    }
+            
+            # Get Nginx version
+            stdin, stdout, stderr = ssh.exec_command("nginx -v 2>&1")
+            nginx_version = stdout.read().decode('utf-8').strip()
+            
+            # Detect Nginx configuration paths
+            stdin, stdout, stderr = ssh.exec_command("find /etc -name nginx.conf 2>/dev/null | head -1")
+            nginx_conf = stdout.read().decode('utf-8').strip()
+            
+            nginx_conf_path = None
+            nginx_sites_path = None
+            
+            if nginx_conf:
+                nginx_conf_path = os.path.dirname(nginx_conf)
+                
+                # Check for common sites directories
+                potential_sites_paths = [
+                    f"{nginx_conf_path}/sites-available",
+                    f"{nginx_conf_path}/conf.d",
+                    f"{nginx_conf_path}/sites-enabled"
+                ]
+                
+                for path in potential_sites_paths:
+                    stdin, stdout, stderr = ssh.exec_command(f"test -d {path} && echo 'exists' || echo 'not found'")
+                    if stdout.read().decode('utf-8').strip() == 'exists':
+                        nginx_sites_path = path
+                        break
+                
+                # If sites path not found, use conf.d
+                if not nginx_sites_path:
+                    # Create conf.d directory if it doesn't exist
+                    nginx_sites_path = f"{nginx_conf_path}/conf.d"
+                    stdin, stdout, stderr = ssh.exec_command(f"mkdir -p {nginx_sites_path}")
+            
+            # Update node record
+            if nginx_conf_path:
+                node.nginx_conf_path = nginx_conf_path
+            if nginx_sites_path:
+                node.nginx_sites_path = nginx_sites_path
+            
+            # Get Nginx reload command
+            stdin, stdout, stderr = ssh.exec_command("which systemctl >/dev/null 2>&1 && echo 'systemctl' || echo 'service'")
+            service_manager = stdout.read().decode('utf-8').strip()
+            
+            if service_manager == 'systemctl':
+                node.nginx_reload_command = "systemctl reload nginx"
+            else:
+                node.nginx_reload_command = "service nginx reload"
+            
+            # Create necessary directories for hosting
+            stdin, stdout, stderr = ssh.exec_command("mkdir -p /var/www/html")
+            
+            # Create test file
+            timestamp = int(time.time())
+            test_content = f"Node {node.name} is ready for hosting. Configured at {timestamp}"
+            
+            stdin, stdout, stderr = ssh.exec_command(f"echo '{test_content}' > /var/www/html/cdntest.txt")
+            
+            # Make node active
+            node.is_active = True
+            node.auto_configured = True
+            node.nginx_version = nginx_version
+            node.updated_at = datetime.utcnow()
+            
+            db.session.commit()
+            ssh.close()
+            
+            log_activity('info', f"Node {node.name} has been auto-configured for hosting")
+            
+            return {
+                "success": True,
+                "message": f"Node {node.name} has been auto-configured for hosting",
+                "nginx_conf_path": nginx_conf_path,
+                "nginx_sites_path": nginx_sites_path,
+                "nginx_version": nginx_version,
+                "test_file": "/var/www/html/cdntest.txt"
+            }
+            
+        except Exception as e:
+            db.session.rollback()
+            log_activity('error', f"Error auto-configuring node {node.name}: {str(e)}")
+            
+            try:
+                ssh.close()
+            except:
+                pass
+                
+            return {
+                "success": False,
+                "message": f"Error auto-configuring node: {str(e)}"
+            }
     
     @staticmethod
     def get_default_yaml_path():
