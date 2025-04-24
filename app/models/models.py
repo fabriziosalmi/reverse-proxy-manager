@@ -685,3 +685,49 @@ class ConfigVersion(db.Model):
             'author': self.author,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
+
+
+class SystemSetting(db.Model):
+    """Model to store system-wide settings"""
+    __tablename__ = 'system_settings'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    key = db.Column(db.String(64), unique=True, nullable=False, index=True)
+    value = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    @classmethod
+    def get(cls, key, default=None):
+        """Get a setting value by key with optional default"""
+        setting = cls.query.filter_by(key=key).first()
+        if setting:
+            return setting.value
+        return default
+    
+    @classmethod
+    def set(cls, key, value):
+        """Set or update a setting value"""
+        setting = cls.query.filter_by(key=key).first()
+        if setting:
+            setting.value = value
+        else:
+            setting = cls(key=key, value=value)
+            db.session.add(setting)
+        db.session.commit()
+        return setting
+    
+    @classmethod
+    def get_all_by_prefix(cls, prefix):
+        """Get all settings with a specific prefix"""
+        settings = cls.query.filter(cls.key.startswith(prefix)).all()
+        return {s.key.replace(prefix, ''): s.value for s in settings}
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'key': self.key,
+            'value': self.value,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+        }
