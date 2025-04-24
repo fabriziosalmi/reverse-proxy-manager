@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 
-{% block title %}My Profile - Italia CDN Proxy{% endblock %}
+{% block title %}My Profile - Reverse Proxy Manager{% endblock %}
 
 {% block content %}
 <div class="container py-4">
@@ -23,6 +23,7 @@
                     {% endwith %}
                     
                     <form method="POST" action="{{ url_for('auth.profile') }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <div class="mb-3">
                             <label for="username" class="form-label">Username</label>
                             <input type="text" class="form-control" id="username" name="username" value="{{ current_user.username }}" readonly>
