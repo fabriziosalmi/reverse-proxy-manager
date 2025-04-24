@@ -663,6 +663,35 @@ location ~* \.(css|gif|ico|jpeg|jpg|js|png)$ {
             templateInput.value = selectedTemplate;
             document.getElementById('siteForm').submit();
         });
+
+        // Form validation to ensure at least one node is selected
+        document.getElementById('siteForm').addEventListener('submit', function(event) {
+            const nodeCheckboxes = document.querySelectorAll('input[name="nodes[]"]:checked');
+            if (nodeCheckboxes.length === 0) {
+                event.preventDefault();
+                alert('Please select at least one deployment node');
+                
+                // Scroll to the nodes section
+                document.querySelector('h4:contains("Deployment Nodes")').scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'start'
+                });
+            }
+        });
+
+        // Make at least one node checked by default if all are unchecked
+        const nodeCheckboxes = document.querySelectorAll('input[name="nodes[]"]');
+        nodeCheckboxes.forEach(checkbox => {
+            checkbox.addEventListener('change', function() {
+                // Check if any checkboxes are checked
+                const anyChecked = Array.from(nodeCheckboxes).some(cb => cb.checked);
+                if (!anyChecked && nodeCheckboxes.length > 0) {
+                    // If none are checked, check the first one
+                    nodeCheckboxes[0].checked = true;
+                    alert('At least one node must be selected. The first node has been automatically selected.');
+                }
+            });
+        });
     });
 </script>
 {% endblock %}
