@@ -1,9 +1,10 @@
 from abc import ABC, abstractmethod
 import os
-import paramiko
 import tempfile
 from datetime import datetime
-from app.models.models import db, Node, Site, SiteNode, DeploymentLog
+from app.models.models import db, Node, Site, SiteNode, DeploymentLog, SystemLog
+from app.services.ssh_connection_service import SSHConnectionService
+from app.services.logger_service import log_activity
 
 class ProxyServiceBase(ABC):
     """Base abstract class for proxy services (Nginx, Caddy, Traefik)"""
@@ -89,7 +90,122 @@ class ProxyServiceBase(ABC):
         Returns:
             tuple: (all_exist, missing_files, warnings)
         """
-        pass
+        # Default implementation that can be overridden by subclasses
+        return (True, [], [])
+    
+    def validate_configs(self, node_id=None):
+        """
+        Validate all configurations for a node or for all nodes of this proxy type
+        
+        Args:
+            node_id: Optional ID of the node to validate. If None, validates all nodes.
+            
+        Returns:
+            tuple: (is_valid, messages)
+        """
+        is_valid = True
+        messages = []
+        
+        try:
+            # Get nodes to validate
+            if node_id:
+                nodes = [Node.query.get(node_id)]
+                if not nodes[0]:
+                    return (False, [f"Node with ID {node_id} not found"])
+            else:
+                # Get all active nodes of this proxy type
+                from app.services.proxy_service_factory import ProxyServiceFactory
+                proxy_type = None
+                
+                # Determine proxy type based on class
+                if self.__class__.__name__ == 'NginxService':
+                    proxy_type = 'nginx'
+                elif self.__class__.__name__ == 'CaddyService':
+                    proxy_type = 'caddy'
+                elif self.__class__.__name__ == 'TraefikService':
+                    proxy_type = 'traefik'
+                
+                if not proxy_type:
+                    return (False, ["Could not determine proxy type"])
+                
+                nodes = Node.query.filter_by(is_active=True, proxy_type=proxy_type).all()
+            
+            if not nodes:
+                return (True, ["No nodes to validate"])
+            
+            # Validate each node
+            for node in nodes:
+                with SSHConnectionService.get_connection(node) as ssh_client:
+                    node_name = f"{node.name} ({node.ip_address})"
+                    
+                    # Test connectivity
+                    exit_code, stdout, stderr = SSHConnectionService.execute_command(
+                        ssh_client, "echo 'Connection test'"
+                    )
+                    
+                    if exit_code != 0:
+                        is_valid = False
+                        messages.append(f"Cannot connect to {node_name}: {stderr}")
+                        continue
+                    
+                    # Test proxy service based on proxy type
+                    if node.proxy_type == 'nginx':
+                        cmd = "nginx -t 2>&1"
+                    elif node.proxy_type == 'caddy':
+                        cmd = "caddy validate --config /etc/caddy/Caddyfile 2>&1"
+                    elif node.proxy_type == 'traefik':
+                        cmd = "traefik healthcheck --ping 2>&1"
+                    else:
+                        messages.append(f"Unknown proxy type for {node_name}: {node.proxy_type}")
+                        continue
+                    
+                    exit_code, stdout, stderr = SSHConnectionService.execute_command(ssh_client, cmd)
+                    output = stdout + stderr
+                    
+                    if exit_code != 0:
+                        is_valid = False
+                        messages.append(f"Configuration invalid on {node_name}: {output}")
+                    else:
+                        messages.append(f"Configuration valid on {node_name}")
+                        
+                        # Check for warnings in the output
+                        if 'warning' in output.lower():
+                            warnings = [line for line in output.split('\n') if 'warning' in line.lower()]
+                            for warning in warnings:
+                                messages.append(f"Warning on {node_name}: {warning}")
+            
+            return (is_valid, messages)
+            
+        except Exception as e:
+            return (False, [f"Error validating configurations: {str(e)}"])
+    
+    def test_connection(self, node_id=None, node=None):
+        """
+        Test SSH connection to a node
+        
+        Args:
+            node_id: Optional ID of the node to test
+            node: Optional Node object to test
+            
+        Returns:
+            bool: True if connection successful, False otherwise
+        """
+        if not node and not node_id:
+            return False
+        
+        if not node:
+            node = Node.query.get(node_id)
+            if not node:
+                return False
+        
+        try:
+            with SSHConnectionService.get_connection(node) as ssh_client:
+                exit_code, stdout, stderr = SSHConnectionService.execute_command(
+                    ssh_client, "echo 'Connection test'"
+                )
+                return exit_code == 0
+        except Exception:
+            return False
     
     def create_backup_config(self, site_id, node_id):
         """
@@ -126,65 +242,38 @@ class ProxyServiceBase(ABC):
                     return backup_path
             else:
                 # For traditional nodes, use SSH to get the config
-                ssh_client = paramiko.SSHClient()
-                ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                
-                # Connect using key or password
-                if node.ssh_key_path:
-                    ssh_client.connect(
-                        hostname=node.ip_address,
-                        port=node.ssh_port,
-                        username=node.ssh_user,
-                        key_filename=node.ssh_key_path,
-                        timeout=10
-                    )
-                else:
-                    ssh_client.connect(
-                        hostname=node.ip_address,
-                        port=node.ssh_port,
-                        username=node.ssh_user,
-                        password=node.ssh_password,
-                        timeout=10
-                    )
-                
-                # Open SFTP connection
-                sftp = ssh_client.open_sftp()
-                
                 # Get the config file path based on proxy type
                 if node.proxy_type == 'nginx':
                     config_path = f"{node.proxy_config_path}/{site.domain}.conf"
                 elif node.proxy_type == 'caddy':
                     config_path = f"{node.proxy_config_path}/sites/{site.domain}.caddy"
                 elif node.proxy_type == 'traefik':
-                    config_path = f"{node.proxy_config_path}/{site.domain}.yml"
+                    config_path = f"{node.proxy_config_path}/{site.domain}.yaml"
                 else:
                     config_path = f"{node.proxy_config_path}/{site.domain}.conf"
                 
                 try:
-                    # Try to retrieve the config file
+                    # Create a temp file to store the downloaded config
                     with tempfile.NamedTemporaryFile(delete=False) as tmp:
                         tmp_path = tmp.name
-                        try:
-                            sftp.get(config_path, tmp_path)
-                            # Copy to backup location
-                            import shutil
-                            shutil.copy2(tmp_path, backup_path)
-                        finally:
-                            # Clean up temp file
-                            if os.path.exists(tmp_path):
-                                os.unlink(tmp_path)
                     
-                    return backup_path
+                    # Download the config file
+                    if SSHConnectionService.download_file(node, config_path, tmp_path):
+                        # Copy to backup location
+                        import shutil
+                        shutil.copy2(tmp_path, backup_path)
+                        
+                        # Clean up temp file
+                        if os.path.exists(tmp_path):
+                            os.unlink(tmp_path)
+                        
+                        return backup_path
                 except FileNotFoundError:
                     # Config doesn't exist yet, nothing to backup
                     return None
-                finally:
-                    sftp.close()
-                    ssh_client.close()
             
             return None
         except Exception as e:
-            from app.services.logger_service import log_activity
             log_activity('error', f"Failed to create backup for {site.domain} on {node.name}: {str(e)}", 'site', site_id)
             return None
     
@@ -216,9 +305,72 @@ class ProxyServiceBase(ABC):
                 config_content = f.read()
             
             # Deploy the backup content
-            return self.deploy_config(site_id, node_id, config_content)
+            result = self.deploy_config(site_id, node_id, config_content)
+            
+            # Log the restore activity
+            log_activity(
+                'admin', 
+                f"Restored configuration from backup for {site.domain} on {node.name}", 
+                'site', 
+                site_id, 
+                None, 
+                user_id
+            )
+            
+            return result
             
         except Exception as e:
-            from app.services.logger_service import log_activity
             log_activity('error', f"Failed to restore from backup for {site.domain} on {node.name}: {str(e)}", 'site', site_id, None, user_id)
             return False
+    
+    def log_deployment(self, site_id, node_id, action, status, message):
+        """
+        Log a deployment action in the database
+        
+        Args:
+            site_id: ID of the site
+            node_id: ID of the node
+            action: Action performed (e.g., 'deploy', 'test_config')
+            status: Status of the action (e.g., 'success', 'error')
+            message: Description of the result
+            
+        Returns:
+            DeploymentLog: The created log entry
+        """
+        log = DeploymentLog(
+            site_id=site_id,
+            node_id=node_id,
+            action=action,
+            status=status,
+            message=message
+        )
+        db.session.add(log)
+        db.session.commit()
+        return log
+    
+    def log_system_action(self, category, action, resource_type, resource_id, details, user_id=None):
+        """
+        Log a system action in the database
+        
+        Args:
+            category: Category of the action (e.g., 'admin', 'system')
+            action: Action performed (e.g., 'install_nginx')
+            resource_type: Type of resource affected (e.g., 'node', 'site')
+            resource_id: ID of the affected resource
+            details: Description of the action
+            user_id: Optional ID of the user performing the action
+            
+        Returns:
+            SystemLog: The created log entry
+        """
+        system_log = SystemLog(
+            category=category,
+            action=action,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            details=details,
+            user_id=user_id
+        )
+        db.session.add(system_log)
+        db.session.commit()
+        return system_log

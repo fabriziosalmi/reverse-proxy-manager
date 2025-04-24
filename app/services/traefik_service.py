@@ -1,12 +1,11 @@
 import os
 import re
-import paramiko
-import tempfile
 import yaml
 from datetime import datetime
 
 from app.services.proxy_service_base import ProxyServiceBase
-from app.models.models import db, Node, Site, SiteNode, DeploymentLog, SystemLog
+from app.models.models import db, Node, Site, SiteNode, DeploymentLog
+from app.services.ssh_connection_service import SSHConnectionService
 from app.services.logger_service import log_activity
 
 class TraefikService(ProxyServiceBase):
@@ -163,7 +162,6 @@ class TraefikService(ProxyServiceBase):
             }
         
         # Convert the config to YAML format
-        import yaml
         return yaml.dump(config, default_flow_style=False)
     
     def deploy_config(self, site_id, node_id, config_content, test_only=False):
@@ -187,159 +185,132 @@ class TraefikService(ProxyServiceBase):
             raise ValueError("Site or Node not found")
         
         # Create a backup of the existing configuration
+        backup_path = None
         if not test_only:
             backup_path = self.create_backup_config(site_id, node_id)
         
         try:
-            # Create SSH connection to the node
-            ssh_client = paramiko.SSHClient()
-            ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            
-            # Connect using key or password
-            if node.ssh_key_path:
-                ssh_client.connect(
-                    hostname=node.ip_address,
-                    port=node.ssh_port,
-                    username=node.ssh_user,
-                    key_filename=node.ssh_key_path,
-                    timeout=10
-                )
-            else:
-                ssh_client.connect(
-                    hostname=node.ip_address,
-                    port=node.ssh_port,
-                    username=node.ssh_user,
-                    password=node.ssh_password,
-                    timeout=10
-                )
-            
-            # Upload the configuration to a temporary file for testing
-            sftp = ssh_client.open_sftp()
-            with tempfile.NamedTemporaryFile(delete=False) as tmp:
-                tmp_path = tmp.name
-                tmp.write(config_content.encode('utf-8'))
-            
+            # Create a temporary file with the configuration content
+            temp_file_path = SSHConnectionService.create_temp_file_with_content(config_content)
             remote_temp_path = f"/tmp/{site.domain}_traefik_test.yaml"
-            sftp.put(tmp_path, remote_temp_path)
-            os.unlink(tmp_path)  # Clean up local temp file
             
-            # Test the configuration (Traefik doesn't have a built-in config test, so we validate YAML syntax)
-            test_cmd = f"yamllint {remote_temp_path} 2>&1 || echo 'YAML syntax is valid'"
-            stdin, stdout, stderr = ssh_client.exec_command(test_cmd)
-            output = stdout.read().decode('utf-8') + stderr.read().decode('utf-8')
-            
-            warnings = []
-            
-            if "error" in output.lower():
-                # Configuration test failed
-                error_message = output
+            with SSHConnectionService.get_sftp_connection(node) as (ssh_client, sftp):
+                # Upload the configuration to a temporary file for testing
+                sftp.put(temp_file_path, remote_temp_path)
+                os.unlink(temp_file_path)  # Clean up local temp file
                 
-                # Log the failure
-                log = DeploymentLog(
-                    site_id=site_id,
-                    node_id=node_id,
-                    action="test_config" if test_only else "deploy",
-                    status="error",
-                    message=f"Traefik configuration test failed: {error_message}"
-                )
-                db.session.add(log)
-                db.session.commit()
+                # Test the configuration (Traefik doesn't have a built-in config test, so we validate YAML syntax)
+                test_cmd = f"yamllint {remote_temp_path} 2>&1 || echo 'YAML syntax is valid'"
+                exit_code, stdout, stderr = SSHConnectionService.execute_command(ssh_client, test_cmd)
+                output = stdout + stderr
                 
+                warnings = []
+                
+                if "error" in output.lower():
+                    # Configuration test failed
+                    error_message = output
+                    
+                    # Log the failure
+                    self.log_deployment(
+                        site_id=site_id,
+                        node_id=node_id,
+                        action="test_config" if test_only else "deploy",
+                        status="error",
+                        message=f"Traefik configuration test failed: {error_message}"
+                    )
+                    
+                    if test_only:
+                        # Return the validation result
+                        return False, error_message
+                    else:
+                        # Restore from backup if deployment was attempted
+                        if backup_path:
+                            self.restore_from_backup(backup_path, site_id, node_id)
+                        
+                        raise Exception(f"Traefik configuration test failed: {error_message}")
+                
+                # If we're only testing, return success and any warnings
                 if test_only:
-                    # Return the validation result
-                    return False, error_message
-                else:
-                    # Restore from backup if deployment was attempted
+                    return True, warnings
+                
+                # Get the Traefik config directory from the node
+                traefik_sites_dir = node.proxy_config_path
+                if not traefik_sites_dir:
+                    traefik_sites_dir = "/etc/traefik/conf.d"  # Default path
+                    
+                # Ensure the sites directory exists
+                mkdir_cmd = f"sudo mkdir -p {traefik_sites_dir}"
+                exit_code, stdout, stderr = SSHConnectionService.execute_command(ssh_client, mkdir_cmd)
+                
+                if exit_code != 0:
+                    error_message = stderr
+                    raise Exception(f"Failed to create Traefik sites directory: {error_message}")
+                
+                # Deploy the valid configuration
+                config_path = f"{traefik_sites_dir}/{site.domain}.yaml"
+                sftp.put(remote_temp_path, f"/tmp/{site.domain}.yaml")
+                
+                # Move the file to final location with sudo
+                mv_cmd = f"sudo mv /tmp/{site.domain}.yaml {config_path}"
+                exit_code, stdout, stderr = SSHConnectionService.execute_command(ssh_client, mv_cmd)
+                
+                if exit_code != 0:
+                    error_message = stderr
+                    raise Exception(f"Failed to move configuration file: {error_message}")
+                
+                # Reload Traefik to apply the new configuration
+                reload_cmd = "sudo systemctl reload traefik"
+                exit_code, stdout, stderr = SSHConnectionService.execute_command(ssh_client, reload_cmd)
+                
+                if exit_code != 0:
+                    # Reload failed
+                    error_message = stderr
+                    
+                    # Log the failure
+                    self.log_deployment(
+                        site_id=site_id,
+                        node_id=node_id,
+                        action="deploy",
+                        status="error",
+                        message=f"Traefik reload failed: {error_message}"
+                    )
+                    
+                    # Restore from backup
                     if backup_path:
                         self.restore_from_backup(backup_path, site_id, node_id)
                     
-                    raise Exception(f"Traefik configuration test failed: {error_message}")
-            
-            # If we're only testing, return success and any warnings
-            if test_only:
-                return True, warnings
-            
-            # Get the Traefik config directory from the node
-            traefik_sites_dir = node.proxy_config_path
-            if not traefik_sites_dir:
-                traefik_sites_dir = "/etc/traefik/conf.d"  # Default path
+                    raise Exception(f"Traefik reload failed: {error_message}")
                 
-            # Ensure the sites directory exists
-            mkdir_cmd = f"sudo mkdir -p {traefik_sites_dir}"
-            stdin, stdout, stderr = ssh_client.exec_command(mkdir_cmd)
-            exit_code = stdout.channel.recv_exit_status()
-            
-            if exit_code != 0:
-                error_message = stderr.read().decode('utf-8')
-                raise Exception(f"Failed to create Traefik sites directory: {error_message}")
-            
-            # Deploy the valid configuration
-            config_path = f"{traefik_sites_dir}/{site.domain}.yaml"
-            sftp.put(remote_temp_path, f"/tmp/{site.domain}.yaml")
-            ssh_client.exec_command(f"sudo mv /tmp/{site.domain}.yaml {config_path}")
-            
-            # Reload Traefik to apply the new configuration
-            reload_cmd = "sudo systemctl reload traefik"
-            stdin, stdout, stderr = ssh_client.exec_command(reload_cmd)
-            exit_code = stdout.channel.recv_exit_status()
-            
-            if exit_code != 0:
-                # Reload failed
-                error_message = stderr.read().decode('utf-8')
+                # Update the site node status
+                site_node = SiteNode.query.filter_by(site_id=site_id, node_id=node_id).first()
+                if site_node:
+                    site_node.status = 'active'
+                    site_node.last_deployed = datetime.utcnow()
+                    db.session.commit()
                 
-                # Log the failure
-                log = DeploymentLog(
+                # Log the successful deployment
+                self.log_deployment(
                     site_id=site_id,
                     node_id=node_id,
                     action="deploy",
-                    status="error",
-                    message=f"Traefik reload failed: {error_message}"
+                    status="success",
+                    message="Traefik configuration deployed successfully"
                 )
-                db.session.add(log)
-                db.session.commit()
                 
-                # Restore from backup
-                if backup_path:
-                    self.restore_from_backup(backup_path, site_id, node_id)
+                # Clean up
+                ssh_client.exec_command(f"rm -f {remote_temp_path}")
                 
-                raise Exception(f"Traefik reload failed: {error_message}")
-            
-            # Update the site node status
-            site_node = SiteNode.query.filter_by(site_id=site_id, node_id=node_id).first()
-            if site_node:
-                site_node.status = 'active'
-                site_node.last_deployed = datetime.utcnow()
-                db.session.commit()
-            
-            # Log the successful deployment
-            log = DeploymentLog(
-                site_id=site_id,
-                node_id=node_id,
-                action="deploy",
-                status="success",
-                message="Traefik configuration deployed successfully"
-            )
-            db.session.add(log)
-            db.session.commit()
-            
-            # Clean up
-            ssh_client.exec_command(f"rm -f {remote_temp_path}")
-            sftp.close()
-            ssh_client.close()
-            
-            return True
+                return True
             
         except Exception as e:
             # Log the error
-            log = DeploymentLog(
+            self.log_deployment(
                 site_id=site_id,
                 node_id=node_id,
                 action="deploy",
                 status="error",
                 message=f"Deployment error: {str(e)}"
             )
-            db.session.add(log)
-            db.session.commit()
             
             # Restore from backup if it exists
             if not test_only and backup_path:
@@ -359,7 +330,6 @@ class TraefikService(ProxyServiceBase):
         """
         # Basic YAML validation
         try:
-            import yaml
             yaml.safe_load(config_content)
             return True, ""
         except Exception as e:
@@ -376,65 +346,45 @@ class TraefikService(ProxyServiceBase):
             dict: A dictionary containing Traefik information
         """
         try:
-            ssh_client = paramiko.SSHClient()
-            ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            
-            # Connect using key or password
-            if node.ssh_key_path:
-                ssh_client.connect(
-                    hostname=node.ip_address,
-                    port=node.ssh_port,
-                    username=node.ssh_user,
-                    key_filename=node.ssh_key_path,
-                    timeout=10
+            with SSHConnectionService.get_connection(node) as ssh_client:
+                # Get Traefik version
+                exit_code, stdout, stderr = SSHConnectionService.execute_command(ssh_client, "traefik version")
+                version_output = stdout.strip()
+                
+                # Extract version
+                version_match = re.search(r'Version:\s+(\d+\.\d+\.\d+)', version_output)
+                version = version_match.group(1) if version_match else "Unknown"
+                
+                # Check if Traefik is running
+                exit_code, stdout, stderr = SSHConnectionService.execute_command(ssh_client, "systemctl is-active traefik")
+                is_running = stdout.strip() == 'active'
+                
+                # Get site count
+                traefik_sites_dir = node.proxy_config_path if node.proxy_config_path else "/etc/traefik/conf.d"
+                exit_code, stdout, stderr = SSHConnectionService.execute_command(
+                    ssh_client, f"find {traefik_sites_dir} -type f -name '*.yaml' | wc -l"
                 )
-            else:
-                ssh_client.connect(
-                    hostname=node.ip_address,
-                    port=node.ssh_port,
-                    username=node.ssh_user,
-                    password=node.ssh_password,
-                    timeout=10
-                )
-            
-            # Get Traefik version
-            stdin, stdout, stderr = ssh_client.exec_command("traefik version")
-            version_output = stdout.read().decode('utf-8').strip()
-            
-            # Extract version
-            version_match = re.search(r'Version:\s+(\d+\.\d+\.\d+)', version_output)
-            version = version_match.group(1) if version_match else "Unknown"
-            
-            # Check if Traefik is running
-            stdin, stdout, stderr = ssh_client.exec_command("systemctl is-active traefik")
-            is_running = stdout.read().decode('utf-8').strip() == 'active'
-            
-            # Get site count
-            traefik_sites_dir = node.proxy_config_path if node.proxy_config_path else "/etc/traefik/conf.d"
-            stdin, stdout, stderr = ssh_client.exec_command(f"find {traefik_sites_dir} -type f -name '*.yaml' | wc -l")
-            site_count = int(stdout.read().decode('utf-8').strip())
-            
-            # Get enabled features and providers
-            features = []
-            providers = []
-            
-            stdin, stdout, stderr = ssh_client.exec_command("ps aux | grep traefik")
-            process_info = stdout.read().decode('utf-8')
-            
-            if "--providers.file" in process_info:
-                providers.append("file")
-            if "--providers.docker" in process_info:
-                providers.append("docker")
-            
-            ssh_client.close()
-            
-            return {
-                'version': version,
-                'is_running': is_running,
-                'site_count': site_count,
-                'providers': providers,
-                'features': features
-            }
+                site_count = int(stdout.strip())
+                
+                # Get enabled features and providers
+                features = []
+                providers = []
+                
+                exit_code, stdout, stderr = SSHConnectionService.execute_command(ssh_client, "ps aux | grep traefik")
+                process_info = stdout
+                
+                if "--providers.file" in process_info:
+                    providers.append("file")
+                if "--providers.docker" in process_info:
+                    providers.append("docker")
+                
+                return {
+                    'version': version,
+                    'is_running': is_running,
+                    'site_count': site_count,
+                    'providers': providers,
+                    'features': features
+                }
             
         except Exception as e:
             return {
@@ -458,55 +408,35 @@ class TraefikService(ProxyServiceBase):
             tuple: (success, message)
         """
         try:
-            ssh_client = paramiko.SSHClient()
-            ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            
-            # Connect using key or password
-            if node.ssh_key_path:
-                ssh_client.connect(
-                    hostname=node.ip_address,
-                    port=node.ssh_port,
-                    username=node.ssh_user,
-                    key_filename=node.ssh_key_path,
-                    timeout=10
-                )
-            else:
-                ssh_client.connect(
-                    hostname=node.ip_address,
-                    port=node.ssh_port,
-                    username=node.ssh_user,
-                    password=node.ssh_password,
-                    timeout=10
-                )
-            
-            # Check if Traefik is already installed
-            stdin, stdout, stderr = ssh_client.exec_command("which traefik")
-            traefik_path = stdout.read().decode('utf-8').strip()
-            
-            if traefik_path:
-                return True, f"Traefik is already installed at {traefik_path}"
-            
-            # Check the Linux distribution
-            stdin, stdout, stderr = ssh_client.exec_command("cat /etc/os-release")
-            os_info = stdout.read().decode('utf-8')
-            
-            # Install Traefik using the binary method since it's the most reliable across distributions
-            commands = [
-                # Create traefik user
-                "sudo useradd -r -s /bin/false traefik || true",
+            with SSHConnectionService.get_connection(node) as ssh_client:
+                # Check if Traefik is already installed
+                exit_code, stdout, stderr = SSHConnectionService.execute_command(ssh_client, "which traefik")
+                traefik_path = stdout.strip()
                 
-                # Download Traefik binary
-                "sudo curl -L https://github.com/traefik/traefik/releases/download/v2.9.1/traefik_v2.9.1_linux_amd64.tar.gz -o /tmp/traefik.tar.gz",
-                "sudo tar -C /tmp -xzf /tmp/traefik.tar.gz",
-                "sudo mv /tmp/traefik /usr/local/bin/",
-                "sudo chmod +x /usr/local/bin/traefik",
+                if traefik_path:
+                    return True, f"Traefik is already installed at {traefik_path}"
                 
-                # Create directories
-                "sudo mkdir -p /etc/traefik/conf.d",
-                "sudo mkdir -p /etc/traefik/rules",
+                # Check the Linux distribution
+                exit_code, stdout, stderr = SSHConnectionService.execute_command(ssh_client, "cat /etc/os-release")
+                os_info = stdout
                 
-                # Create basic configuration
-                """sudo tee /etc/traefik/traefik.yaml > /dev/null << 'EOT'
+                # Install Traefik using the binary method since it's the most reliable across distributions
+                commands = [
+                    # Create traefik user
+                    "sudo useradd -r -s /bin/false traefik || true",
+                    
+                    # Download Traefik binary
+                    "sudo curl -L https://github.com/traefik/traefik/releases/download/v2.9.1/traefik_v2.9.1_linux_amd64.tar.gz -o /tmp/traefik.tar.gz",
+                    "sudo tar -C /tmp -xzf /tmp/traefik.tar.gz",
+                    "sudo mv /tmp/traefik /usr/local/bin/",
+                    "sudo chmod +x /usr/local/bin/traefik",
+                    
+                    # Create directories
+                    "sudo mkdir -p /etc/traefik/conf.d",
+                    "sudo mkdir -p /etc/traefik/rules",
+                    
+                    # Create basic configuration
+                    """sudo tee /etc/traefik/traefik.yaml > /dev/null << 'EOT'
 api:
   dashboard: true
   insecure: true
@@ -530,11 +460,11 @@ certificatesResolvers:
       httpChallenge:
         entryPoint: web
 EOT""",
-                "sudo touch /etc/traefik/acme.json",
-                "sudo chmod 600 /etc/traefik/acme.json",
-                
-                # Create systemd service
-                """sudo tee /etc/systemd/system/traefik.service > /dev/null << 'EOT'
+                    "sudo touch /etc/traefik/acme.json",
+                    "sudo chmod 600 /etc/traefik/acme.json",
+                    
+                    # Create systemd service
+                    """sudo tee /etc/systemd/system/traefik.service > /dev/null << 'EOT'
 [Unit]
 Description=Traefik
 Documentation=https://doc.traefik.io/traefik/
@@ -552,49 +482,49 @@ RestartSec=5s
 [Install]
 WantedBy=multi-user.target
 EOT""",
+                    
+                    # Set permissions
+                    "sudo chown -R traefik:traefik /etc/traefik",
+                    
+                    # Enable and start service
+                    "sudo systemctl daemon-reload",
+                    "sudo systemctl enable traefik",
+                    "sudo systemctl start traefik"
+                ]
                 
-                # Set permissions
-                "sudo chown -R traefik:traefik /etc/traefik",
+                # Run installation commands
+                success, results = SSHConnectionService.execute_commands(ssh_client, commands)
                 
-                # Enable and start service
-                "sudo systemctl daemon-reload",
-                "sudo systemctl enable traefik",
-                "sudo systemctl start traefik"
-            ]
-            
-            # Run installation commands
-            for cmd in commands:
-                stdin, stdout, stderr = ssh_client.exec_command(cmd)
-                exit_code = stdout.channel.recv_exit_status()
-                if exit_code != 0:
-                    error = stderr.read().decode('utf-8')
-                    return False, f"Installation failed: {error}"
-            
-            # Verify installation
-            stdin, stdout, stderr = ssh_client.exec_command("which traefik")
-            traefik_path = stdout.read().decode('utf-8').strip()
-            
-            if traefik_path:
-                # Update the node with Traefik config path
-                node.proxy_config_path = "/etc/traefik/conf.d"
-                node.proxy_type = "traefik"
-                db.session.commit()
+                if not success:
+                    # Find the command that failed
+                    for cmd, exit_code, stdout, stderr in results:
+                        if exit_code != 0:
+                            return False, f"Installation failed: {stderr}"
                 
-                # Log the installation
-                if user_id:
-                    from app.services.logger_service import log_activity
-                    log_activity(
-                        category='admin',
-                        action='install_traefik',
-                        resource_type='node',
-                        resource_id=node.id,
-                        user_id=user_id,
-                        details=f"Installed Traefik on node {node.name}"
-                    )
+                # Verify installation
+                exit_code, stdout, stderr = SSHConnectionService.execute_command(ssh_client, "which traefik")
+                traefik_path = stdout.strip()
                 
-                return True, f"Traefik successfully installed at {traefik_path}"
-            else:
-                return False, "Traefik installation failed: Traefik binary not found after installation"
+                if traefik_path:
+                    # Update the node with Traefik config path
+                    node.proxy_config_path = "/etc/traefik/conf.d"
+                    node.proxy_type = "traefik"
+                    db.session.commit()
+                    
+                    # Log the installation
+                    if user_id:
+                        self.log_system_action(
+                            category='admin',
+                            action='install_traefik',
+                            resource_type='node',
+                            resource_id=node.id,
+                            details=f"Installed Traefik on node {node.name}",
+                            user_id=user_id
+                        )
+                    
+                    return True, f"Traefik successfully installed at {traefik_path}"
+                else:
+                    return False, "Traefik installation failed: Traefik binary not found after installation"
                 
         except Exception as e:
             return False, f"Traefik installation failed: {str(e)}"
