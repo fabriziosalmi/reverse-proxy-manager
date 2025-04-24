@@ -57,6 +57,34 @@ class User(db.Model, UserMixin):
             'last_login': self.last_login.isoformat() if self.last_login else None
         }
 
+# Add the ActivityLog model
+class ActivityLog(db.Model):
+    """Model to track user activity for security and audit purposes"""
+    __tablename__ = 'activity_logs'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    action = db.Column(db.String(64), nullable=False)  # login, logout, profile_update, etc.
+    ip_address = db.Column(db.String(45), nullable=True)  # Store IP address for security monitoring
+    details = db.Column(db.Text, nullable=True)  # Additional details about the activity
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Relationship to the User model
+    user = db.relationship('User', backref=db.backref('activity_logs', lazy='dynamic'))
+    
+    def __repr__(self):
+        return f'<ActivityLog id={self.id} user_id={self.user_id} action={self.action}>'
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'user': self.user.username if self.user else None,
+            'action': self.action,
+            'ip_address': self.ip_address,
+            'details': self.details,
+            'created_at': self.created_at.isoformat() if self.created_at else None
+        }
 
 class Node(db.Model):
     __tablename__ = 'nodes'

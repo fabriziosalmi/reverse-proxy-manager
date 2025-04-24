@@ -1,3 +1,5 @@
+import time
+
 class RateLimiter:
     """
     A memory-efficient rate limiter implementation with periodic cleanup
