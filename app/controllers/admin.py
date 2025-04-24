@@ -2169,7 +2169,6 @@ def settings():
         'failed_login_limit': current_app.config.get('FAILED_LOGIN_LIMIT', 5),
         'password_expiry_days': current_app.config.get('PASSWORD_EXPIRY_DAYS', 90),
         'enforce_password_complexity': current_app.config.get('ENFORCE_PASSWORD_COMPLEXITY', True),
-        'two_factor_auth': current_app.config.get('ENABLE_2FA', False),
         'allowed_ip_ranges': current_app.config.get('ALLOWED_IP_RANGES', []),
         'api_rate_limit': current_app.config.get('API_RATE_LIMIT', 100)
     }
@@ -2321,7 +2320,7 @@ def settings():
             security_settings['failed_login_limit'] = int(request.form.get('failed_login_limit', 5))
             security_settings['password_expiry_days'] = int(request.form.get('password_expiry_days', 90))
             security_settings['enforce_password_complexity'] = 'enforce_password_complexity' in request.form
-            security_settings['two_factor_auth'] = 'two_factor_auth' in request.form
+            # Two-factor authentication option removed
             security_settings['allowed_ip_ranges'] = [range.strip() for range in request.form.get('allowed_ip_ranges', '').split(',') if range.strip()]
             security_settings['api_rate_limit'] = int(request.form.get('api_rate_limit', 100))
             
