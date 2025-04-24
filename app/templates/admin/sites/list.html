@@ -584,6 +584,10 @@
         
         // Export to CSV
         document.getElementById('exportSitesBtn').addEventListener('click', function() {
+            exportTableToCSV();
+        });
+        
+        function exportTableToCSV() {
             // Get visible data from DataTable
             let visibleData = [];
             let headers = [];
@@ -591,7 +595,7 @@
             // Get headers (excluding checkbox and actions)
             $('#sitesTable thead th').each(function(index) {
                 if (index !== 0 && index !== 10) { // Skip checkbox and actions columns
-                    headers.push($(this).text().trim());
+                    headers.push($(this).text().trim().replace(/▾$/, '').trim());
                 }
             });
             
@@ -602,11 +606,13 @@
                 
                 // Process each cell, skip checkbox and actions
                 for (let i = 1; i < rowData.length - 1; i++) {
-                    // Extract text from HTML
-                    let div = document.createElement('div');
-                    div.innerHTML = rowData[i];
-                    let text = div.textContent.trim();
-                    cleanedRow.push(text);
+                    // Create a temporary element to extract text from HTML
+                    const temp = document.createElement('div');
+                    temp.innerHTML = rowData[i];
+                    // Get text content without HTML tags
+                    const text = temp.textContent || temp.innerText || '';
+                    // Escape commas and quotes for CSV
+                    cleanedRow.push('"' + text.trim().replace(/"/g, '""') + '"');
                 }
                 
                 visibleData.push(cleanedRow);
@@ -624,14 +630,16 @@
             });
             
             // Create download link
-            let encodedUri = encodeURI(csvContent);
-            let link = document.createElement("a");
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
             link.setAttribute("href", encodedUri);
-            link.setAttribute("download", "sites_export_" + new Date().toISOString().split('T')[0] + ".csv");
+            link.setAttribute("download", "sites_export_" + new Date().toISOString().slice(0,10) + ".csv");
             document.body.appendChild(link);
+            
+            // Trigger download and clean up
             link.click();
             document.body.removeChild(link);
-        });
+        }
     });
 </script>
 {% endblock %}

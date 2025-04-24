@@ -344,18 +344,20 @@
 
     // Function to check external IP address
     function checkExternalIP(nodeId) {
-        const ipElement = document.getElementById(`external-ip-${nodeId}`);
-        const originalButton = ipElement.innerHTML; // Store original button
+        const ipElement = document.getElementById(`node-external-ip-${nodeId}`);
+        const originalContent = ipElement.innerHTML; // Store original content
         ipElement.innerHTML = `<div class="spinner-border spinner-border-sm text-secondary" role="status"><span class="visually-hidden">Loading...</span></div>`;
-
+        
         fetch(`{{ url_for('admin.check_external_ip', node_id=0) }}`.replace('0', nodeId))
             .then(response => {
-                if (!response.ok) { throw new Error(`HTTP error! status: ${response.status}`); }
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
                 return response.json();
             })
             .then(data => {
                 if (data.success && data.external_ip) {
-                    ipElement.innerHTML = `<span class="badge bg-light-subtle text-dark border rounded-pill" title="External IP"><i class="fas fa-globe text-success me-1"></i>${data.external_ip}</span>`;
+                    ipElement.innerHTML = `<code>${data.external_ip}</code> <i class="fas fa-check-circle text-success ms-1"></i>`;
                 } else {
                     ipElement.innerHTML = `<span class="badge bg-danger-subtle text-danger-emphasis border border-danger-subtle rounded-pill" title="${data.error || 'Failed to check'}"><i class="fas fa-exclamation-triangle"></i> Error</span>
                         <button class="btn btn-sm btn-link text-secondary p-0 ms-1" onclick="checkExternalIP(${nodeId})" title="Try again">

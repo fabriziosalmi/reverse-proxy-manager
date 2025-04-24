@@ -68,7 +68,9 @@
                             <!-- Email for Let's Encrypt notifications -->
                             <div id="email_field" class="mb-3 d-none">
                                 <label for="email" class="form-label">Email Address</label>
-                                <input type="email" class="form-control" id="email" name="email" placeholder="your.email@example.com">
+                                <input type="email" class="form-control" id="email" name="email" 
+                                       pattern="^[^\s@]+@[^\s@]+\.[^\s@]+$"
+                                       placeholder="your.email@example.com">
                                 <div class="form-text">Email address for Let's Encrypt notifications and recovery.</div>
                             </div>
                             

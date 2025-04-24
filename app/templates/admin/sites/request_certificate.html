@@ -226,6 +226,19 @@
                             </div>
                         </div>
 
+                        <div class="form-section">
+                            <h4 class="form-section-title">
+                                <i class="fas fa-globe"></i>Domain Information
+                            </h4>
+                            <div class="mb-3">
+                                <label for="domain" class="form-label">Domain<span class="required-indicator">*</span></label>
+                                <input type="text" class="form-control" id="domain" name="domain" 
+                                       required pattern="^(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$"
+                                       placeholder="example.com">
+                                <div class="form-text">Enter the root domain name without 'www'</div>
+                            </div>
+                        </div>
+
                         <div class="alert alert-info">
                             <i class="fas fa-info-circle me-2"></i>
                             <strong>Important:</strong> Let's Encrypt certificates are valid for 90 days. The system will attempt to auto-renew certificates 30 days before expiry.

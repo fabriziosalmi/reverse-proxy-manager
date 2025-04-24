@@ -59,19 +59,21 @@
                 </div>
             </div>
             
-            <form method="POST" action="{{ url_for('admin.system_reset') }}" id="resetForm">
+            <form id="resetForm" method="POST" action="{{ url_for('admin.reset_system') }}" onsubmit="return validateResetForm();">
+                <input type="hidden" name="confirm" value="yes">
+                
                 <div class="mb-4">
-                    <label class="form-label">What would you like to reset?</label>
-                    <div class="form-check">
+                    <label class="form-label">Reset Type:</label>
+                    <div class="form-check mb-2">
                         <input class="form-check-input" type="radio" name="reset_type" id="resetAll" value="all" checked>
                         <label class="form-check-label" for="resetAll">
-                            Reset everything (all sites, nodes, and logs)
+                            Reset entire system (users, sites, nodes, certificates)
                         </label>
                     </div>
-                    <div class="form-check">
+                    <div class="form-check mb-2">
                         <input class="form-check-input" type="radio" name="reset_type" id="resetSites" value="sites">
                         <label class="form-check-label" for="resetSites">
-                            Reset only sites and their deployments
+                            Reset only sites (deployments, configurations)
                         </label>
                     </div>
                     <div class="form-check">
@@ -188,5 +190,27 @@
             });
         }
     });
+    
+    // Global validation function that will be called by the onsubmit attribute
+    function validateResetForm() {
+        const passwordField = document.getElementById('password');
+        const confirmCheck = document.getElementById('confirmCheck');
+        
+        if (!passwordField.value.trim()) {
+            alert('Please enter your password to confirm.');
+            passwordField.focus();
+            return false;
+        }
+        
+        // Only allow submission through the modal confirmation process
+        if (!confirmCheck || !confirmCheck.checked) {
+            // Show the modal instead of submitting directly
+            var confirmModal = new bootstrap.Modal(document.getElementById('confirmResetModal'));
+            confirmModal.show();
+            return false;
+        }
+        
+        return true;
+    }
 </script>
 {% endblock %}
