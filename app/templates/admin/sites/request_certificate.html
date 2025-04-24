@@ -1,0 +1,315 @@
+{% extends "base.html" %}
+
+{% block title %}Request SSL Certificate - Italia CDN Proxy{% endblock %}
+
+{% block head_extra %}
+<style>
+    .form-card {
+        border-radius: 0.75rem;
+        transition: all 0.2s ease;
+    }
+    .form-section {
+        border-radius: 0.5rem;
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+        background-color: var(--bs-tertiary-bg);
+        border: 1px solid var(--bs-border-color);
+    }
+    .form-section-title {
+        font-size: 1.1rem;
+        font-weight: 600;
+        margin-bottom: 1.25rem;
+        padding-bottom: 0.75rem;
+        border-bottom: 1px solid var(--bs-border-color);
+        display: flex;
+        align-items: center;
+    }
+    .form-section-title i {
+        margin-right: 0.75rem;
+        color: var(--bs-primary);
+    }
+    .form-label {
+        font-weight: 500;
+        margin-bottom: 0.5rem;
+    }
+    .required-indicator {
+        color: var(--bs-danger);
+        font-weight: bold;
+        margin-left: 0.25rem;
+    }
+    .validation-method-card {
+        cursor: pointer;
+        transition: all 0.2s ease;
+        border: 2px solid transparent;
+    }
+    .validation-method-card.selected {
+        border-color: var(--bs-primary);
+        background-color: var(--bs-primary-bg-subtle);
+    }
+    .validation-method-card:hover:not(.selected) {
+        border-color: var(--bs-gray-300);
+        background-color: var(--bs-tertiary-bg);
+    }
+    .validation-method-card .validation-icon {
+        font-size: 2rem;
+        color: var(--bs-gray-500);
+    }
+    .validation-method-card.selected .validation-icon {
+        color: var(--bs-primary);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <nav aria-label="breadcrumb" class="mb-4">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{{ url_for('admin.dashboard') }}"><i class="fas fa-tachometer-alt me-1"></i>Dashboard</a></li>
+            <li class="breadcrumb-item"><a href="{{ url_for('admin.ssl_dashboard') }}"><i class="fas fa-shield-alt me-1"></i>SSL Dashboard</a></li>
+            <li class="breadcrumb-item active" aria-current="page"><i class="fas fa-plus-circle me-1"></i>Request Certificate</li>
+        </ol>
+    </nav>
+
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1 class="h3 mb-0"><i class="fas fa-certificate me-2"></i>Request SSL Certificate</h1>
+        <a href="{{ url_for('admin.ssl_dashboard') }}" class="btn btn-outline-secondary">
+            <i class="fas fa-arrow-left me-1"></i> Back to SSL Dashboard
+        </a>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                {% set alert_class = 'alert-info' %}
+                {% set icon_class = 'fa-info-circle' %}
+                {% if category == 'success' %}
+                    {% set alert_class = 'alert-success' %}
+                    {% set icon_class = 'fa-check-circle' %}
+                {% elif category == 'error' %}
+                    {% set alert_class = 'alert-danger' %}
+                    {% set icon_class = 'fa-exclamation-circle' %}
+                {% elif category == 'warning' %}
+                    {% set alert_class = 'alert-warning' %}
+                    {% set icon_class = 'fa-exclamation-triangle' %}
+                {% endif %}
+                <div class="alert {{ alert_class }} alert-dismissible fade show" role="alert">
+                    <div class="d-flex align-items-center">
+                        <i class="fas {{ icon_class }} me-2"></i>
+                        <div>{{ message }}</div>
+                    </div>
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
+    <div class="row">
+        <div class="col-lg-8 mx-auto">
+            <div class="card shadow-sm">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="card-title mb-0"><i class="fas fa-lock me-2"></i>Certificate Request Form</h5>
+                </div>
+                <div class="card-body p-4">
+                    <form method="POST" action="{{ url_for('admin.initiate_certificate_request') }}">
+                        <div class="form-section">
+                            <h4 class="form-section-title">
+                                <i class="fas fa-globe"></i>Select Site for Certificate
+                            </h4>
+                            <div class="mb-3">
+                                <label for="site_id" class="form-label">Site<span class="required-indicator">*</span></label>
+                                <select class="form-select" id="site_id" name="site_id" required>
+                                    <option value="" selected disabled>-- Select a site --</option>
+                                    {% for site in sites %}
+                                    <option value="{{ site.id }}">{{ site.domain }} ({{ site.name }})</option>
+                                    {% endfor %}
+                                </select>
+                                <div class="form-text">Select the site for which to request a certificate.</div>
+                            </div>
+                        </div>
+
+                        <div class="form-section">
+                            <h4 class="form-section-title">
+                                <i class="fas fa-server"></i>Deployment Target
+                            </h4>
+                            <div class="mb-3">
+                                <label for="node_id" class="form-label">Node<span class="required-indicator">*</span></label>
+                                <select class="form-select" id="node_id" name="node_id" required>
+                                    <option value="" selected disabled>-- Select a node --</option>
+                                    {% for node in nodes %}
+                                    <option value="{{ node.id }}">{{ node.name }} ({{ node.ip_address }})</option>
+                                    {% endfor %}
+                                </select>
+                                <div class="form-text">Select the node where this certificate will be installed.</div>
+                            </div>
+                        </div>
+
+                        <div class="form-section">
+                            <h4 class="form-section-title">
+                                <i class="fas fa-check-circle"></i>Domain Validation Method
+                            </h4>
+                            
+                            <div class="row mb-3">
+                                <div class="col-md-6 mb-3 mb-md-0">
+                                    <div class="validation-method-card h-100 p-3 rounded selected" id="http-validation-card" onclick="selectValidationMethod('http')">
+                                        <input type="radio" class="visually-hidden" name="validation_method" value="http" id="validation_http" checked>
+                                        <div class="text-center mb-3">
+                                            <i class="fas fa-globe validation-icon"></i>
+                                        </div>
+                                        <h5 class="text-center mb-2">HTTP Validation</h5>
+                                        <p class="text-muted small mb-0">Uses the HTTP-01 challenge through the /.well-known/acme-challenge/ path. Domain must be publicly accessible on port 80.</p>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="validation-method-card h-100 p-3 rounded" id="dns-validation-card" onclick="selectValidationMethod('dns')">
+                                        <input type="radio" class="visually-hidden" name="validation_method" value="dns" id="validation_dns">
+                                        <div class="text-center mb-3">
+                                            <i class="fas fa-server validation-icon"></i>
+                                        </div>
+                                        <h5 class="text-center mb-2">DNS Validation</h5>
+                                        <p class="text-muted small mb-0">Uses DNS-01 challenge with TXT records. Required for wildcard certificates. Works for servers behind firewalls.</p>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- DNS Provider selector (initially hidden) -->
+                            <div id="dns-provider-section" class="mt-3" style="display: none;">
+                                <div class="mb-3">
+                                    <label for="dns_provider" class="form-label">DNS Provider<span class="required-indicator">*</span></label>
+                                    <select class="form-select" id="dns_provider" name="dns_provider">
+                                        <option value="" selected disabled>-- Select DNS provider --</option>
+                                        {% for provider in dns_providers %}
+                                        <option value="{{ provider.id }}">{{ provider.name }}</option>
+                                        {% endfor %}
+                                    </select>
+                                    <div class="form-text">Select your DNS provider for automated TXT record creation.</div>
+                                </div>
+                                
+                                <div class="form-check mt-3">
+                                    <input class="form-check-input" type="checkbox" value="1" id="manual_dns" name="manual_dns">
+                                    <label class="form-check-label" for="manual_dns">
+                                        I'll add DNS records manually
+                                    </label>
+                                    <div class="form-text">Check this if you want to add TXT records manually instead of using API automation.</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-section">
+                            <h4 class="form-section-title">
+                                <i class="fas fa-cog"></i>Certificate Options
+                            </h4>
+                            
+                            <div class="mb-3">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" value="1" id="include_www" name="include_www" checked>
+                                    <label class="form-check-label" for="include_www">
+                                        Include www subdomain (www.domain.com)
+                                    </label>
+                                </div>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" value="1" id="wildcard" name="wildcard">
+                                    <label class="form-check-label" for="wildcard">
+                                        Request wildcard certificate (*.domain.com)
+                                    </label>
+                                    <div class="form-text">Wildcard certificates require DNS validation.</div>
+                                </div>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="additional_domains" class="form-label">Additional Domains (SAN)</label>
+                                <textarea class="form-control" id="additional_domains" name="additional_domains" rows="2" placeholder="One domain per line, e.g. sub1.domain.com"></textarea>
+                                <div class="form-text">Optional: Add extra domains to be covered by this certificate.</div>
+                            </div>
+                        </div>
+
+                        <div class="alert alert-info">
+                            <i class="fas fa-info-circle me-2"></i>
+                            <strong>Important:</strong> Let's Encrypt certificates are valid for 90 days. The system will attempt to auto-renew certificates 30 days before expiry.
+                        </div>
+
+                        <div class="d-flex justify-content-between mt-4 pt-3 border-top">
+                            <a href="{{ url_for('admin.ssl_dashboard') }}" class="btn btn-outline-secondary">
+                                <i class="fas fa-times me-1"></i> Cancel
+                            </a>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-paper-plane me-1"></i> Request Certificate
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Wildcard certificate checkbox logic
+        const wildcardCheckbox = document.getElementById('wildcard');
+        const validationHttpRadio = document.getElementById('validation_http');
+        const validationDnsRadio = document.getElementById('validation_dns');
+        const httpValidationCard = document.getElementById('http-validation-card');
+        const dnsValidationCard = document.getElementById('dns-validation-card');
+        
+        wildcardCheckbox.addEventListener('change', function() {
+            if (this.checked) {
+                // Wildcard requires DNS validation
+                validationDnsRadio.checked = true;
+                httpValidationCard.classList.remove('selected');
+                dnsValidationCard.classList.add('selected');
+                document.getElementById('dns-provider-section').style.display = 'block';
+            }
+        });
+
+        // Handle manual DNS checkbox
+        const manualDnsCheckbox = document.getElementById('manual_dns');
+        const dnsProviderSelect = document.getElementById('dns_provider');
+        
+        manualDnsCheckbox.addEventListener('change', function() {
+            dnsProviderSelect.disabled = this.checked;
+            if (this.checked) {
+                dnsProviderSelect.value = '';
+            }
+        });
+    });
+
+    // Function to select validation method
+    function selectValidationMethod(method) {
+        const httpCard = document.getElementById('http-validation-card');
+        const dnsCard = document.getElementById('dns-validation-card');
+        const httpRadio = document.getElementById('validation_http');
+        const dnsRadio = document.getElementById('validation_dns');
+        const dnsProviderSection = document.getElementById('dns-provider-section');
+        const wildcardCheckbox = document.getElementById('wildcard');
+        
+        if (method === 'http') {
+            httpCard.classList.add('selected');
+            dnsCard.classList.remove('selected');
+            httpRadio.checked = true;
+            dnsProviderSection.style.display = 'none';
+            
+            // Deactivate wildcard if HTTP validation is selected
+            if (wildcardCheckbox.checked) {
+                wildcardCheckbox.checked = false;
+            }
+        } else {
+            httpCard.classList.remove('selected');
+            dnsCard.classList.add('selected');
+            dnsRadio.checked = true;
+            dnsProviderSection.style.display = 'block';
+        }
+    }
+
+    // Add event listener to wildcard checkbox for immediate validation method change
+    document.getElementById('wildcard').addEventListener('change', function() {
+        if (this.checked) {
+            selectValidationMethod('dns');
+        }
+    });
+</script>
+{% endblock %}

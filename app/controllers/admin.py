@@ -1964,7 +1964,7 @@ def request_certificate(site_id):
     
     return redirect(url_for('admin.manage_ssl_certificates', site_id=site_id))
 
-@admin.route('/request-certificate', methods=['GET'])
+@admin.route('/request-certificate', methods=['GET', 'POST'])
 @login_required
 @admin_required
 def initiate_certificate_request():
@@ -1983,6 +1983,71 @@ def initiate_certificate_request():
     # Get list of supported DNS providers
     from app.services.ssl_certificate_service import SSLCertificateService
     dns_providers = SSLCertificateService.get_supported_dns_providers()
+    
+    # Handle form submission
+    if request.method == 'POST':
+        site_id = request.form.get('site_id')
+        node_id = request.form.get('node_id')
+        email = request.form.get('email')
+        challenge_type = request.form.get('challenge_type', 'http')
+        cert_type = request.form.get('cert_type', 'standard')
+        
+        # Validate required fields
+        if not site_id or not node_id or not email:
+            flash('Site, node, and email are required fields', 'error')
+            return render_template(
+                'admin/sites/request_certificate.html',
+                sites=https_sites,
+                nodes=nodes,
+                dns_providers=dns_providers
+            )
+        
+        # Process DNS provider information if selected
+        dns_provider = None
+        dns_credentials = None
+        if challenge_type == 'dns':
+            dns_provider = request.form.get('dns_provider')
+            
+            # Extract credentials based on provider
+            if dns_provider:
+                dns_credentials = {}
+                if dns_provider == 'cloudflare':
+                    dns_credentials['token'] = request.form.get('cf_token')
+                elif dns_provider == 'route53':
+                    dns_credentials['access_key'] = request.form.get('aws_access_key')
+                    dns_credentials['secret_key'] = request.form.get('aws_secret_key')
+                elif dns_provider == 'digitalocean':
+                    dns_credentials['token'] = request.form.get('do_token')
+                elif dns_provider == 'godaddy':
+                    dns_credentials['key'] = request.form.get('godaddy_key')
+                    dns_credentials['secret'] = request.form.get('godaddy_secret')
+                elif dns_provider == 'namecheap':
+                    dns_credentials['username'] = request.form.get('namecheap_username')
+                    dns_credentials['api_key'] = request.form.get('namecheap_api_key')
+        
+        # Request the certificate
+        result = SSLCertificateService.request_certificate(
+            site_id=site_id,
+            node_id=node_id,
+            email=email,
+            challenge_type=challenge_type,
+            dns_provider=dns_provider,
+            dns_credentials=dns_credentials,
+            cert_type=cert_type
+        )
+        
+        # Handle the result
+        if result.get('success', False):
+            flash('Certificate requested successfully', 'success')
+            return redirect(url_for('admin.ssl_dashboard'))
+        else:
+            flash(f"Failed to request certificate: {result.get('message', 'Unknown error')}", 'error')
+            return render_template(
+                'admin/sites/request_certificate.html',
+                sites=https_sites,
+                nodes=nodes,
+                dns_providers=dns_providers
+            )
     
     return render_template(
         'admin/sites/request_certificate.html',
