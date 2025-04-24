@@ -2,65 +2,153 @@
 
 {% block title %}Client Dashboard - Italia CDN Proxy Manager{% endblock %}
 
+{% block head_extra %}
+<style>
+    .stat-card {
+        transition: all 0.2s ease;
+        height: 100%;
+        border: none;
+    }
+    .stat-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15) !important;
+    }
+    .stat-card .card-body {
+        display: flex;
+        flex-direction: column;
+    }
+    .stat-card .display-4 {
+        font-size: 2.5rem;
+        line-height: 1.2;
+    }
+    .quick-action-link {
+        padding: 0.5rem 0.75rem;
+        border-radius: 0.375rem;
+        transition: background-color 0.15s ease-in-out;
+        text-decoration: none;
+        display: flex;
+        align-items: center;
+    }
+    .quick-action-link:hover {
+        background-color: var(--bs-primary-bg-subtle);
+    }
+    .quick-action-link i {
+        margin-right: 0.5rem;
+    }
+    .table th, .table td {
+        vertical-align: middle;
+    }
+    .badge.badge-subtle {
+        background-color: var(--bs-secondary-bg);
+        color: var(--bs-emphasis-color);
+    }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="container py-4">
-    <div class="row mb-4">
-        <div class="col-12">
-            <h1 class="display-5 fw-bold mb-2">My Dashboard</h1>
-            <p class="text-muted">Manage your proxy sites from a single location.</p>
+    <div class="row mb-4 align-items-center">
+        <div class="col-md-7">
+            <h1 class="h2 fw-bold mb-1">My Dashboard</h1>
+            <p class="text-muted">Welcome back! Here's an overview of your proxy sites.</p>
+        </div>
+        <div class="col-md-5 text-md-end">
+            <a href="{{ url_for('client.new_site') }}" class="btn btn-primary">
+                <i class="fas fa-plus-circle me-2"></i>Add New Site
+            </a>
         </div>
     </div>
 
     <!-- Stats Overview -->
-    <div class="row mb-4">
-        <div class="col-md-4 mb-3">
-            <div class="card h-100">
+    <div class="row mb-4 g-3">
+        <div class="col-md-4">
+            <div class="card stat-card shadow-sm border-0">
                 <div class="card-body">
-                    <h5 class="card-title text-muted mb-2">My Sites</h5>
+                    <div class="d-flex justify-content-between mb-3">
+                        <h5 class="text-muted mb-0">My Sites</h5>
+                        <div class="stat-icon rounded-circle bg-primary-subtle d-flex align-items-center justify-content-center" style="width: 48px; height: 48px;">
+                            <i class="fas fa-globe text-primary fa-lg"></i>
+                        </div>
+                    </div>
                     <p class="display-4 fw-bold text-primary mb-0">{{ site_count }}</p>
-                    <p class="small text-muted">{{ active_site_count }} active</p>
-                </div>
-            </div>
-        </div>
-        
-        <div class="col-md-4 mb-3">
-            <div class="card h-100">
-                <div class="card-body">
-                    <h5 class="card-title text-muted mb-2">Quick Actions</h5>
-                    <div class="d-flex flex-column">
-                        <a href="{{ url_for('client.new_site') }}" class="text-primary mb-2">Add New Site</a>
-                        <a href="{{ url_for('client.list_sites') }}" class="text-primary">Manage Sites</a>
+                    <div class="d-flex align-items-center mt-2">
+                        <span class="badge rounded-pill bg-success-subtle text-success-emphasis border border-success-subtle me-2">
+                            <i class="fas fa-check-circle me-1"></i>{{ active_site_count }} active
+                        </span>
+                        {% if site_count - active_site_count > 0 %}
+                        <span class="badge rounded-pill bg-secondary-subtle text-secondary-emphasis border border-secondary-subtle">
+                            {{ site_count - active_site_count }} inactive
+                        </span>
+                        {% endif %}
                     </div>
                 </div>
             </div>
         </div>
         
-        <div class="col-md-4 mb-3">
-            <div class="card h-100">
+        <div class="col-md-4">
+            <div class="card stat-card shadow-sm border-0">
                 <div class="card-body">
-                    <h5 class="card-title text-muted mb-2">Need Help?</h5>
-                    <p class="small text-muted mb-2">If you need assistance with your proxy configurations, please contact the administrator.</p>
+                    <div class="d-flex justify-content-between mb-3">
+                        <h5 class="text-muted mb-0">Quick Actions</h5>
+                        <div class="stat-icon rounded-circle bg-info-subtle d-flex align-items-center justify-content-center" style="width: 48px; height: 48px;">
+                            <i class="fas fa-bolt text-info fa-lg"></i>
+                        </div>
+                    </div>
+                    <div class="d-flex flex-column">
+                        <a href="{{ url_for('client.new_site') }}" class="quick-action-link mb-2">
+                            <i class="fas fa-plus-circle text-success"></i>
+                            <span>Add New Site</span>
+                        </a>
+                        <a href="{{ url_for('client.list_sites') }}" class="quick-action-link mb-2">
+                            <i class="fas fa-cog text-primary"></i>
+                            <span>Manage Sites</span>
+                        </a>
+                        <a href="{{ url_for('client.ssl_dashboard') }}" class="quick-action-link">
+                            <i class="fas fa-lock text-warning"></i>
+                            <span>SSL Certificates</span>
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-4">
+            <div class="card stat-card shadow-sm border-0">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between mb-3">
+                        <h5 class="text-muted mb-0">Need Help?</h5>
+                        <div class="stat-icon rounded-circle bg-warning-subtle d-flex align-items-center justify-content-center" style="width: 48px; height: 48px;">
+                            <i class="fas fa-question-circle text-warning fa-lg"></i>
+                        </div>
+                    </div>
+                    <p class="text-muted mb-3">If you need assistance with your proxy configurations, please contact the administrator.</p>
+                    <a href="mailto:support@italiacdn.proxy" class="btn btn-sm btn-outline-secondary">
+                        <i class="fas fa-envelope me-1"></i> Contact Support
+                    </a>
                 </div>
             </div>
         </div>
     </div>
 
     <!-- Recent Sites -->
-    <div class="card mb-4">
-        <div class="card-header">
-            <h5 class="card-title mb-0">Recent Sites</h5>
+    <div class="card shadow-sm mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center bg-transparent">
+            <h5 class="card-title mb-0"><i class="fas fa-globe me-2 text-primary"></i>Recent Sites</h5>
+            <a href="{{ url_for('client.list_sites') }}" class="btn btn-sm btn-outline-primary">
+                View All <i class="fas fa-arrow-right ms-1"></i>
+            </a>
         </div>
-        <div class="card-body">
+        <div class="card-body p-0">
             {% if sites %}
             <div class="table-responsive">
-                <table class="table table-bordered table-hover">
-                    <thead>
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="table-light">
                         <tr>
-                            <th>Name</th>
                             <th>Domain</th>
                             <th>Origin</th>
                             <th>Status</th>
-                            <th>Actions</th>
+                            <th>Updated</th>
+                            <th class="text-end">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -72,57 +160,91 @@
                             {% endif %}
                         {% endfor %}
                         <tr>
-                            <td>{{ site.name }}</td>
-                            <td>{{ site.domain }}</td>
-                            <td>{{ site.protocol }}://{{ site.origin_address }}:{{ site.origin_port }}</td>
+                            <td>
+                                <div class="d-flex align-items-center">
+                                    <i class="fas fa-globe-europe text-secondary me-2"></i>
+                                    <div>
+                                        <div class="fw-semibold">{{ site.domain }}</div>
+                                        <div class="small text-muted">{{ site.name }}</div>
+                                    </div>
+                                </div>
+                            </td>
+                            <td><code>{{ site.protocol }}://{{ site.origin_address }}:{{ site.origin_port }}</code></td>
                             <td>
                                 {% if site.is_active %}
                                     {% if pending_deployment %}
-                                        <span class="badge rounded-pill bg-warning text-dark">Pending Deployment</span>
+                                        <span class="badge rounded-pill bg-warning-subtle text-warning-emphasis border border-warning-subtle">
+                                            <i class="fas fa-hourglass-half me-1"></i>Pending Deployment
+                                        </span>
                                     {% else %}
-                                        <span class="badge rounded-pill bg-success">Active</span>
+                                        <span class="badge rounded-pill bg-success-subtle text-success-emphasis border border-success-subtle">
+                                            <i class="fas fa-check-circle me-1"></i>Active
+                                        </span>
                                     {% endif %}
                                 {% else %}
-                                    <span class="badge rounded-pill bg-danger">Inactive</span>
+                                    <span class="badge rounded-pill bg-danger-subtle text-danger-emphasis border border-danger-subtle">
+                                        <i class="fas fa-times-circle me-1"></i>Inactive
+                                    </span>
                                 {% endif %}
                             </td>
-                            <td>
-                                <a href="{{ url_for('client.view_site', site_id=site.id) }}" class="btn btn-sm btn-outline-primary me-1">View</a>
-                                <a href="{{ url_for('client.edit_site', site_id=site.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
+                            <td class="text-muted">
+                                {% if site.updated_at %}
+                                    <span title="{{ site.updated_at.strftime('%Y-%m-%d %H:%M:%S') }}">
+                                        {{ site.updated_at.strftime('%Y-%m-%d') }}
+                                    </span>
+                                {% else %}
+                                    -
+                                {% endif %}
+                            </td>
+                            <td class="text-end">
+                                <div class="btn-group">
+                                    <a href="{{ url_for('client.view_site', site_id=site.id) }}" class="btn btn-sm btn-outline-secondary" title="View Details">
+                                        <i class="fas fa-eye"></i>
+                                    </a>
+                                    <a href="{{ url_for('client.edit_site', site_id=site.id) }}" class="btn btn-sm btn-outline-primary" title="Edit Site">
+                                        <i class="fas fa-edit"></i>
+                                    </a>
+                                </div>
                             </td>
                         </tr>
                         {% endfor %}
                     </tbody>
                 </table>
             </div>
-            <div class="mt-3 text-end">
-                <a href="{{ url_for('client.list_sites') }}" class="text-primary">View all sites →</a>
-            </div>
             {% else %}
-            <p class="text-muted">No sites created yet. 
-                <a href="{{ url_for('client.new_site') }}" class="text-primary">Add your first site</a>.
-            </p>
+            <div class="card-body text-center p-5">
+                <div class="mb-3">
+                    <i class="fas fa-globe fa-3x text-muted mb-3"></i>
+                    <h5>No sites created yet</h5>
+                    <p class="text-muted">Get started by adding your first site to the proxy network.</p>
+                </div>
+                <a href="{{ url_for('client.new_site') }}" class="btn btn-primary">
+                    <i class="fas fa-plus-circle me-1"></i> Add Your First Site
+                </a>
+            </div>
             {% endif %}
         </div>
     </div>
 
     <!-- Recent Logs -->
-    <div class="card">
-        <div class="card-header d-flex justify-content-between align-items-center">
-            <h5 class="card-title mb-0">Recent Deployment Logs</h5>
+    <div class="card shadow-sm">
+        <div class="card-header d-flex justify-content-between align-items-center bg-transparent">
+            <h5 class="card-title mb-0"><i class="fas fa-history me-2 text-primary"></i>Recent Deployment Logs</h5>
             <div>
-                <button id="toggleLogsRefresh" class="btn btn-sm btn-outline-success">Auto-Refresh</button>
-                <span id="logsRefreshIndicator" style="display: none;" class="ms-2">
-                    <i class="fas fa-sync fa-spin"></i>
-                    <small class="ms-1">Last: <span id="lastLogsRefreshTime">-</span></small>
+                <button id="toggleLogsRefresh" class="btn btn-sm btn-outline-success">
+                    <i class="fas fa-sync-alt me-1"></i>Auto-Refresh
+                </button>
+                <span id="logsRefreshIndicator" style="display: none;" class="badge bg-success-subtle text-success-emphasis border border-success-subtle ms-2">
+                    <i class="fas fa-sync fa-spin me-1"></i>
+                    <small>Last: <span id="lastLogsRefreshTime">-</span></small>
                 </span>
             </div>
         </div>
-        <div class="card-body">
+        <div class="card-body p-0">
             {% if latest_logs %}
             <div class="table-responsive" id="logsTableContainer">
-                <table class="table table-bordered table-hover">
-                    <thead>
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="table-light">
                         <tr>
                             <th>Time</th>
                             <th>Site</th>
@@ -135,30 +257,35 @@
                     <tbody>
                         {% for log in latest_logs %}
                         <tr class="{% if log.status == 'error' %}table-danger{% endif %}">
-                            <td>{{ log.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                            <td class="text-nowrap" title="{{ log.created_at.strftime('%Y-%m-%d %H:%M:%S') }}">{{ log.created_at.strftime('%H:%M:%S') }}<br><small class="text-muted">{{ log.created_at.strftime('%Y-%m-%d') }}</small></td>
                             <td>
-                                <a href="{{ url_for('client.view_site', site_id=log.site_id) }}" class="text-primary">
+                                <a href="{{ url_for('client.view_site', site_id=log.site_id) }}" class="text-decoration-none">
                                     {{ log.site.domain }}
                                 </a>
                             </td>
-                            <td>{{ log.node.name }}</td>
+                            <td><span class="badge rounded-pill bg-secondary-subtle">{{ log.node.name }}</span></td>
                             <td>{{ log.action }}</td>
                             <td>
                                 <span class="badge rounded-pill 
-                                {% if log.status == 'success' %}bg-success
-                                {% elif log.status == 'error' %}bg-danger
-                                {% else %}bg-warning{% endif %}">
+                                {% if log.status == 'success' %}bg-success-subtle text-success-emphasis border border-success-subtle
+                                {% elif log.status == 'error' %}bg-danger-subtle text-danger-emphasis border border-danger-subtle
+                                {% else %}bg-warning-subtle text-warning-emphasis border border-warning-subtle{% endif %}">
+                                    <i class="fas {% if log.status == 'success' %}fa-check-circle{% elif log.status == 'error' %}fa-exclamation-circle{% else %}fa-exclamation-triangle{% endif %} me-1"></i>
                                     {{ log.status }}
                                 </span>
                             </td>
-                            <td class="text-truncate" style="max-width: 200px;">{{ log.message }}</td>
+                            <td class="text-truncate small" style="max-width: 300px;">
+                                <code>{{ log.message }}</code>
+                            </td>
                         </tr>
                         {% endfor %}
                     </tbody>
                 </table>
             </div>
             {% else %}
-            <p class="text-muted">No recent deployment logs found.</p>
+            <div class="card-body text-center py-4">
+                <i class="fas fa-info-circle me-1 text-muted"></i> No recent deployment logs found.
+            </div>
             {% endif %}
         </div>
     </div>
@@ -179,12 +306,12 @@
             logsRefreshToggle.addEventListener('click', function() {
                 if (isLogsRefreshing) {
                     stopLogsAutoRefresh();
-                    logsRefreshToggle.textContent = 'Auto-Refresh';
+                    logsRefreshToggle.innerHTML = '<i class="fas fa-sync-alt me-1"></i>Auto-Refresh';
                     logsRefreshToggle.classList.replace('btn-outline-danger', 'btn-outline-success');
                     logsRefreshIndicator.style.display = 'none';
                 } else {
                     startLogsAutoRefresh();
-                    logsRefreshToggle.textContent = 'Stop Refresh';
+                    logsRefreshToggle.innerHTML = '<i class="fas fa-stop-circle me-1"></i>Stop Refresh';
                     logsRefreshToggle.classList.replace('btn-outline-success', 'btn-outline-danger');
                     logsRefreshIndicator.style.display = 'inline-block';
                 }
@@ -225,8 +352,8 @@
         function updateLogsTable(logs) {
             // Create new table HTML
             let tableHtml = `
-                <table class="table table-bordered table-hover">
-                    <thead>
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="table-light">
                         <tr>
                             <th>Time</th>
                             <th>Site</th>
@@ -239,32 +366,46 @@
                     <tbody>`;
             
             logs.forEach(log => {
-                const statusClass = log.status === 'success' 
-                    ? 'bg-success' 
-                    : (log.status === 'error' ? 'bg-danger' : 'bg-warning');
+                const date = new Date(log.created_at);
+                const timeFormatted = date.toLocaleTimeString();
+                const dateFormatted = date.toLocaleDateString();
+                
+                let statusClass = '';
+                let statusIcon = '';
+                
+                if (log.status === 'success') {
+                    statusClass = 'bg-success-subtle text-success-emphasis border border-success-subtle';
+                    statusIcon = 'fa-check-circle';
+                } else if (log.status === 'error') {
+                    statusClass = 'bg-danger-subtle text-danger-emphasis border border-danger-subtle';
+                    statusIcon = 'fa-exclamation-circle';
+                } else {
+                    statusClass = 'bg-warning-subtle text-warning-emphasis border border-warning-subtle';
+                    statusIcon = 'fa-exclamation-triangle';
+                }
                 
                 const rowClass = log.status === 'error' ? 'table-danger' : '';
                 
-                // Format the date
-                const date = new Date(log.created_at);
-                const formattedDate = date.toLocaleString();
-                
                 tableHtml += `
                     <tr class="${rowClass}">
-                        <td>${formattedDate}</td>
+                        <td class="text-nowrap" title="${dateFormatted} ${timeFormatted}">
+                            ${timeFormatted}<br><small class="text-muted">${dateFormatted}</small>
+                        </td>
                         <td>
-                            <a href="/client/sites/${log.site_id}" class="text-primary">
+                            <a href="/client/sites/${log.site_id}" class="text-decoration-none">
                                 ${log.site ? log.site.domain : 'Unknown Site'}
                             </a>
                         </td>
-                        <td>${log.node ? log.node.name : 'Unknown Node'}</td>
+                        <td><span class="badge rounded-pill bg-secondary-subtle">${log.node ? log.node.name : 'Unknown Node'}</span></td>
                         <td>${log.action}</td>
                         <td>
                             <span class="badge rounded-pill ${statusClass}">
-                                ${log.status}
+                                <i class="fas ${statusIcon} me-1"></i>${log.status}
                             </span>
                         </td>
-                        <td class="text-truncate" style="max-width: 200px;">${log.message}</td>
+                        <td class="text-truncate small" style="max-width: 300px;">
+                            <code>${log.message}</code>
+                        </td>
                     </tr>`;
             });
             

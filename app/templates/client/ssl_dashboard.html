@@ -1,64 +1,127 @@
 {% extends "base.html" %}
 
-{% block title %}SSL Certificate Dashboard{% endblock %}
+{% block title %}SSL Certificate Dashboard - Italia CDN Proxy Manager{% endblock %}
+
+{% block head_extra %}
+<link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/1.11.5/css/dataTables.bootstrap5.min.css">
+<style>
+    .status-card {
+        transition: all 0.2s ease;
+        border: none;
+        height: 100%;
+    }
+    .status-card:hover {
+        transform: translateY(-5px);
+    }
+    .status-icon {
+        font-size: 2.5rem;
+        line-height: 1;
+    }
+    .status-count {
+        font-size: 2.5rem;
+        line-height: 1;
+        font-weight: 600;
+    }
+    .certificate-card {
+        transition: all 0.2s ease;
+    }
+    .certificate-card:hover {
+        transform: translateY(-3px);
+    }
+    .table th, .table td {
+        vertical-align: middle;
+    }
+    .days-remaining {
+        font-weight: 600;
+    }
+    .status-dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        margin-right: 6px;
+    }
+    .dot-active {
+        background-color: var(--bs-success);
+        box-shadow: 0 0 0 2px var(--bs-success-bg-subtle);
+    }
+    .dot-warning {
+        background-color: var(--bs-warning);
+        box-shadow: 0 0 0 2px var(--bs-warning-bg-subtle);
+    }
+    .dot-danger {
+        background-color: var(--bs-danger);
+        box-shadow: 0 0 0 2px var(--bs-danger-bg-subtle);
+    }
+    .certificate-domain {
+        font-weight: 500;
+    }
+    .certificate-meta {
+        font-size: 0.85rem;
+        color: var(--bs-secondary-color);
+    }
+    .empty-state {
+        padding: 3rem 0;
+        text-align: center;
+    }
+    .empty-state-icon {
+        font-size: 3rem;
+        color: var(--bs-secondary-color);
+        opacity: 0.6;
+        margin-bottom: 1rem;
+    }
+</style>
+{% endblock %}
 
 {% block content %}
-<div class="container-fluid py-4">
-    {% with messages = get_flashed_messages(with_categories=true) %}
-        {% if messages %}
-            {% for category, message in messages %}
-                <div class="alert alert-{{ category if category != 'error' else 'danger' }} alert-dismissible fade show" role="alert">
-                    {{ message }}
-                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-                </div>
-            {% endfor %}
-        {% endif %}
-    {% endwith %}
-
+<div class="container py-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
-        <h1>SSL Certificate Dashboard</h1>
+        <div>
+            <h1 class="h2 fw-bold mb-1"><i class="fas fa-shield-alt me-2 text-primary"></i>SSL Certificate Dashboard</h1>
+            <p class="text-muted">Manage your SSL certificates and monitor their status.</p>
+        </div>
         <a href="{{ url_for('client.dashboard') }}" class="btn btn-outline-secondary">
-            <i class="fas fa-arrow-left me-1"></i> Back to Dashboard
+            <i class="fas fa-arrow-left me-2"></i>Back to Dashboard
         </a>
     </div>
     
     <!-- Status Cards -->
-    <div class="row mb-4">
+    <div class="row g-3 mb-4">
         <div class="col-md-4">
-            <div class="card bg-success text-white">
-                <div class="card-body d-flex align-items-center">
-                    <div class="display-4 me-3">
+            <div class="card shadow-sm status-card border-0 bg-success-subtle text-success-emphasis h-100">
+                <div class="card-body d-flex align-items-center p-4">
+                    <div class="status-icon me-3">
                         <i class="fas fa-check-circle"></i>
                     </div>
                     <div>
-                        <h5 class="card-title">Valid Certificates</h5>
-                        <p class="card-text display-6">{{ certificates|selectattr('status', 'equalto', 'valid')|list|length }}</p>
+                        <h6 class="text-uppercase fw-bold mb-2">Valid</h6>
+                        <div class="status-count">{{ certificates|selectattr('status', 'equalto', 'valid')|list|length }}</div>
                     </div>
                 </div>
             </div>
         </div>
         <div class="col-md-4">
-            <div class="card bg-warning text-dark">
-                <div class="card-body d-flex align-items-center">
-                    <div class="display-4 me-3">
+            <div class="card shadow-sm status-card border-0 bg-warning-subtle text-warning-emphasis h-100">
+                <div class="card-body d-flex align-items-center p-4">
+                    <div class="status-icon me-3">
                         <i class="fas fa-exclamation-circle"></i>
                     </div>
                     <div>
-                        <h5 class="card-title">Expiring Soon</h5>
-                        <p class="card-text display-6">{{ expiring_soon|length }}</p>
+                        <h6 class="text-uppercase fw-bold mb-2">Expiring Soon</h6>
+                        <div class="status-count">{{ expiring_soon|length }}</div>
                     </div>
                 </div>
             </div>
         </div>
         <div class="col-md-4">
-            <div class="card bg-danger text-white">
-                <div class="card-body d-flex align-items-center">
-                    <div class="display-4 me-3">
+            <div class="card shadow-sm status-card border-0 bg-danger-subtle text-danger-emphasis h-100">
+                <div class="card-body d-flex align-items-center p-4">
+                    <div class="status-icon me-3">
                         <i class="fas fa-times-circle"></i>
                     </div>
                     <div>
-                        <h5 class="card-title">Expired</h5>
-                        <p class="card-text display-6">{{ expired|length }}</p>
+                        <h6 class="text-uppercase fw-bold mb-2">Expired</h6>
+                        <div class="status-count">{{ expired|length }}</div>
                     </div>
                 </div>
             </div>
@@ -67,34 +130,50 @@
     
     {% if expired|length > 0 %}
     <!-- Expired Certificates -->
-    <div class="card mb-4 border-danger">
-        <div class="card-header bg-danger text-white">
-            <h5 class="mb-0"><i class="fas fa-exclamation-triangle me-1"></i> Expired Certificates</h5>
+    <div class="card shadow-sm certificate-card mb-4">
+        <div class="card-header bg-danger-subtle text-danger-emphasis d-flex justify-content-between align-items-center">
+            <h5 class="mb-0"><i class="fas fa-exclamation-triangle me-2"></i>Expired Certificates</h5>
+            <span class="badge rounded-pill bg-danger-subtle text-danger-emphasis border border-danger-subtle">
+                {{ expired|length }} expired
+            </span>
         </div>
-        <div class="card-body">
+        <div class="card-body p-0">
             <div class="table-responsive">
-                <table class="table table-bordered table-hover">
-                    <thead>
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="table-light">
                         <tr>
                             <th>Domain</th>
                             <th>Node</th>
                             <th>Expired On</th>
                             <th>Issuer</th>
-                            <th>Actions</th>
+                            <th class="text-end">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for cert in expired %}
                         <tr>
                             <td>
-                                <a href="{{ url_for('client.view_site', site_id=cert.site_id) }}">{{ cert.domain }}</a>
+                                <div class="d-flex align-items-center">
+                                    <i class="fas fa-globe text-danger me-2"></i>
+                                    <a href="{{ url_for('client.view_site', site_id=cert.site_id) }}" class="text-decoration-none certificate-domain">
+                                        {{ cert.domain }}
+                                    </a>
+                                </div>
                             </td>
-                            <td>{{ cert.node_name }}</td>
-                            <td>{{ cert.valid_until.strftime('%Y-%m-%d') }}</td>
-                            <td>{{ cert.issuer }}</td>
                             <td>
-                                <a href="{{ url_for('client.manage_ssl_certificates', site_id=cert.site_id) }}" class="btn btn-sm btn-primary">
-                                    <i class="fas fa-sync me-1"></i> Renew
+                                <span class="badge rounded-pill bg-secondary-subtle text-secondary-emphasis border border-secondary-subtle">
+                                    {{ cert.node_name }}
+                                </span>
+                            </td>
+                            <td class="text-danger fw-semibold">
+                                {{ cert.valid_until.strftime('%d %b %Y') }}
+                            </td>
+                            <td>
+                                <span class="certificate-meta">{{ cert.issuer }}</span>
+                            </td>
+                            <td class="text-end">
+                                <a href="{{ url_for('client.manage_ssl_certificates', site_id=cert.site_id) }}" class="btn btn-sm btn-danger">
+                                    <i class="fas fa-sync-alt me-1"></i> Renew Now
                                 </a>
                             </td>
                         </tr>
@@ -108,36 +187,56 @@
     
     {% if expiring_soon|length > 0 %}
     <!-- Expiring Soon Certificates -->
-    <div class="card mb-4 border-warning">
-        <div class="card-header bg-warning text-dark">
-            <h5 class="mb-0"><i class="fas fa-clock me-1"></i> Certificates Expiring Soon</h5>
+    <div class="card shadow-sm certificate-card mb-4">
+        <div class="card-header bg-warning-subtle text-warning-emphasis d-flex justify-content-between align-items-center">
+            <h5 class="mb-0"><i class="fas fa-clock me-2"></i>Certificates Expiring Soon</h5>
+            <span class="badge rounded-pill bg-warning-subtle text-warning-emphasis border border-warning-subtle">
+                {{ expiring_soon|length }} expiring
+            </span>
         </div>
-        <div class="card-body">
+        <div class="card-body p-0">
             <div class="table-responsive">
-                <table class="table table-bordered table-hover">
-                    <thead>
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="table-light">
                         <tr>
                             <th>Domain</th>
                             <th>Node</th>
                             <th>Days Left</th>
                             <th>Expiry Date</th>
                             <th>Issuer</th>
-                            <th>Actions</th>
+                            <th class="text-end">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for cert in expiring_soon %}
                         <tr>
                             <td>
-                                <a href="{{ url_for('client.view_site', site_id=cert.site_id) }}">{{ cert.domain }}</a>
+                                <div class="d-flex align-items-center">
+                                    <i class="fas fa-globe text-warning me-2"></i>
+                                    <a href="{{ url_for('client.view_site', site_id=cert.site_id) }}" class="text-decoration-none certificate-domain">
+                                        {{ cert.domain }}
+                                    </a>
+                                </div>
                             </td>
-                            <td>{{ cert.node_name }}</td>
-                            <td>{{ cert.days_remaining }}</td>
-                            <td>{{ cert.valid_until.strftime('%Y-%m-%d') }}</td>
-                            <td>{{ cert.issuer }}</td>
                             <td>
-                                <a href="{{ url_for('client.manage_ssl_certificates', site_id=cert.site_id) }}" class="btn btn-sm btn-primary">
-                                    <i class="fas fa-sync me-1"></i> Renew
+                                <span class="badge rounded-pill bg-secondary-subtle text-secondary-emphasis border border-secondary-subtle">
+                                    {{ cert.node_name }}
+                                </span>
+                            </td>
+                            <td>
+                                <span class="badge rounded-pill bg-warning-subtle text-warning-emphasis border border-warning-subtle days-remaining">
+                                    {{ cert.days_remaining }} days
+                                </span>
+                            </td>
+                            <td>
+                                {{ cert.valid_until.strftime('%d %b %Y') }}
+                            </td>
+                            <td>
+                                <span class="certificate-meta">{{ cert.issuer }}</span>
+                            </td>
+                            <td class="text-end">
+                                <a href="{{ url_for('client.manage_ssl_certificates', site_id=cert.site_id) }}" class="btn btn-sm btn-outline-warning">
+                                    <i class="fas fa-sync-alt me-1"></i> Renew
                                 </a>
                             </td>
                         </tr>
@@ -150,15 +249,20 @@
     {% endif %}
     
     <!-- All Certificates -->
-    <div class="card">
-        <div class="card-header bg-primary text-white">
-            <h5 class="mb-0"><i class="fas fa-certificate me-1"></i> All SSL Certificates</h5>
+    <div class="card shadow-sm certificate-card">
+        <div class="card-header bg-transparent d-flex justify-content-between align-items-center">
+            <h5 class="mb-0"><i class="fas fa-certificate me-2 text-primary"></i>All SSL Certificates</h5>
+            {% if certificates %}
+            <span class="badge rounded-pill bg-primary-subtle text-primary-emphasis border border-primary-subtle">
+                Total: {{ certificates|length }}
+            </span>
+            {% endif %}
         </div>
-        <div class="card-body">
+        <div class="card-body p-0">
             {% if certificates %}
             <div class="table-responsive">
-                <table class="table table-bordered table-hover" id="certificates-table">
-                    <thead>
+                <table class="table table-hover align-middle mb-0" id="certificates-table">
+                    <thead class="table-light">
                         <tr>
                             <th>Domain</th>
                             <th>Node</th>
@@ -166,46 +270,91 @@
                             <th>Type</th>
                             <th>Expiry Date</th>
                             <th>Days Left</th>
-                            <th>Actions</th>
+                            <th class="text-end">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for cert in certificates %}
                         <tr>
                             <td>
-                                <a href="{{ url_for('client.view_site', site_id=cert.site_id) }}">{{ cert.domain }}</a>
+                                <div class="d-flex align-items-center">
+                                    <i class="fas fa-globe 
+                                      {% if cert.status == 'valid' %}text-success
+                                      {% elif cert.status == 'expiring_soon' %}text-warning
+                                      {% elif cert.status == 'expired' %}text-danger
+                                      {% else %}text-secondary{% endif %} me-2"></i>
+                                    <a href="{{ url_for('client.view_site', site_id=cert.site_id) }}" class="text-decoration-none certificate-domain">
+                                        {{ cert.domain }}
+                                    </a>
+                                </div>
                             </td>
-                            <td>{{ cert.node_name }}</td>
+                            <td>
+                                <span class="badge rounded-pill bg-secondary-subtle text-secondary-emphasis border border-secondary-subtle">
+                                    {{ cert.node_name }}
+                                </span>
+                            </td>
                             <td>
                                 {% if cert.status == 'valid' %}
-                                    <span class="badge bg-success">Valid</span>
+                                    <span class="badge rounded-pill bg-success-subtle text-success-emphasis border border-success-subtle">
+                                        <span class="status-dot dot-active"></span>Valid
+                                    </span>
                                 {% elif cert.status == 'expiring_soon' %}
-                                    <span class="badge bg-warning">Expiring Soon</span>
+                                    <span class="badge rounded-pill bg-warning-subtle text-warning-emphasis border border-warning-subtle">
+                                        <span class="status-dot dot-warning"></span>Expiring Soon
+                                    </span>
                                 {% elif cert.status == 'expired' %}
-                                    <span class="badge bg-danger">Expired</span>
+                                    <span class="badge rounded-pill bg-danger-subtle text-danger-emphasis border border-danger-subtle">
+                                        <span class="status-dot dot-danger"></span>Expired
+                                    </span>
                                 {% elif cert.status == 'not_yet_valid' %}
-                                    <span class="badge bg-info">Not Yet Valid</span>
+                                    <span class="badge rounded-pill bg-info-subtle text-info-emphasis border border-info-subtle">
+                                        <i class="fas fa-clock me-1"></i>Not Yet Valid
+                                    </span>
                                 {% else %}
-                                    <span class="badge bg-secondary">Unknown</span>
+                                    <span class="badge rounded-pill bg-secondary-subtle text-secondary-emphasis border border-secondary-subtle">
+                                        <i class="fas fa-question-circle me-1"></i>Unknown
+                                    </span>
                                 {% endif %}
                             </td>
                             <td>
                                 {% if cert.is_self_signed %}
-                                    <span class="badge bg-secondary">Self-Signed</span>
+                                    <span class="badge rounded-pill bg-secondary text-white">
+                                        <i class="fas fa-user-shield me-1"></i>Self-Signed
+                                    </span>
                                 {% else %}
-                                    <span class="badge bg-info">Let's Encrypt</span>
+                                    <span class="badge rounded-pill bg-info text-white">
+                                        <i class="fas fa-lock me-1"></i>Let's Encrypt
+                                    </span>
                                 {% endif %}
                             </td>
-                            <td>{{ cert.valid_until.strftime('%Y-%m-%d') }}</td>
+                            <td>
+                                {{ cert.valid_until.strftime('%d %b %Y') }}
+                            </td>
                             <td>
                                 {% if cert.days_remaining is not none %}
-                                    {{ cert.days_remaining }}
+                                    {% if cert.days_remaining < 0 %}
+                                        <span class="badge bg-danger-subtle text-danger-emphasis border border-danger-subtle">
+                                            Expired
+                                        </span>
+                                    {% elif cert.days_remaining < 15 %}
+                                        <span class="badge bg-danger-subtle text-danger-emphasis border border-danger-subtle days-remaining">
+                                            {{ cert.days_remaining }} days
+                                        </span>
+                                    {% elif cert.days_remaining < 30 %}
+                                        <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle days-remaining">
+                                            {{ cert.days_remaining }} days
+                                        </span>
+                                    {% else %}
+                                        <span class="badge bg-success-subtle text-success-emphasis border border-success-subtle days-remaining">
+                                            {{ cert.days_remaining }} days
+                                        </span>
+                                    {% endif %}
                                 {% else %}
-                                    N/A
+                                    <span class="badge bg-secondary-subtle text-secondary-emphasis border border-secondary-subtle">N/A</span>
                                 {% endif %}
                             </td>
-                            <td>
-                                <a href="{{ url_for('client.manage_ssl_certificates', site_id=cert.site_id) }}" class="btn btn-sm btn-primary">
+                            <td class="text-end">
+                                <a href="{{ url_for('client.manage_ssl_certificates', site_id=cert.site_id) }}" class="btn btn-sm btn-outline-primary">
                                     <i class="fas fa-cog me-1"></i> Manage
                                 </a>
                             </td>
@@ -214,21 +363,16 @@
                     </tbody>
                 </table>
             </div>
-            
-            {% if certificates|length >= 10 %}
-            <script>
-                document.addEventListener('DOMContentLoaded', function() {
-                    $('#certificates-table').DataTable({
-                        "order": [[5, "asc"]]
-                    });
-                });
-            </script>
-            {% endif %}
-            
             {% else %}
-            <div class="alert alert-info">
-                <i class="fas fa-info-circle me-1"></i>
-                No SSL certificates found. You can request certificates from the SSL management page for each site.
+            <div class="empty-state">
+                <div class="empty-state-icon">
+                    <i class="fas fa-shield-alt"></i>
+                </div>
+                <h4>No SSL Certificates Found</h4>
+                <p class="text-muted mb-4">You haven't set up any SSL certificates yet. SSL certificates secure your sites with encrypted HTTPS connections.</p>
+                <a href="{{ url_for('client.list_sites') }}" class="btn btn-primary">
+                    <i class="fas fa-plus-circle me-2"></i>Add SSL to a Site
+                </a>
             </div>
             {% endif %}
         </div>
@@ -236,11 +380,27 @@
 </div>
 {% endblock %}
 
-{% block head_scripts %}
-{% if certificates|length >= 10 %}
-<!-- DataTables CSS and JS -->
-<link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/1.11.5/css/dataTables.bootstrap5.min.css">
-<script type="text/javascript" src="https://cdn.datatables.net/1.11.5/js/jquery.dataTables.min.js"></script>
-<script type="text/javascript" src="https://cdn.datatables.net/1.11.5/js/dataTables.bootstrap5.min.js"></script>
+{% block scripts %}
+{% if certificates %}
+<!-- DataTables JS -->
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="https://cdn.datatables.net/1.11.5/js/jquery.dataTables.min.js"></script>
+<script src="https://cdn.datatables.net/1.11.5/js/dataTables.bootstrap5.min.js"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        $('#certificates-table').DataTable({
+            "order": [[5, "asc"]],
+            "pageLength": 10,
+            "lengthMenu": [10, 25, 50, 100],
+            "language": {
+                "lengthMenu": "Show _MENU_ certificates per page",
+                "zeroRecords": "No certificates found",
+                "info": "Showing _START_ to _END_ of _TOTAL_ certificates",
+                "infoEmpty": "Showing 0 to 0 of 0 certificates",
+                "infoFiltered": "(filtered from _MAX_ total certificates)"
+            }
+        });
+    });
+</script>
 {% endif %}
 {% endblock %}
