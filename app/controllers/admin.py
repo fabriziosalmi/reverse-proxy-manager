@@ -61,7 +61,7 @@ def dashboard():
                            node_count=node_count,
                            active_node_count=active_node_count,
                            site_count=site_count,
-                           active_site_count=active_site_count,
+                           active_site_count=site_count,
                            latest_logs=latest_logs,
                            now=now,
                            error_log_count=error_log_count,
@@ -1745,53 +1745,142 @@ def manage_site_waf(site_id):
     site = Site.query.get_or_404(site_id)
     
     if request.method == 'POST':
-        # Update WAF settings
-        site.use_waf = 'use_waf' in request.form
-        site.waf_rule_level = request.form.get('waf_rule_level', 'basic')
-        site.waf_custom_rules = request.form.get('waf_custom_rules')
-        site.waf_max_request_size = int(request.form.get('waf_max_request_size', 1))
-        site.waf_request_timeout = int(request.form.get('waf_request_timeout', 60))
-        site.waf_block_tor_exit_nodes = 'waf_block_tor_exit_nodes' in request.form
-        site.waf_rate_limiting_enabled = 'waf_rate_limiting_enabled' in request.form
-        site.waf_rate_limiting_requests = int(request.form.get('waf_rate_limiting_requests', 100))
-        site.waf_rate_limiting_burst = int(request.form.get('waf_rate_limiting_burst', 200))
-        
-        # OWASP ModSecurity Core Rule Set settings
-        site.waf_use_owasp_crs = 'waf_use_owasp_crs' in request.form
-        site.waf_owasp_crs_paranoia = int(request.form.get('waf_owasp_crs_paranoia', 1))
-        site.waf_enabled_crs_rules = request.form.get('waf_enabled_crs_rules')
-        site.waf_disabled_crs_rules = request.form.get('waf_disabled_crs_rules')
-        
-        db.session.commit()
-        
-        # Get all nodes serving this site and update their configurations
-        site_nodes = SiteNode.query.filter_by(site_id=site_id).all()
-        
         try:
-            from app.services.nginx_service import generate_nginx_config, deploy_to_node
+            # Server-side validation
+            errors = []
             
-            # Generate updated Nginx configuration with WAF settings
-            nginx_config = generate_nginx_config(site)
+            # Basic validation - presence of required fields
+            waf_rule_level = request.form.get('waf_rule_level', 'basic')
+            if waf_rule_level not in ['basic', 'medium', 'strict']:
+                errors.append('Invalid WAF rule level provided')
             
-            # Deploy to each node
-            for site_node in site_nodes:
-                node_id = site_node.node_id
-                deploy_to_node(site.id, node_id, nginx_config)
+            # Validate max request size
+            try:
+                waf_max_request_size = int(request.form.get('waf_max_request_size', 1))
+                if waf_max_request_size < 1 or waf_max_request_size > 100:
+                    errors.append('Max request size must be between 1 and 100 MB')
+            except ValueError:
+                errors.append('Max request size must be a valid number')
+            
+            # Validate request timeout
+            try:
+                waf_request_timeout = int(request.form.get('waf_request_timeout', 60))
+                if waf_request_timeout < 10 or waf_request_timeout > 300:
+                    errors.append('Request timeout must be between 10 and 300 seconds')
+            except ValueError:
+                errors.append('Request timeout must be a valid number')
+            
+            # Validate rate limiting if enabled
+            if 'waf_rate_limiting_enabled' in request.form:
+                try:
+                    waf_rate_limiting_requests = int(request.form.get('waf_rate_limiting_requests', 100))
+                    if waf_rate_limiting_requests < 10 or waf_rate_limiting_requests > 10000:
+                        errors.append('Requests per minute must be between 10 and 10000')
+                except ValueError:
+                    errors.append('Requests per minute must be a valid number')
                 
-                # Log the action
-                log = DeploymentLog(
-                    site_id=site_id,
-                    node_id=node_id,
-                    action="Update WAF settings",
-                    status="success",
-                    message="Advanced WAF settings updated and deployed"
-                )
-                db.session.add(log)
+                try:
+                    waf_rate_limiting_burst = int(request.form.get('waf_rate_limiting_burst', 200))
+                    if waf_rate_limiting_burst < 10 or waf_rate_limiting_burst > 20000:
+                        errors.append('Burst size must be between 10 and 20000')
+                except ValueError:
+                    errors.append('Burst size must be a valid number')
+            
+            # OWASP CRS paranoia level validation
+            if 'waf_use_owasp_crs' in request.form:
+                try:
+                    waf_owasp_crs_paranoia = int(request.form.get('waf_owasp_crs_paranoia', 1))
+                    if waf_owasp_crs_paranoia < 1 or waf_owasp_crs_paranoia > 4:
+                        errors.append('OWASP CRS paranoia level must be between 1 and 4')
+                except ValueError:
+                    errors.append('OWASP CRS paranoia level must be a valid number')
+            
+            # Validate disabled CRS rules format (comma-separated numbers or ranges)
+            waf_disabled_crs_rules = request.form.get('waf_disabled_crs_rules', '')
+            if waf_disabled_crs_rules.strip():
+                import re
+                rule_pattern = re.compile(r'^(\d+(-\d+)?)(,\s*\d+(-\d+)?)*$')
+                if not rule_pattern.match(waf_disabled_crs_rules):
+                    errors.append('Disabled CRS rule IDs must be in the format of comma-separated numbers or ranges (e.g., 123, 456-789)')
+            
+            # Validate custom rules for unmatched quotes or other syntax issues
+            waf_custom_rules = request.form.get('waf_custom_rules', '')
+            if waf_custom_rules.strip():
+                # Count quotes to check for unmatched pairs
+                single_quotes = waf_custom_rules.count("'")
+                double_quotes = waf_custom_rules.count('"')
+                
+                if single_quotes % 2 != 0:
+                    errors.append('Custom rules contain unmatched single quotes')
+                
+                if double_quotes % 2 != 0:
+                    errors.append('Custom rules contain unmatched double quotes')
+            
+            # If any validation errors, raise Exception
+            if errors:
+                raise ValueError('\n'.join(errors))
+                
+            # If we get here, validation passed - update the site
+            site.use_waf = 'use_waf' in request.form
+            site.waf_rule_level = waf_rule_level
+            site.waf_custom_rules = waf_custom_rules
+            site.waf_max_request_size = waf_max_request_size
+            site.waf_request_timeout = waf_request_timeout
+            site.waf_block_tor_exit_nodes = 'waf_block_tor_exit_nodes' in request.form
+            site.waf_rate_limiting_enabled = 'waf_rate_limiting_enabled' in request.form
+            
+            if 'waf_rate_limiting_enabled' in request.form:
+                site.waf_rate_limiting_requests = waf_rate_limiting_requests
+                site.waf_rate_limiting_burst = waf_rate_limiting_burst
+            
+            # OWASP ModSecurity Core Rule Set settings
+            site.waf_use_owasp_crs = 'waf_use_owasp_crs' in request.form
+            
+            if 'waf_use_owasp_crs' in request.form:
+                site.waf_owasp_crs_paranoia = waf_owasp_crs_paranoia
+                site.waf_enabled_crs_rules = request.form.get('waf_enabled_crs_rules')
+                site.waf_disabled_crs_rules = waf_disabled_crs_rules
             
             db.session.commit()
-            flash('WAF settings updated successfully and configuration deployed', 'success')
-        except Exception as e:
-            flash(f'WAF settings updated but configuration deployment failed: {str(e)}', 'warning')
+            
+            # Get all nodes serving this site and update their configurations
+            site_nodes = SiteNode.query.filter_by(site_id=site_id).all()
+            
+            try:
+                from app.services.nginx_service import generate_nginx_config, deploy_to_node
+                
+                # Generate updated Nginx configuration with WAF settings
+                nginx_config = generate_nginx_config(site)
+                
+                # Deploy to each node
+                for site_node in site_nodes:
+                    node_id = site_node.node_id
+                    deploy_to_node(site.id, node_id, nginx_config)
+                    
+                    # Log the action
+                    log = DeploymentLog(
+                        site_id=site_id,
+                        node_id=node_id,
+                        action="Update WAF settings",
+                        status="success",
+                        message="Advanced WAF settings updated and deployed"
+                    )
+                    db.session.add(log)
+                
+                db.session.commit()
+                flash('WAF settings updated successfully and configuration deployed', 'success')
+            except Exception as e:
+                flash(f'WAF settings updated but configuration deployment failed: {str(e)}', 'warning')
+                
+        except ValueError as validation_error:
+            flash(f'Validation errors: {str(validation_error)}', 'error')
+            # Prepare WAF rule level options for template
+            rule_levels = [
+                {'value': 'basic', 'label': 'Basic Protection', 'description': 'Basic protection against common web attacks'},
+                {'value': 'medium', 'label': 'Medium Protection', 'description': 'Enhanced protection with more strict rules'},
+                {'value': 'strict', 'label': 'Strict Protection', 'description': 'Maximum protection with potential false positives'}
+            ]
+            return render_template('admin/sites/waf_settings.html', site=site, rule_levels=rule_levels)
         
         return redirect(url_for('admin.view_site', site_id=site_id))
     
@@ -1923,7 +2012,7 @@ def refresh_node_health():
                     "health_status": health_status,
                     "cpu_load": cpu_load,
                     "memory_usage": memory_usage,
-                    "last_check": datetime.utcnow().strftime("%Y-%m-%d %H:%M")
+                    "last_check": datetime.utcnow().strftime("%Y-%m-%d %H:%m")
                 }
             else:
                 # Node is unreachable
@@ -1934,7 +2023,7 @@ def refresh_node_health():
                     "health_status": "unreachable",
                     "cpu_load": 0,
                     "memory_usage": 0,
-                    "last_check": datetime.utcnow().strftime("%Y-%m-%d %H:%M")
+                    "last_check": datetime.utcnow().strftime("%Y-%m-%d %H:%m")
                 }
                 
             nodes_data.append(node_data)
@@ -1959,7 +2048,7 @@ def refresh_node_health():
                 "cpu_load": 0,
                 "memory_usage": 0,
                 "error": str(e),
-                "last_check": datetime.utcnow().strftime("%Y-%m-%d %H:%M")
+                "last_check": datetime.utcnow().strftime("%Y-%m-%d %H:%m")
             }
             nodes_data.append(node_data)
     

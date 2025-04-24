@@ -745,6 +745,18 @@ http {
         Returns:
             dict: Analysis results with error details and suggestions
         """
+        # Guard against None or empty error messages
+        if not error_message:
+            return {
+                "error_type": "unknown",
+                "details": "No error message provided",
+                "suggestion": "No suggestions available without error details."
+            }
+            
+        # Convert error message to string if needed
+        if not isinstance(error_message, str):
+            error_message = str(error_message)
+        
         result = {
             "error_type": "unknown",
             "details": error_message,

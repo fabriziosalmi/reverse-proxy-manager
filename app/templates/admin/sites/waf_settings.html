@@ -29,7 +29,7 @@
                     </span>
                 </div>
                 <div class="card-body">
-                    <form method="POST">
+                    <form method="POST" id="wafSettingsForm">
                         <div class="form-check form-switch mb-3">
                             <input class="form-check-input" type="checkbox" id="use_waf" name="use_waf" {{ 'checked' if site.use_waf else '' }}>
                             <label class="form-check-label" for="use_waf">Enable Web Application Firewall</label>
@@ -39,155 +39,157 @@
                             </p>
                         </div>
 
-                        <!-- OWASP ModSecurity Core Rule Set (CRS) Card -->
-                        <div class="card mb-3">
-                            <div class="card-header bg-light">
-                                <div class="form-check form-switch">
-                                    <input class="form-check-input" type="checkbox" id="waf_use_owasp_crs" name="waf_use_owasp_crs" 
-                                        {{ 'checked' if site.waf_use_owasp_crs else '' }}>
-                                    <label class="form-check-label" for="waf_use_owasp_crs">Enable OWASP ModSecurity Core Rule Set</label>
+                        <div id="wafAdvancedOptions" style="{{ 'display:none;' if not site.use_waf else '' }}">
+                            <!-- OWASP ModSecurity Core Rule Set (CRS) Card -->
+                            <div class="card mb-3">
+                                <div class="card-header bg-light">
+                                    <div class="form-check form-switch">
+                                        <input class="form-check-input" type="checkbox" id="waf_use_owasp_crs" name="waf_use_owasp_crs" 
+                                            {{ 'checked' if site.waf_use_owasp_crs else '' }}>
+                                        <label class="form-check-label" for="waf_use_owasp_crs">Enable OWASP ModSecurity Core Rule Set</label>
+                                    </div>
+                                    <div class="form-text">
+                                        <i class="fas fa-shield-alt me-1"></i>
+                                        The OWASP ModSecurity Core Rule Set (CRS) is a set of generic attack detection rules for use with ModSecurity.
+                                    </div>
                                 </div>
-                                <div class="form-text">
-                                    <i class="fas fa-shield-alt me-1"></i>
-                                    The OWASP ModSecurity Core Rule Set (CRS) is a set of generic attack detection rules for use with ModSecurity.
+                                <div class="card-body" id="owasp_crs_options" style="{{ 'display:none;' if not site.waf_use_owasp_crs else '' }}">
+                                    <div class="row mb-3">
+                                        <div class="col-md-6">
+                                            <label for="waf_owasp_crs_paranoia" class="form-label">Paranoia Level</label>
+                                            <select class="form-select" id="waf_owasp_crs_paranoia" name="waf_owasp_crs_paranoia">
+                                                <option value="1" {{ 'selected' if site.waf_owasp_crs_paranoia == 1 else '' }}>Level 1 (Default)</option>
+                                                <option value="2" {{ 'selected' if site.waf_owasp_crs_paranoia == 2 else '' }}>Level 2 (Medium)</option>
+                                                <option value="3" {{ 'selected' if site.waf_owasp_crs_paranoia == 3 else '' }}>Level 3 (High)</option>
+                                                <option value="4" {{ 'selected' if site.waf_owasp_crs_paranoia == 4 else '' }}>Level 4 (Very High)</option>
+                                            </select>
+                                            <div class="form-text">
+                                                <i class="fas fa-info-circle me-1"></i>
+                                                Higher levels provide more security but may result in more false positives.
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="row">
+                                        <div class="col-md-6 mb-3">
+                                            <label for="waf_disabled_crs_rules" class="form-label">Disabled Rule IDs</label>
+                                            <input type="text" class="form-control" id="waf_disabled_crs_rules" name="waf_disabled_crs_rules" 
+                                                value="{{ site.waf_disabled_crs_rules or '' }}" placeholder="942100, 942190, 941180">
+                                            <div class="form-text">
+                                                <i class="fas fa-info-circle me-1"></i>
+                                                Comma-separated list of rule IDs to disable. Use this to reduce false positives.
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6 mb-3">
+                                            <label for="waf_enabled_crs_rules" class="form-label">Specifically Enabled Rule IDs</label>
+                                            <input type="text" class="form-control" id="waf_enabled_crs_rules" name="waf_enabled_crs_rules" 
+                                                value="{{ site.waf_enabled_crs_rules or '' }}" placeholder="900000, 900005">
+                                            <div class="form-text">
+                                                <i class="fas fa-info-circle me-1"></i>
+                                                Comma-separated list of rule IDs to explicitly enable. Use with caution.
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
-                            <div class="card-body" id="owasp_crs_options" style="{{ 'display:none;' if not site.waf_use_owasp_crs else '' }}">
-                                <div class="row mb-3">
-                                    <div class="col-md-6">
-                                        <label for="waf_owasp_crs_paranoia" class="form-label">Paranoia Level</label>
-                                        <select class="form-select" id="waf_owasp_crs_paranoia" name="waf_owasp_crs_paranoia">
-                                            <option value="1" {{ 'selected' if site.waf_owasp_crs_paranoia == 1 else '' }}>Level 1 (Default)</option>
-                                            <option value="2" {{ 'selected' if site.waf_owasp_crs_paranoia == 2 else '' }}>Level 2 (Medium)</option>
-                                            <option value="3" {{ 'selected' if site.waf_owasp_crs_paranoia == 3 else '' }}>Level 3 (High)</option>
-                                            <option value="4" {{ 'selected' if site.waf_owasp_crs_paranoia == 4 else '' }}>Level 4 (Very High)</option>
-                                        </select>
-                                        <div class="form-text">
-                                            <i class="fas fa-info-circle me-1"></i>
-                                            Higher levels provide more security but may result in more false positives.
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="row">
-                                    <div class="col-md-6 mb-3">
-                                        <label for="waf_disabled_crs_rules" class="form-label">Disabled Rule IDs</label>
-                                        <input type="text" class="form-control" id="waf_disabled_crs_rules" name="waf_disabled_crs_rules" 
-                                            value="{{ site.waf_disabled_crs_rules or '' }}" placeholder="942100, 942190, 941180">
-                                        <div class="form-text">
-                                            <i class="fas fa-info-circle me-1"></i>
-                                            Comma-separated list of rule IDs to disable. Use this to reduce false positives.
-                                        </div>
-                                    </div>
-                                    <div class="col-md-6 mb-3">
-                                        <label for="waf_enabled_crs_rules" class="form-label">Specifically Enabled Rule IDs</label>
-                                        <input type="text" class="form-control" id="waf_enabled_crs_rules" name="waf_enabled_crs_rules" 
-                                            value="{{ site.waf_enabled_crs_rules or '' }}" placeholder="900000, 900005">
-                                        <div class="form-text">
-                                            <i class="fas fa-info-circle me-1"></i>
-                                            Comma-separated list of rule IDs to explicitly enable. Use with caution.
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
 
-                        <div class="row mb-3">
-                            <div class="col-md-6">
-                                <label for="waf_rule_level" class="form-label">Protection Level</label>
-                                <select class="form-select" id="waf_rule_level" name="waf_rule_level">
-                                    {% for rule in rule_levels %}
-                                    <option value="{{ rule.value }}" {{ 'selected' if site.waf_rule_level == rule.value else '' }}>
-                                        {{ rule.label }}
-                                    </option>
-                                    {% endfor %}
-                                </select>
-                                <div class="form-text">
-                                    <i class="fas fa-info-circle me-1"></i>
-                                    <span id="rule_level_description">
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <label for="waf_rule_level" class="form-label">Protection Level</label>
+                                    <select class="form-select" id="waf_rule_level" name="waf_rule_level">
                                         {% for rule in rule_levels %}
-                                            {% if site.waf_rule_level == rule.value %}
-                                                {{ rule.description }}
-                                            {% endif %}
+                                        <option value="{{ rule.value }}" {{ 'selected' if site.waf_rule_level == rule.value else '' }}>
+                                            {{ rule.label }}
+                                        </option>
                                         {% endfor %}
-                                    </span>
-                                </div>
-                                <div class="form-text mt-2 text-warning">
-                                    <i class="fas fa-exclamation-triangle me-1"></i>
-                                    Note: This setting is only used when OWASP CRS is disabled.
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                <label for="waf_max_request_size" class="form-label">Maximum Request Size (MB)</label>
-                                <input type="number" class="form-control" id="waf_max_request_size" name="waf_max_request_size" 
-                                    value="{{ site.waf_max_request_size }}" min="1" max="100">
-                                <div class="form-text">
-                                    <i class="fas fa-info-circle me-1"></i>
-                                    Limits the size of incoming requests. Larger values may be needed for file uploads.
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="row mb-3">
-                            <div class="col-md-6">
-                                <label for="waf_request_timeout" class="form-label">Request Timeout (seconds)</label>
-                                <input type="number" class="form-control" id="waf_request_timeout" name="waf_request_timeout" 
-                                    value="{{ site.waf_request_timeout }}" min="10" max="300">
-                                <div class="form-text">
-                                    <i class="fas fa-info-circle me-1"></i>
-                                    Maximum time allowed for processing a request.
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                <div class="form-check form-switch mt-4">
-                                    <input class="form-check-input" type="checkbox" id="waf_block_tor_exit_nodes" name="waf_block_tor_exit_nodes" 
-                                        {{ 'checked' if site.waf_block_tor_exit_nodes else '' }}>
-                                    <label class="form-check-label" for="waf_block_tor_exit_nodes">Block Tor Exit Nodes</label>
+                                    </select>
                                     <div class="form-text">
                                         <i class="fas fa-info-circle me-1"></i>
-                                        Block access from known Tor exit nodes (updated daily).
+                                        <span id="rule_level_description">
+                                            {% for rule in rule_levels %}
+                                                {% if site.waf_rule_level == rule.value %}
+                                                    {{ rule.description }}
+                                                {% endif %}
+                                            {% endfor %}
+                                        </span>
+                                    </div>
+                                    <div class="form-text mt-2 text-warning">
+                                        <i class="fas fa-exclamation-triangle me-1"></i>
+                                        Note: This setting is only used when OWASP CRS is disabled.
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <label for="waf_max_request_size" class="form-label">Maximum Request Size (MB)</label>
+                                    <input type="number" class="form-control" id="waf_max_request_size" name="waf_max_request_size" 
+                                        value="{{ site.waf_max_request_size }}" min="1" max="100">
+                                    <div class="form-text">
+                                        <i class="fas fa-info-circle me-1"></i>
+                                        Limits the size of incoming requests. Larger values may be needed for file uploads.
                                     </div>
                                 </div>
                             </div>
-                        </div>
 
-                        <div class="card mb-3">
-                            <div class="card-header bg-light">
-                                <div class="form-check form-switch">
-                                    <input class="form-check-input" type="checkbox" id="waf_rate_limiting_enabled" name="waf_rate_limiting_enabled" 
-                                        {{ 'checked' if site.waf_rate_limiting_enabled else '' }}>
-                                    <label class="form-check-label" for="waf_rate_limiting_enabled">Enable Rate Limiting</label>
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <label for="waf_request_timeout" class="form-label">Request Timeout (seconds)</label>
+                                    <input type="number" class="form-control" id="waf_request_timeout" name="waf_request_timeout" 
+                                        value="{{ site.waf_request_timeout }}" min="10" max="300">
+                                    <div class="form-text">
+                                        <i class="fas fa-info-circle me-1"></i>
+                                        Maximum time allowed for processing a request.
+                                    </div>
                                 </div>
-                            </div>
-                            <div class="card-body" id="rate_limiting_options" style="{{ 'display:none;' if not site.waf_rate_limiting_enabled else '' }}">
-                                <div class="row">
-                                    <div class="col-md-6">
-                                        <label for="waf_rate_limiting_requests" class="form-label">Requests Per Minute</label>
-                                        <input type="number" class="form-control" id="waf_rate_limiting_requests" name="waf_rate_limiting_requests" 
-                                            value="{{ site.waf_rate_limiting_requests }}" min="10" max="10000">
+                                <div class="col-md-6">
+                                    <div class="form-check form-switch mt-4">
+                                        <input class="form-check-input" type="checkbox" id="waf_block_tor_exit_nodes" name="waf_block_tor_exit_nodes" 
+                                            {{ 'checked' if site.waf_block_tor_exit_nodes else '' }}>
+                                        <label class="form-check-label" for="waf_block_tor_exit_nodes">Block Tor Exit Nodes</label>
                                         <div class="form-text">
                                             <i class="fas fa-info-circle me-1"></i>
-                                            Maximum number of requests allowed per minute per IP.
-                                        </div>
-                                    </div>
-                                    <div class="col-md-6">
-                                        <label for="waf_rate_limiting_burst" class="form-label">Burst Size</label>
-                                        <input type="number" class="form-control" id="waf_rate_limiting_burst" name="waf_rate_limiting_burst" 
-                                            value="{{ site.waf_rate_limiting_burst }}" min="10" max="20000">
-                                        <div class="form-text">
-                                            <i class="fas fa-info-circle me-1"></i>
-                                            Maximum burst size allowed.
+                                            Block access from known Tor exit nodes (updated daily).
                                         </div>
                                     </div>
                                 </div>
                             </div>
-                        </div>
 
-                        <div class="mb-3">
-                            <label for="waf_custom_rules" class="form-label">Custom WAF Rules</label>
-                            <textarea class="form-control" id="waf_custom_rules" name="waf_custom_rules" rows="8" placeholder="# Add custom ModSecurity rules here">{{ site.waf_custom_rules or '' }}</textarea>
-                            <div class="form-text">
-                                <i class="fas fa-info-circle me-1"></i>
-                                Add custom ModSecurity compatible rules. These will be added to the base rules.
+                            <div class="card mb-3">
+                                <div class="card-header bg-light">
+                                    <div class="form-check form-switch">
+                                        <input class="form-check-input" type="checkbox" id="waf_rate_limiting_enabled" name="waf_rate_limiting_enabled" 
+                                            {{ 'checked' if site.waf_rate_limiting_enabled else '' }}>
+                                        <label class="form-check-label" for="waf_rate_limiting_enabled">Enable Rate Limiting</label>
+                                    </div>
+                                </div>
+                                <div class="card-body" id="rate_limiting_options" style="{{ 'display:none;' if not site.waf_rate_limiting_enabled else '' }}">
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <label for="waf_rate_limiting_requests" class="form-label">Requests Per Minute</label>
+                                            <input type="number" class="form-control" id="waf_rate_limiting_requests" name="waf_rate_limiting_requests" 
+                                                value="{{ site.waf_rate_limiting_requests }}" min="10" max="10000">
+                                            <div class="form-text">
+                                                <i class="fas fa-info-circle me-1"></i>
+                                                Maximum number of requests allowed per minute per IP.
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label for="waf_rate_limiting_burst" class="form-label">Burst Size</label>
+                                            <input type="number" class="form-control" id="waf_rate_limiting_burst" name="waf_rate_limiting_burst" 
+                                                value="{{ site.waf_rate_limiting_burst }}" min="10" max="20000">
+                                            <div class="form-text">
+                                                <i class="fas fa-info-circle me-1"></i>
+                                                Maximum burst size allowed.
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="waf_custom_rules" class="form-label">Custom WAF Rules</label>
+                                <textarea class="form-control" id="waf_custom_rules" name="waf_custom_rules" rows="8" placeholder="# Add custom ModSecurity rules here">{{ site.waf_custom_rules or '' }}</textarea>
+                                <div class="form-text">
+                                    <i class="fas fa-info-circle me-1"></i>
+                                    Add custom ModSecurity compatible rules. These will be added to the base rules.
+                                </div>
                             </div>
                         </div>
 
@@ -311,34 +313,134 @@ SecRule REQUEST_URI "@contains /admin/backup" "id:1002,phase:1,deny,status:403,l
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    // Update rule level description on change
-    const ruleLevelSelect = document.getElementById('waf_rule_level');
-    const ruleLevelDescription = document.getElementById('rule_level_description');
-    const ruleLevels = {
-        {% for rule in rule_levels %}
-        '{{ rule.value }}': '{{ rule.description }}',
-        {% endfor %}
-    };
-    
-    ruleLevelSelect.addEventListener('change', function() {
-        ruleLevelDescription.textContent = ruleLevels[this.value];
-    });
-    
-    // Toggle rate limiting options visibility
-    const rateLimitingEnabled = document.getElementById('waf_rate_limiting_enabled');
+    // Initialize form elements
+    const wafEnabledToggle = document.getElementById('use_waf');
+    const wafForm = document.getElementById('wafSettingsForm');
+    const wafAdvancedOptions = document.getElementById('wafAdvancedOptions');
+    const rateLimitingToggle = document.getElementById('waf_rate_limiting_enabled');
     const rateLimitingOptions = document.getElementById('rate_limiting_options');
-    
-    rateLimitingEnabled.addEventListener('change', function() {
-        rateLimitingOptions.style.display = this.checked ? 'block' : 'none';
-    });
-
-    // Toggle OWASP CRS options visibility
-    const owaspCrsEnabled = document.getElementById('waf_use_owasp_crs');
+    const owaspCrsToggle = document.getElementById('waf_use_owasp_crs');
     const owaspCrsOptions = document.getElementById('owasp_crs_options');
+    const customRulesField = document.getElementById('waf_custom_rules');
+    const disabledRuleIdsField = document.getElementById('waf_disabled_rule_ids');
     
-    owaspCrsEnabled.addEventListener('change', function() {
-        owaspCrsOptions.style.display = this.checked ? 'block' : 'none';
-    });
+    // Set up toggle functionality for WAF options
+    if (wafEnabledToggle) {
+        wafEnabledToggle.addEventListener('change', function() {
+            wafAdvancedOptions.style.display = this.checked ? 'block' : 'none';
+        });
+        
+        // Initial state
+        wafAdvancedOptions.style.display = wafEnabledToggle.checked ? 'block' : 'none';
+    }
+    
+    // Toggle rate limiting options
+    if (rateLimitingToggle) {
+        rateLimitingToggle.addEventListener('change', function() {
+            rateLimitingOptions.style.display = this.checked ? 'block' : 'none';
+        });
+        
+        // Initial state
+        rateLimitingOptions.style.display = rateLimitingToggle.checked ? 'block' : 'none';
+    }
+    
+    // Toggle OWASP CRS options
+    if (owaspCrsToggle) {
+        owaspCrsToggle.addEventListener('change', function() {
+            owaspCrsOptions.style.display = this.checked ? 'block' : 'none';
+        });
+        
+        // Initial state
+        owaspCrsOptions.style.display = owaspCrsToggle.checked ? 'block' : 'none';
+    }
+    
+    // Form validation
+    if (wafForm) {
+        wafForm.addEventListener('submit', function(event) {
+            let isValid = true;
+            let errorMessage = '';
+            
+            // Validate rate limiting settings if enabled
+            if (rateLimitingToggle && rateLimitingToggle.checked) {
+                const reqsPerSec = document.getElementById('waf_rate_limiting_requests');
+                const burstSize = document.getElementById('waf_rate_limiting_burst');
+                
+                if (reqsPerSec) {
+                    const reqsValue = parseInt(reqsPerSec.value, 10);
+                    if (isNaN(reqsValue) || reqsValue < 10 || reqsValue > 10000) {
+                        isValid = false;
+                        errorMessage += 'Requests per second must be between 10 and 10000.\n';
+                        reqsPerSec.classList.add('is-invalid');
+                    } else {
+                        reqsPerSec.classList.remove('is-invalid');
+                    }
+                }
+                
+                if (burstSize) {
+                    const burstValue = parseInt(burstSize.value, 10);
+                    if (isNaN(burstValue) || burstValue < 10 || burstValue > 20000) {
+                        isValid = false;
+                        errorMessage += 'Burst size must be between 10 and 20000.\n';
+                        burstSize.classList.add('is-invalid');
+                    } else {
+                        burstSize.classList.remove('is-invalid');
+                    }
+                }
+            }
+            
+            // Validate custom rules if provided (basic ModSecurity syntax check)
+            if (customRulesField && customRulesField.value.trim() !== '') {
+                const customRules = customRulesField.value.trim();
+                
+                // Check for unmatched quotes
+                const singleQuotes = (customRules.match(/'/g) || []).length;
+                const doubleQuotes = (customRules.match(/"/g) || []).length;
+                
+                if (singleQuotes % 2 !== 0) {
+                    isValid = false;
+                    errorMessage += 'Custom rules contain unmatched single quotes (\')\n';
+                    customRulesField.classList.add('is-invalid');
+                }
+                
+                if (doubleQuotes % 2 !== 0) {
+                    isValid = false;
+                    errorMessage += 'Custom rules contain unmatched double quotes (")\n';
+                    customRulesField.classList.add('is-invalid');
+                }
+                
+                // Check for basic ModSecurity syntax
+                if (!customRules.includes('SecRule') && !customRules.includes('#') && customRules.length > 10) {
+                    // Not an error, just a warning
+                    console.warn('Custom rules might not be in ModSecurity format. Make sure syntax is correct.');
+                }
+            }
+            
+            // Validate disabled rule IDs (should be comma-separated numbers)
+            if (disabledRuleIdsField && disabledRuleIdsField.value.trim() !== '') {
+                const disabledIds = disabledRuleIdsField.value.trim();
+                
+                // Should be comma-separated numbers or ranges (e.g., 123, 456-789)
+                const validFormat = /^(\d+(-\d+)?)(,\s*\d+(-\d+)?)*$/.test(disabledIds);
+                
+                if (!validFormat) {
+                    isValid = false;
+                    errorMessage += 'Disabled rule IDs should be comma-separated numbers or ranges (e.g., 123, 456-789)\n';
+                    disabledRuleIdsField.classList.add('is-invalid');
+                } else {
+                    disabledRuleIdsField.classList.remove('is-invalid');
+                }
+            }
+            
+            // Show error message and prevent submission if validation fails
+            if (!isValid) {
+                event.preventDefault();
+                alert('Please fix the following errors:\n\n' + errorMessage);
+                return false;
+            }
+            
+            return true;
+        });
+    }
 });
 </script>
 {% endblock %}

@@ -3,6 +3,7 @@ from flask_login import login_required, current_user
 from app.models.models import db, Site, Node, SiteNode, User, DeploymentLog
 from app.services.access_control import admin_required
 import datetime
+from flask_wtf.csrf import validate_csrf, CSRFError
 
 api = Blueprint('api', __name__)
 
@@ -167,6 +168,15 @@ def update_site_waf(site_id):
     data = request.get_json()
     if not data:
         return error_response("Invalid JSON data")
+    
+    # Validate CSRF token
+    try:
+        csrf_token = data.get('csrf_token') or request.headers.get('X-CSRF-Token')
+        if not csrf_token:
+            return error_response("Missing CSRF token", 400)
+        validate_csrf(csrf_token)
+    except CSRFError:
+        return error_response("Invalid CSRF token", 400)
     
     # Update WAF settings
     if 'use_waf' in data:
