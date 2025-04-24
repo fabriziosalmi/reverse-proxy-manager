@@ -71,27 +71,32 @@
                     <div class="row g-3">
                         {% for node in nodes %}
                         <div class="col-md-6 col-lg-4">
-                            <div class="border rounded p-3 {% if not node.is_active %}opacity-50{% endif %}">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" name="nodes" value="{{ node.id }}" id="node-{{ node.id }}"
-                                           {% if node.id|string in assigned_node_ids or node.id in assigned_node_ids %}checked{% endif %}
-                                           {% if not node.is_active %}disabled{% endif %}>
-                                    <label class="form-check-label" for="node-{{ node.id }}">
-                                        <strong>{{ node.name }}</strong>
-                                        <span class="badge rounded-pill ms-2 {% if node.is_active %}bg-success{% else %}bg-danger{% endif %}">
-                                            {{ 'Active' if node.is_active else 'Inactive' }}
-                                        </span>
-                                        <div class="small text-muted">{{ node.ip_address }}</div>
-                                    </label>
+                            <div class="card">
+                                <div class="card-body">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" value="{{ node.id }}" 
+                                               id="node_{{ node.id }}" name="nodes[]" 
+                                               {% if node.id in site_nodes %}checked{% endif %}>
+                                        <label class="form-check-label" for="node_{{ node.id }}">
+                                            <strong>{{ node.name }}</strong>
+                                            <div class="text-muted small">{{ node.ip_address }}</div>
+                                            <span class="badge bg-{% if node.is_active %}success{% else %}danger{% endif %} text-white mt-1">
+                                                {{ 'Active' if node.is_active else 'Inactive' }}
+                                            </span>
+                                            <span class="badge bg-info text-white mt-1">
+                                                {{ node.proxy_type|default('nginx')|upper }}
+                                            </span>
+                                        </label>
+                                    </div>
                                 </div>
                             </div>
                         </div>
                         {% endfor %}
                     </div>
                     
-                    {% if not nodes %}
-                    <div class="alert alert-warning">No active nodes are available. Please contact an administrator.</div>
-                    {% endif %}
+                    <div class="mt-3 alert alert-info">
+                        <i class="fas fa-info-circle me-2"></i> This site will be deployed using the proxy software configured on each selected node (Nginx, Caddy, Traefik).
+                    </div>
                 </div>
                 
                 <!-- Cache Configuration -->

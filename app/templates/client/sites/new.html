@@ -8,12 +8,17 @@
         <div class="col-12">
             <h1 class="display-5 fw-bold mb-2">Add New Site</h1>
             <p class="text-muted">Configure a new site to be proxied through the CDN.</p>
+            {% if template %}
+            <div class="alert alert-info">
+                <i class="fas fa-info-circle me-2"></i> Using template: <strong>{{ template|title }}</strong>
+            </div>
+            {% endif %}
         </div>
     </div>
 
     <div class="card shadow-sm">
         <div class="card-body p-4">
-            <form method="POST" action="{{ url_for('client.new_site') }}">
+            <form method="POST" action="{{ url_for('client.new_site') }}{% if template %}?template={{ template }}{% endif %}">
                 <!-- Basic Information -->
                 <div class="mb-4">
                     <h4 class="fw-semibold mb-3">Basic Information</h4>
@@ -23,7 +28,8 @@
                             <label for="name" class="form-label">Site Name</label>
                             <input type="text" id="name" name="name" required
                                    class="form-control"
-                                   placeholder="My Website">
+                                   placeholder="My Website"
+                                   value="{% if template == 'wordpress' %}WordPress Site{% endif %}">
                             <div class="form-text">A friendly name to identify this site</div>
                         </div>
                         
@@ -75,27 +81,54 @@
                     <div class="row g-3">
                         {% for node in nodes %}
                         <div class="col-md-6 col-lg-4">
-                            <div class="border rounded p-3 {% if not node.is_active %}opacity-50{% endif %}">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" name="nodes" value="{{ node.id }}" id="node-{{ node.id }}"
-                                           {% if not node.is_active %}disabled{% endif %}>
-                                    <label class="form-check-label" for="node-{{ node.id }}">
-                                        <strong>{{ node.name }}</strong>
-                                        <span class="badge rounded-pill ms-2 {% if node.is_active %}bg-success{% else %}bg-danger{% endif %}">
-                                            {{ 'Active' if node.is_active else 'Inactive' }}
-                                        </span>
-                                        <div class="small text-muted">{{ node.ip_address }}</div>
-                                    </label>
+                            <div class="card">
+                                <div class="card-body">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" value="{{ node.id }}" 
+                                               id="node_{{ node.id }}" name="nodes[]" checked>
+                                        <label class="form-check-label" for="node_{{ node.id }}">
+                                            <strong>{{ node.name }}</strong>
+                                            <div class="text-muted small">{{ node.ip_address }}</div>
+                                            <span class="badge bg-{% if node.is_active %}success{% else %}danger{% endif %} text-white mt-1">
+                                                {{ 'Active' if node.is_active else 'Inactive' }}
+                                            </span>
+                                            <span class="badge bg-secondary text-white mt-1">
+                                                {{ node.proxy_type }}
+                                            </span>
+                                        </label>
+                                    </div>
                                 </div>
                             </div>
                         </div>
                         {% endfor %}
                     </div>
-                    
-                    {% if not nodes %}
-                    <div class="alert alert-warning">No active nodes are available. Please contact an administrator.</div>
-                    {% endif %}
                 </div>
+                
+                <!-- Template-specific settings -->
+                {% if template == 'wordpress' %}
+                <div class="card shadow-sm mb-4">
+                    <div class="card-header bg-primary text-white">
+                        <h2 class="h5 mb-0">WordPress Settings</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label for="wp_admin_path" class="form-label">Admin Path</label>
+                                <input type="text" class="form-control" id="wp_admin_path" name="wp_admin_path" value="wp-admin">
+                                <div class="form-text">Path to WordPress admin (default: wp-admin)</div>
+                            </div>
+                            
+                            <div class="col-md-6">
+                                <div class="form-check form-switch mt-4">
+                                    <input class="form-check-input" type="checkbox" role="switch" id="wp_extra_security" name="wp_extra_security" checked>
+                                    <label class="form-check-label" for="wp_extra_security">Enhanced WordPress Security</label>
+                                </div>
+                                <div class="form-text">Add additional security rules specific to WordPress</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
                 
                 <!-- Cache Configuration -->
                 <div class="card shadow-sm mb-4">
@@ -117,20 +150,24 @@
                                 </div>
                                 
                                 <div class="col-md-4">
-                                    <label for="cache_static_time" class="form-label">Static Assets Cache Duration (seconds)</label>
-                                    <input type="number" class="form-control" id="cache_static_time" name="cache_static_time" min="0" value="86400">
-                                    <div class="form-text">Default: 86400 (1 day)</div>
+                                    <label for="browser_cache_time" class="form-label">Browser Cache Duration (seconds)</label>
+                                    <input type="number" class="form-control" id="browser_cache_time" name="browser_cache_time" min="0" value="3600">
+                                    <div class="form-text">Default: 3600 (1 hour)</div>
                                 </div>
                                 
                                 <div class="col-md-4">
-                                    <label for="cache_browser_time" class="form-label">Browser Cache Duration (seconds)</label>
-                                    <input type="number" class="form-control" id="cache_browser_time" name="cache_browser_time" min="0" value="3600">
-                                    <div class="form-text">Default: 3600 (1 hour)</div>
+                                    <label for="cache_exceptions" class="form-label">Cache Exceptions</label>
+                                    <input type="text" class="form-control" id="cache_exceptions" name="cache_exceptions" placeholder="/admin/*, *.php">
+                                    <div class="form-text">Paths to exclude from caching</div>
                                 </div>
                                 
                                 <div class="col-md-12">
                                     <label for="custom_cache_rules" class="form-label">Custom Cache Rules (Advanced)</label>
-                                    <textarea class="form-control" id="custom_cache_rules" name="custom_cache_rules" rows="3" placeholder="# Enter custom Nginx cache directives here"></textarea>
+                                    <textarea class="form-control" id="custom_cache_rules" name="custom_cache_rules" rows="3" 
+                                            placeholder="# Enter custom Nginx cache directives here">{% if template == 'wordpress' %}# WordPress-specific cache exclusions
+location ~ wp-admin/ { proxy_pass $upstream; proxy_cache off; }
+location ~ /wp-json/ { proxy_pass $upstream; proxy_cache off; }
+location ~ /wp-login.php { proxy_pass $upstream; proxy_cache off; }{% endif %}</textarea>
                                     <div class="form-text">Advanced users only. Enter custom Nginx cache directives.</div>
                                 </div>
                             </div>
@@ -144,7 +181,7 @@
                     
                     <div class="mb-3">
                         <div class="form-check">
-                            <input class="form-check-input" type="checkbox" name="use_waf" id="use_waf">
+                            <input class="form-check-input" type="checkbox" name="use_waf" id="use_waf" {% if template == 'wordpress' %}checked{% endif %}>
                             <label class="form-check-label" for="use_waf">
                                 <strong>Enable WAF</strong>
                                 <div class="form-text">Use Web Application Firewall for additional security</div>
@@ -156,7 +193,13 @@
                         <label for="custom_config" class="form-label">Custom Nginx Configuration</label>
                         <textarea id="custom_config" name="custom_config" rows="6"
                                   class="form-control"
-                                  placeholder="# Add custom Nginx configuration directives here"></textarea>
+                                  placeholder="# Add custom Nginx configuration directives here">{% if template == 'wordpress' %}# WordPress-specific optimizations
+location = /favicon.ico { access_log off; log_not_found off; }
+location = /robots.txt { access_log off; log_not_found off; }
+location ~* \.(css|gif|ico|jpeg|jpg|js|png)$ {
+    expires max;
+    log_not_found off;
+}{% endif %}</textarea>
                         <div class="form-text">Advanced users can add custom Nginx configuration directives</div>
                     </div>
                 </div>
