@@ -82,7 +82,7 @@ class CustomTestRunner(unittest.TextTestRunner):
             for i, (test, traceback) in enumerate(result.errors, 1):
                 print(f"\n{i}. {test}")
                 error_lines = traceback.split('\n')
-                error_summary = '\n'.join([line for line in error_lines if "File" in line][-1:] + [error_lines[-1]])
+                error_summary = '\n' + '\n'.join([line for line in error_lines if "File" in line][-1:] + [error_lines[-1]])
                 print(f"{Fore.RED}{error_summary}{Style.RESET_ALL}")
         
         print("\n" + "="*80)
