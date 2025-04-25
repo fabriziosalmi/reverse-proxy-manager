@@ -195,7 +195,7 @@ class ItaliaProxyTestCase(unittest.TestCase):
     def test_admin_edit_user(self):
         """Test editing an existing user as admin"""
         # Create a user to edit
-        user = User(username='editme', email='editme@example.com', password='password123', role='client')
+        user = User(username='editme', email='editme@example.com', password='Password123', role='client')
         db.session.add(user)
         db.session.commit()
         
@@ -215,7 +215,7 @@ class ItaliaProxyTestCase(unittest.TestCase):
     def test_admin_delete_user(self):
         """Test deleting a user as admin"""
         # Create a user to delete
-        user = User(username='deleteme', email='deleteme@example.com', password='password123', role='client')
+        user = User(username='deleteme', email='deleteme@example.com', password='Password123', role='client')
         db.session.add(user)
         db.session.commit()
         user_id = user.id
@@ -304,17 +304,30 @@ class ItaliaProxyTestCase(unittest.TestCase):
         db.session.commit()
         
         self.login('testadmin', 'Testing123')
-        response = self.client.post(f'/admin/nodes/{node.id}/toggle_active', follow_redirects=True)
-        self.assertEqual(response.status_code, 200)
         
-        # Verify node status was toggled
-        updated_node = Node.query.get(node.id)
-        self.assertFalse(updated_node.is_active)
-        
-        # Toggle back
-        response = self.client.post(f'/admin/nodes/{node.id}/toggle_active', follow_redirects=True)
-        updated_node = Node.query.get(node.id)
-        self.assertTrue(updated_node.is_active)
+        # Mock the NginxValidationService.test_config_on_node method to avoid SSH connections
+        from unittest.mock import patch
+        with patch('app.services.nginx_validation_service.NginxValidationService.test_config_on_node') as mock_test:
+            # Configure the mock to return a valid response
+            mock_test.return_value = (True, "", "")
+            
+            # First toggle - should deactivate the node
+            response = self.client.post(f'/admin/nodes/{node.id}/toggle_active', follow_redirects=True)
+            self.assertEqual(response.status_code, 200)
+            
+            # Verify node status was toggled
+            db.session.expire_all()
+            updated_node = Node.query.get(node.id)
+            self.assertFalse(updated_node.is_active)
+            
+            # Second toggle - should reactivate the node
+            response = self.client.post(f'/admin/nodes/{node.id}/toggle_active', follow_redirects=True)
+            self.assertEqual(response.status_code, 200)
+            
+            # Verify node was reactivated
+            db.session.expire_all()
+            updated_node = Node.query.get(node.id)
+            self.assertTrue(updated_node.is_active)
     
     def test_admin_delete_node(self):
         """Test deleting a node"""
@@ -375,6 +388,7 @@ class ItaliaProxyTestCase(unittest.TestCase):
         self.assertIsNotNone(site)
         self.assertEqual(site.domain, 'testsite.com')
         self.assertEqual(site.protocol, 'https')
+        self.assertTrue(site.force_https)  # Check force_https is True
         
         # Verify site-node relationship
         site_node = SiteNode.query.filter_by(site_id=site.id, node_id=node.id).first()
