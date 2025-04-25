@@ -263,67 +263,56 @@
 {% block scripts %}
 <script>
     document.addEventListener('DOMContentLoaded', function() {
-        // Wildcard certificate checkbox logic
-        const wildcardCheckbox = document.getElementById('wildcard');
-        const validationHttpRadio = document.getElementById('validation_http');
-        const validationDnsRadio = document.getElementById('validation_dns');
-        const httpValidationCard = document.getElementById('http-validation-card');
-        const dnsValidationCard = document.getElementById('dns-validation-card');
-        
-        wildcardCheckbox.addEventListener('change', function() {
-            if (this.checked) {
-                // Wildcard requires DNS validation
-                validationDnsRadio.checked = true;
-                httpValidationCard.classList.remove('selected');
-                dnsValidationCard.classList.add('selected');
-                document.getElementById('dns-provider-section').style.display = 'block';
-            }
-        });
-
-        // Handle manual DNS checkbox
-        const manualDnsCheckbox = document.getElementById('manual_dns');
-        const dnsProviderSelect = document.getElementById('dns_provider');
-        
-        manualDnsCheckbox.addEventListener('change', function() {
-            dnsProviderSelect.disabled = this.checked;
-            if (this.checked) {
-                dnsProviderSelect.value = '';
-            }
-        });
-    });
-
-    // Function to select validation method
-    function selectValidationMethod(method) {
+        // Initialize elements
         const httpCard = document.getElementById('http-validation-card');
         const dnsCard = document.getElementById('dns-validation-card');
-        const httpRadio = document.getElementById('validation_http');
-        const dnsRadio = document.getElementById('validation_dns');
-        const dnsProviderSection = document.getElementById('dns-provider-section');
-        const wildcardCheckbox = document.getElementById('wildcard');
         
-        if (method === 'http') {
-            httpCard.classList.add('selected');
-            dnsCard.classList.remove('selected');
-            httpRadio.checked = true;
-            dnsProviderSection.style.display = 'none';
+        function selectValidationMethod(method) {
+            const dnsRadio = document.getElementById('validation_dns');
+            const dnsProviderSection = document.getElementById('dns-provider-section');
+            const wildcardCheckbox = document.getElementById('wildcard');
             
-            // Deactivate wildcard if HTTP validation is selected
-            if (wildcardCheckbox.checked) {
-                wildcardCheckbox.checked = false;
+            if (method === 'http') {
+                httpCard.classList.add('selected');
+                dnsCard.classList.remove('selected');
+                httpRadio.checked = true;
+                dnsProviderSection.style.display = 'none';
+                
+                // Deactivate wildcard if HTTP validation is selected
+                if (wildcardCheckbox.checked) {
+                    wildcardCheckbox.checked = false;
+                }
+            } else {
+                httpCard.classList.remove('selected');
+                dnsCard.classList.add('selected');
+                dnsRadio.checked = true;
+                dnsProviderSection.style.display = 'block';
             }
-        } else {
-            httpCard.classList.remove('selected');
-            dnsCard.classList.add('selected');
-            dnsRadio.checked = true;
-            dnsProviderSection.style.display = 'block';
         }
-    }
 
-    // Add event listener to wildcard checkbox for immediate validation method change
-    document.getElementById('wildcard').addEventListener('change', function() {
-        if (this.checked) {
-            selectValidationMethod('dns');
+        // Add event listener to wildcard checkbox for immediate validation method change
+        document.getElementById('wildcard').addEventListener('change', function() {
+            if (this.checked) {
+                selectValidationMethod('dns');
+            }
+        });
+        
+        // Add event listeners to validation method cards
+        if (httpCard) {
+            httpCard.addEventListener('click', function() {
+                selectValidationMethod('http');
+            });
         }
+        
+        if (dnsCard) {
+            dnsCard.addEventListener('click', function() {
+                selectValidationMethod('dns');
+            });
+        }
+        
+        // Make initial selection based on radio buttons
+        const initialMethod = document.getElementById('validation_dns').checked ? 'dns' : 'http';
+        selectValidationMethod(initialMethod);
     });
 </script>
 {% endblock %}

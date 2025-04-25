@@ -514,264 +514,109 @@
             })
             .then(data => {
                 let statusHtml = '';
-                
                 if (data.success) {
-                    const proxyStatus = data.proxy_status;
-                    
-                    // Show installed proxy software with status
-                    if (proxyStatus.installed_proxies && proxyStatus.installed_proxies.length > 0) {
-                        statusHtml += '<div class="mb-2">';
-                        proxyStatus.installed_proxies.forEach(proxy => {
-                            const isRunning = proxy.is_running;
-                            const version = proxy.version || 'N/A';
-                            
-                            let statusBadgeClass = isRunning ? 'success' : 'warning';
-                            let statusText = isRunning ? 'Running' : 'Stopped';
-                            let statusIcon = isRunning ? 'fa-play-circle' : 'fa-stop-circle';
-                            
-                            statusHtml += `
-                                <div class="d-flex align-items-center mb-1">
-                                    <span class="badge bg-${statusBadgeClass}-subtle text-${statusBadgeClass}-emphasis border border-${statusBadgeClass}-subtle me-2">
-                                        <i class="fas ${statusIcon} me-1"></i>${proxy.type}
-                                    </span>
-                                    <small class="text-muted">${version}</small>
-                                </div>`;
-                                
-                            // Add action buttons for starting/stopping if installed
-                            if (!isRunning) {
-                                statusHtml += `
-                                    <button class="btn btn-sm btn-outline-success mb-2" onclick="startProxyService(${nodeId}, '${proxy.type}')" title="Start ${proxy.type}">
-                                        <i class="fas fa-play me-1"></i> Start ${proxy.type}
-                                    </button>`;
-                            } else {
-                                statusHtml += `
-                                    <button class="btn btn-sm btn-outline-warning mb-2" onclick="stopProxyService(${nodeId}, '${proxy.type}')" title="Stop ${proxy.type}">
-                                        <i class="fas fa-stop me-1"></i> Stop ${proxy.type}
-                                    </button>`;
-                            }
+                    const installed = data.installed || [];
+                    if (installed.length > 0) {
+                        statusHtml = '<div class="node-status-info">';
+                        installed.forEach(proxy => {
+                            statusHtml += `<div class="mb-1"><span class="badge rounded-pill bg-success-subtle text-success-emphasis border border-success-subtle">
+                                          <i class="fas fa-check-circle me-1"></i>${proxy.type}: ${proxy.version}</span></div>`;
                         });
                         statusHtml += '</div>';
                     } else {
-                        statusHtml += `
-                            <div class="alert alert-warning py-2 px-3 mb-2 small">
-                                <i class="fas fa-exclamation-triangle me-1"></i> No proxy software detected
-                            </div>`;
+                        statusHtml = `<span class="badge rounded-pill bg-warning-subtle text-warning-emphasis border border-warning-subtle">
+                                    <i class="fas fa-exclamation-triangle me-1"></i>No proxy software detected</span>`;
                     }
-                    
-                    // Add install dropdown for missing proxy software
-                    statusHtml += `
-                        <div class="dropdown">
-                            <button class="btn btn-sm btn-primary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
-                                <i class="fas fa-download me-1"></i> Install Proxy
-                            </button>
-                            <ul class="dropdown-menu">`;
-                    
-                    // Determine which proxy types are not installed
-                    const installedTypes = new Set(proxyStatus.installed_proxies.map(p => p.type));
-                    const availableTypes = ['nginx', 'caddy', 'traefik'];
-                    
-                    availableTypes.forEach(type => {
-                        if (!installedTypes.has(type)) {
-                            statusHtml += `
-                                <li><button class="dropdown-item" onclick="installProxySoftware(${nodeId}, '${type}')">
-                                    <i class="fas fa-server me-2 text-${getProxyTypeColor(type)}"></i>${capitalizeFirstLetter(type)}
-                                </button></li>`;
-                        }
-                    });
-                    
-                    statusHtml += `
-                            </ul>
-                        </div>
-                        <button class="btn btn-sm btn-link text-secondary p-0 ms-2" onclick="checkProxyStatus(${nodeId})" title="Refresh status">
-                            <i class="fas fa-sync-alt small"></i>
-                        </button>`;
                 } else {
-                    statusHtml = `
-                        <div class="alert alert-danger py-2 px-3 mb-2 small">
-                            <i class="fas fa-exclamation-circle me-1"></i> ${data.error || 'Failed to check proxy status'}
-                        </div>
-                        <button class="btn btn-sm btn-link text-secondary p-0" onclick="checkProxyStatus(${nodeId})" title="Try again">
-                            <i class="fas fa-redo small"></i> Try again
-                        </button>`;
+                    statusHtml = `<span class="badge rounded-pill bg-danger-subtle text-danger-emphasis border border-danger-subtle" 
+                                title="${data.error || 'Failed to check proxy status'}">
+                                <i class="fas fa-exclamation-triangle me-1"></i>Check failed</span>
+                                <button class="btn btn-sm btn-link text-secondary p-0 ms-1" onclick="checkProxyStatus(${nodeId})" title="Try again">
+                                <i class="fas fa-redo small"></i></button>`;
                 }
-                
                 proxyStatusElement.innerHTML = statusHtml;
             })
             .catch(error => {
                 console.error("Proxy status check failed:", error);
-                proxyStatusElement.innerHTML = `
-                    <div class="alert alert-danger py-2 px-3 mb-2 small">
-                        <i class="fas fa-exclamation-circle me-1"></i> Connection error
-                    </div>
-                    <button class="btn btn-sm btn-link text-secondary p-0" onclick="checkProxyStatus(${nodeId})" title="Try again">
-                        <i class="fas fa-redo small"></i> Try again
-                    </button>`;
+                proxyStatusElement.innerHTML = `<span class="badge rounded-pill bg-danger-subtle text-danger-emphasis border border-danger-subtle" title="Request failed">
+                                              <i class="fas fa-exclamation-triangle me-1"></i>Error</span>
+                                              <button class="btn btn-sm btn-link text-secondary p-0 ms-1" onclick="checkProxyStatus(${nodeId})" title="Try again">
+                                              <i class="fas fa-redo small"></i></button>`;
             });
     }
     
     // Function to install proxy software
     function installProxySoftware(nodeId, proxyType) {
-        if (!confirm(`Are you sure you want to install ${proxyType} on this node?`)) {
+        if (!confirm(`Are you sure you want to install ${proxyType.toUpperCase()} on this node?`)) {
             return;
         }
         
+        const rowElement = document.getElementById(`node-row-${nodeId}`);
         const proxyStatusElement = document.getElementById(`proxy-status-${nodeId}`);
-        proxyStatusElement.innerHTML = `
-            <div class="alert alert-info py-2 px-3 small">
-                <div class="d-flex align-items-center">
-                    <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
-                    <div>Installing ${proxyType}... This may take a few minutes.</div>
-                </div>
-            </div>`;
         
-        fetch(`{{ url_for('admin.install_proxy_software', node_id=0, proxy_type='type') }}`.replace('0', nodeId).replace('type', proxyType), {
+        proxyStatusElement.innerHTML = `<div class="spinner-border spinner-border-sm text-secondary" role="status"><span class="visually-hidden">Loading...</span></div> Installing ${proxyType}...`;
+        
+        fetch(`{{ url_for('admin.install_proxy_software', node_id=0) }}`.replace('0', nodeId), {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'X-CSRFToken': '{{ csrf_token() }}'
-            }
+            },
+            body: JSON.stringify({ proxy_type: proxyType })
         })
-        .then(response => response.json())
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response.json();
+        })
         .then(data => {
             if (data.success) {
-                proxyStatusElement.innerHTML = `
-                    <div class="alert alert-success py-2 px-3 mb-2 small">
-                        <i class="fas fa-check-circle me-1"></i> ${data.message}
-                    </div>
-                    <button class="btn btn-sm btn-outline-primary" onclick="checkProxyStatus(${nodeId})">
-                        <i class="fas fa-sync-alt me-1"></i> Refresh Status
-                    </button>`;
+                proxyStatusElement.innerHTML = `<span class="badge rounded-pill bg-success-subtle text-success-emphasis border border-success-subtle">
+                                              <i class="fas fa-check-circle me-1"></i>${proxyType.toUpperCase()} installed successfully</span>`;
                 
-                // Refresh the status after a short delay
+                // Show success notification
+                alert(`${proxyType.toUpperCase()} installed successfully: ${data.message}`);
+                
+                // Highlight row temporarily for visual feedback
+                if (rowElement) {
+                    rowElement.classList.add('table-success-light');
+                    setTimeout(() => {
+                        rowElement.classList.remove('table-success-light');
+                    }, 3000);
+                }
+                
+                // Refresh proxy status after short delay
                 setTimeout(() => checkProxyStatus(nodeId), 2000);
             } else {
-                proxyStatusElement.innerHTML = `
-                    <div class="alert alert-danger py-2 px-3 mb-2 small">
-                        <i class="fas fa-exclamation-circle me-1"></i> ${data.error || 'Installation failed'}
-                    </div>
-                    <button class="btn btn-sm btn-outline-primary" onclick="checkProxyStatus(${nodeId})">
-                        <i class="fas fa-sync-alt me-1"></i> Refresh Status
-                    </button>`;
+                proxyStatusElement.innerHTML = `<span class="badge rounded-pill bg-danger-subtle text-danger-emphasis border border-danger-subtle" 
+                                              title="${data.error || 'Installation failed'}">
+                                              <i class="fas fa-exclamation-triangle me-1"></i>Installation failed</span>
+                                              <button class="btn btn-sm btn-link text-secondary p-0 ms-1" onclick="checkProxyStatus(${nodeId})" title="Check status">
+                                              <i class="fas fa-redo small"></i></button>`;
+                
+                // Show error notification
+                alert(`Failed to install ${proxyType.toUpperCase()}: ${data.error || 'Unknown error'}`);
+                
+                // Highlight row temporarily for visual feedback (error)
+                if (rowElement) {
+                    rowElement.classList.add('table-danger-light');
+                    setTimeout(() => {
+                        rowElement.classList.remove('table-danger-light');
+                    }, 3000);
+                }
             }
         })
         .catch(error => {
-            console.error("Installation failed:", error);
-            proxyStatusElement.innerHTML = `
-                <div class="alert alert-danger py-2 px-3 mb-2 small">
-                    <i class="fas fa-exclamation-circle me-1"></i> Connection error during installation
-                </div>
-                <button class="btn btn-sm btn-outline-primary" onclick="checkProxyStatus(${nodeId})">
-                    <i class="fas fa-sync-alt me-1"></i> Refresh Status
-                </button>`;
+            console.error(`Failed to install ${proxyType}:`, error);
+            proxyStatusElement.innerHTML = `<span class="badge rounded-pill bg-danger-subtle text-danger-emphasis border border-danger-subtle" title="Request failed">
+                                          <i class="fas fa-exclamation-triangle me-1"></i>Error</span>
+                                          <button class="btn btn-sm btn-link text-secondary p-0 ms-1" onclick="checkProxyStatus(${nodeId})" title="Check status">
+                                          <i class="fas fa-redo small"></i></button>`;
+            
+            // Show error notification
+            alert(`Error installing ${proxyType.toUpperCase()}: Request failed`);
         });
-    }
-    
-    // Function to start a proxy service
-    function startProxyService(nodeId, proxyType) {
-        const proxyStatusElement = document.getElementById(`proxy-status-${nodeId}`);
-        proxyStatusElement.innerHTML = `
-            <div class="alert alert-info py-2 px-3 small">
-                <div class="d-flex align-items-center">
-                    <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
-                    <div>Starting ${proxyType}...</div>
-                </div>
-            </div>`;
-        
-        fetch(`{{ url_for('admin.toggle_proxy_service', node_id=0, proxy_type='type', action='start') }}`
-            .replace('0', nodeId)
-            .replace('type', proxyType)
-            .replace('start', 'start'), {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRFToken': '{{ csrf_token() }}'
-            }
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                setTimeout(() => checkProxyStatus(nodeId), 1000);
-            } else {
-                proxyStatusElement.innerHTML = `
-                    <div class="alert alert-danger py-2 px-3 mb-2 small">
-                        <i class="fas fa-exclamation-circle me-1"></i> ${data.error || 'Failed to start service'}
-                    </div>
-                    <button class="btn btn-sm btn-outline-primary" onclick="checkProxyStatus(${nodeId})">
-                        <i class="fas fa-sync-alt me-1"></i> Refresh Status
-                    </button>`;
-            }
-        })
-        .catch(error => {
-            console.error("Failed to start service:", error);
-            proxyStatusElement.innerHTML = `
-                <div class="alert alert-danger py-2 px-3 mb-2 small">
-                    <i class="fas fa-exclamation-circle me-1"></i> Connection error
-                </div>
-                <button class="btn btn-sm btn-outline-primary" onclick="checkProxyStatus(${nodeId})">
-                    <i class="fas fa-sync-alt me-1"></i> Refresh Status
-                </button>`;
-        });
-    }
-    
-    // Function to stop a proxy service
-    function stopProxyService(nodeId, proxyType) {
-        const proxyStatusElement = document.getElementById(`proxy-status-${nodeId}`);
-        proxyStatusElement.innerHTML = `
-            <div class="alert alert-info py-2 px-3 small">
-                <div class="d-flex align-items-center">
-                    <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
-                    <div>Stopping ${proxyType}...</div>
-                </div>
-            </div>`;
-        
-        fetch(`{{ url_for('admin.toggle_proxy_service', node_id=0, proxy_type='type', action='stop') }}`
-            .replace('0', nodeId)
-            .replace('type', proxyType)
-            .replace('stop', 'stop'), {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRFToken': '{{ csrf_token() }}'
-            }
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                setTimeout(() => checkProxyStatus(nodeId), 1000);
-            } else {
-                proxyStatusElement.innerHTML = `
-                    <div class="alert alert-danger py-2 px-3 mb-2 small">
-                        <i class="fas fa-exclamation-circle me-1"></i> ${data.error || 'Failed to stop service'}
-                    </div>
-                    <button class="btn btn-sm btn-outline-primary" onclick="checkProxyStatus(${nodeId})">
-                        <i class="fas fa-sync-alt me-1"></i> Refresh Status
-                    </button>`;
-            }
-        })
-        .catch(error => {
-            console.error("Failed to stop service:", error);
-            proxyStatusElement.innerHTML = `
-                <div class="alert alert-danger py-2 px-3 mb-2 small">
-                    <i class="fas fa-exclamation-circle me-1"></i> Connection error
-                </div>
-                <button class="btn btn-sm btn-outline-primary" onclick="checkProxyStatus(${nodeId})">
-                    <i class="fas fa-sync-alt me-1"></i> Refresh Status
-                </button>`;
-        });
-    }
-    
-    // Helper functions
-    function getProxyTypeColor(type) {
-        switch(type.toLowerCase()) {
-            case 'nginx': return 'success';
-            case 'caddy': return 'info';
-            case 'traefik': return 'primary';
-            default: return 'secondary';
-        }
-    }
-    
-    function capitalizeFirstLetter(string) {
-        return string.charAt(0).toUpperCase() + string.slice(1);
     }
 </script>
 {% endblock %}

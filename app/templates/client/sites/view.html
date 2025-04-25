@@ -587,6 +587,23 @@
                 }, 1500);
             });
         }
+
+        // Initialize modal functionality
+        const toggleSiteModal = document.getElementById('toggleSiteModal');
+        if (toggleSiteModal) {
+            const toggleForm = document.getElementById('toggleSiteForm');
+            const toggleButton = document.getElementById('toggleSiteButton');
+            
+            toggleButton.addEventListener('click', function() {
+                toggleForm.submit();
+            });
+        }
+        
+        // Initialize tooltips
+        const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+        tooltipTriggerList.map(function (tooltipTriggerEl) {
+            return new bootstrap.Tooltip(tooltipTriggerEl);
+        });
     });
 </script>
 {% endblock %}
