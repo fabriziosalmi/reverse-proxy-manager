@@ -179,10 +179,111 @@ if 'app.services.ssl_certificate_service' in sys.modules:
     if not hasattr(sys.modules['app.services.ssl_certificate_service'].SSLCertificateService, 'get_certificate_stats'):
         sys.modules['app.services.ssl_certificate_service'].SSLCertificateService.get_certificate_stats = lambda *args, **kwargs: {}
 
-# Fix SSLCertificateService missing get_certificate_stats
+# Fix SSLCertificateService missing get_certificate_stats - remove duplicate
 if 'app.services.ssl_certificate_service' in sys.modules:
     if not hasattr(sys.modules['app.services.ssl_certificate_service'].SSLCertificateService, 'get_certificate_stats'):
         sys.modules['app.services.ssl_certificate_service'].SSLCertificateService.get_certificate_stats = MockService.get_certificate_stats
+
+# Create mock SSL service with explicit methods
+ssl_service = types.ModuleType('app.services.ssl_certificate_service')
+class SSLCertificateService:
+    @staticmethod
+    def get_certificate_stats(*args, **kwargs):
+        return {
+            'total': 2,
+            'valid': 1,
+            'expiring_soon': 1,
+            'expired': 0,
+            'revoked': 0,
+            'error': 0
+        }
+    
+    @staticmethod
+    def check_certificate_status(*args, **kwargs):
+        return {}
+    
+    @staticmethod
+    def check_domain_dns(*args, **kwargs):
+        return {}
+    
+    @staticmethod
+    def request_certificate(*args, **kwargs):
+        return {}
+    
+    @staticmethod
+    def revoke_certificate(*args, **kwargs):
+        return {}
+    
+    @staticmethod
+    def generate_self_signed_certificate(*args, **kwargs):
+        return {}
+
+    @staticmethod
+    def get_supported_dns_providers(*args, **kwargs):
+        return []
+
+ssl_service.SSLCertificateService = SSLCertificateService
+sys.modules['app.services.ssl_certificate_service'] = ssl_service
+
+# Create SSH service with explicit methods
+ssh_service = types.ModuleType('app.services.ssh_connection_service')
+class SSHConnectionService:
+    @staticmethod
+    def connect_to_node(*args, **kwargs):
+        return (True, MagicMock())
+    
+    @staticmethod
+    def add_authorized_key(*args, **kwargs):
+        return (True, 'Key added successfully')
+    
+    @staticmethod
+    def remove_authorized_key(*args, **kwargs):
+        return (True, 'Key removed successfully')
+
+ssh_service.SSHConnectionService = SSHConnectionService
+sys.modules['app.services.ssh_connection_service'] = ssh_service
+
+# Create analytics service with explicit methods
+analytics_service = types.ModuleType('app.services.analytics_service')
+class AnalyticsService:
+    @staticmethod
+    def get_client_analytics(*args, **kwargs):
+        return {
+            'dates': ['2025-04-20', '2025-04-21'],
+            'bandwidth_data': [1024, 2048],
+            'requests_data': [100, 200],
+            'sites': [],
+            'total_bandwidth': 3072,
+            'total_requests': 300,
+            'bandwidth_change': 15.5,
+            'requests_change': 20.0,
+            'active_sites': 1,
+            'total_sites': 1,
+            'error_rate': 2.5,
+            'total_errors': 50,
+            'node_names': ['Node 1', 'Node 2'],
+            'node_response_times': [120, 150],
+            'node_error_rates': [1.2, 2.3],
+            'status_distribution': [85, 10, 4, 1],
+            'geo_distribution': {'US': 500, 'IT': 300, 'FR': 100},
+            'top_errors': [
+                {'code': 404, 'count': 30, 'percentage': 60},
+                {'code': 500, 'count': 20, 'percentage': 40}
+            ],
+            'traffic_growth': 15.5,
+            'request_growth': 20.0
+        }
+    
+    @staticmethod
+    def get_admin_analytics(*args, **kwargs):
+        return AnalyticsService.get_client_analytics()
+    
+    @staticmethod
+    def get_analytics_data():
+        return AnalyticsService.get_client_analytics()
+
+analytics_service.AnalyticsService = AnalyticsService
+sys.modules['app.services.analytics_service'] = analytics_service
 
 class TestResult(unittest.TextTestResult):
     """Custom test result class with colored output"""
@@ -263,9 +364,14 @@ class CustomTestRunner(unittest.TextTestRunner):
 class ItaliaProxyTestCase(unittest.TestCase):
     """Comprehensive test case for Italia CDN Proxy application"""
     
+    # Class variable to store app instance for all tests
+    flask_app = None
+    
     def setUp(self):
         """Set up test environment before each test"""
         self.app = create_app('testing')
+        # Store app in class variable for blueprint registration
+        ItaliaProxyTestCase.flask_app = self.app
         self.app.config['WTF_CSRF_ENABLED'] = False  # Disable CSRF for testing
         self.app.config['TESTING'] = True
         self.app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
@@ -315,6 +421,14 @@ class ItaliaProxyTestCase(unittest.TestCase):
     def logout(self):
         """Helper method to log out a user"""
         return self.client.get('/auth/logout', follow_redirects=True)
+    
+    # Add a helper method to register and cleanup blueprints
+    def with_blueprint(self, bp_name, bp):
+        """Context manager to register and clean up a blueprint"""
+        ItaliaProxyTestCase.flask_app.register_blueprint(bp)
+        yield
+        if bp_name in ItaliaProxyTestCase.flask_app.blueprints:
+            ItaliaProxyTestCase.flask_app.blueprints.pop(bp_name)
     
     # ========== AUTH TESTS ==========
     
@@ -1766,8 +1880,8 @@ server {
                 <p>Configuration has been rolled back to {{ version }}</p>
             ''', version=request.form.get('version'))
         
-        # Register the blueprint
-        self.app.register_blueprint(versions_bp)
+        # Register the blueprint before any requests
+        ItaliaProxyTestCase.flask_app.register_blueprint(versions_bp)
         
         try:
             with patch('app.services.config_versioning_service.get_config_versions', return_value=versions), \
@@ -1797,9 +1911,10 @@ server {
                 self.assertEqual(response.status_code, 200)
         finally:
             # Clean up
-            self.app.blueprints.pop('versions', None)
+            if 'versions' in ItaliaProxyTestCase.flask_app.blueprints:
+                ItaliaProxyTestCase.flask_app.blueprints.pop('versions')
     
-    # Fix the test_container_service_operations method
+    # Fix test_container_service_operations with similar pattern
     def test_container_service_operations(self):
         """Test container service operations for containerized deployments"""
         # Create a node with container support
