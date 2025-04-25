@@ -40,7 +40,18 @@ def login():
         # Validate login credentials
         user = User.query.filter_by(username=username).first()
         
-        if user and user.check_password(password):
+        # Use constant-time comparison to prevent timing attacks
+        # Always check password even if user doesn't exist (using a dummy check)
+        is_valid = False
+        if user:
+            is_valid = user.check_password(password)
+        else:
+            # Perform a dummy password check to maintain constant time
+            # This helps prevent user enumeration via timing attacks
+            dummy_user = User()
+            dummy_user.check_password(password)
+        
+        if user and is_valid:
             # Successfully authenticated
             login_user(user, remember=remember)
             

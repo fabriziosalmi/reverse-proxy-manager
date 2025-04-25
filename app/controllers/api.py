@@ -8,6 +8,7 @@ import re
 from functools import wraps
 import time
 from flask import current_app, g
+import threading
 
 api = Blueprint('api', __name__)
 
@@ -21,33 +22,35 @@ class RateLimiter:
         self.cache = {}  # Store client IP and their call timestamps
         self.last_cleanup = time.time()  # Last cache cleanup time
         self.cleanup_interval = cleanup_interval  # Cleanup every 5 minutes by default
+        self.lock = threading.RLock()  # Thread-safe operations
     
     def is_allowed(self, client_ip):
         """Check if client is allowed to make another request"""
         now = time.time()
         
-        # Periodically clean up expired entries to prevent memory leaks
-        if now - self.last_cleanup > self.cleanup_interval:
-            self._cleanup_expired_entries(now)
-            self.last_cleanup = now
-        
-        # Create new entry for new clients
-        if client_ip not in self.cache:
-            self.cache[client_ip] = [now]
-            return True
-        
-        # Get existing timestamps for this client
-        timestamps = self.cache[client_ip]
-        
-        # Remove timestamps older than the period
-        cutoff = now - self.period
-        self.cache[client_ip] = [ts for ts in timestamps if ts > cutoff]
-        
-        # Add current timestamp
-        self.cache[client_ip].append(now)
-        
-        # Check if client exceeded max calls in the period
-        return len(self.cache[client_ip]) <= self.max_calls
+        with self.lock:
+            # Periodically clean up expired entries to prevent memory leaks
+            if now - self.last_cleanup > self.cleanup_interval:
+                self._cleanup_expired_entries(now)
+                self.last_cleanup = now
+            
+            # Create new entry for new clients
+            if client_ip not in self.cache:
+                self.cache[client_ip] = [now]
+                return True
+            
+            # Get existing timestamps for this client
+            timestamps = self.cache[client_ip]
+            
+            # Remove timestamps older than the period
+            cutoff = now - self.period
+            self.cache[client_ip] = [ts for ts in timestamps if ts > cutoff]
+            
+            # Add current timestamp
+            self.cache[client_ip].append(now)
+            
+            # Check if client exceeded max calls in the period
+            return len(self.cache[client_ip]) <= self.max_calls
     
     def _cleanup_expired_entries(self, current_time):
         """Remove expired entries from the cache to prevent memory leaks"""
@@ -69,6 +72,26 @@ class RateLimiter:
         # Remove expired entries
         for ip in expired_ips:
             del self.cache[ip]
+            
+    def get_remaining(self, client_ip):
+        """Get remaining requests for a client"""
+        now = time.time()
+        with self.lock:
+            if client_ip not in self.cache:
+                return self.max_calls
+                
+            # Remove timestamps older than the period
+            cutoff = now - self.period
+            valid_timestamps = [ts for ts in self.cache[client_ip] if ts > cutoff]
+            self.cache[client_ip] = valid_timestamps
+            
+            return max(0, self.max_calls - len(valid_timestamps))
+            
+    def reset(self, client_ip):
+        """Reset rate limiting for a specific client"""
+        with self.lock:
+            if client_ip in self.cache:
+                del self.cache[client_ip]
 
 # Create rate limiter instance
 rate_limiter = RateLimiter(max_calls=100, period=60)
