@@ -36,6 +36,16 @@
     .action-btn-group .btn {
         padding: 0.25rem 0.5rem; /* Smaller padding for action buttons */
     }
+    
+    /* Ensure table has enough height for dropdown menus */
+    .table-responsive {
+        min-height: 400px;
+    }
+    
+    /* Ensure proper positioning of dropdowns relative to the table */
+    .dropdown-menu {
+        z-index: 1030;
+    }
 </style>
 {% endblock %}
 
@@ -556,13 +566,12 @@
         
         proxyStatusElement.innerHTML = `<div class="spinner-border spinner-border-sm text-secondary" role="status"><span class="visually-hidden">Loading...</span></div> Installing ${proxyType}...`;
         
-        fetch(`{{ url_for('admin.install_proxy_software', node_id=0) }}`.replace('0', nodeId), {
+        fetch(`{{ url_for('admin.install_proxy_software', node_id=0, proxy_type='placeholder') }}`.replace('0', nodeId).replace('placeholder', proxyType), {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'X-CSRFToken': '{{ csrf_token() }}'
-            },
-            body: JSON.stringify({ proxy_type: proxyType })
+            }
         })
         .then(response => {
             if (!response.ok) {

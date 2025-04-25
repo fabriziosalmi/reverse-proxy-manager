@@ -8,6 +8,7 @@ instance/
 
 # Virtual environment
 venv/
+venv_py312/
 
 # SQLite database
 *.db
