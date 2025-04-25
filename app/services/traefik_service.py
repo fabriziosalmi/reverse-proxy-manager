@@ -1,10 +1,10 @@
 import os
+import tempfile
 import re
-import yaml
 from datetime import datetime
 
 from app.services.proxy_service_base import ProxyServiceBase
-from app.models.models import db, Node, Site, SiteNode, DeploymentLog
+from app.models.models import db, Site, Node, SiteNode, DeploymentLog
 from app.services.ssh_connection_service import SSHConnectionService
 from app.services.logger_service import log_activity
 
@@ -19,150 +19,146 @@ class TraefikService(ProxyServiceBase):
             site: Site object containing configuration details
             
         Returns:
-            str: Traefik configuration file content in YAML format
+            str: Traefik configuration file content
         """
-        # Traefik uses YAML or TOML for configuration
-        # We'll use YAML as it's more readable and similar to JSON
+        # Define the configuration in YAML format for Traefik
+        config = []
         
-        # Basic router configuration
-        router_name = site.domain.replace('.', '_')
+        # Add header
+        config.append(f"# Traefik configuration for {site.domain}")
+        config.append("http:")
+        config.append("  routers:")
         
-        config = {
-            "http": {
-                "routers": {
-                    f"{router_name}": {
-                        "rule": f"Host(`{site.domain}`)",
-                        "service": f"{router_name}_service",
-                        "entryPoints": ["web"]
-                    }
-                },
-                "services": {
-                    f"{router_name}_service": {
-                        "loadBalancer": {
-                            "servers": [
-                                {"url": f"{site.origin_protocol}://{site.origin_address}:{site.origin_port}"}
-                            ],
-                            "passHostHeader": True
-                        }
-                    }
-                },
-                "middlewares": {}
-            }
-        }
+        # Add the router configuration
+        config.append(f"    {site.domain.replace('.', '-')}:")
+        config.append(f"      rule: \"Host(`{site.domain}`)\"")
         
-        # Configure HTTPS if required
+        # Handle TLS for HTTPS
         if site.protocol == 'https':
-            config["http"]["routers"][router_name]["entryPoints"] = ["websecure"]
-            config["http"]["routers"][router_name]["tls"] = {"certResolver": "default"}
-            
-            # Add HTTPS redirect router
-            if site.force_https:
-                config["http"]["routers"][f"{router_name}_redirect"] = {
-                    "rule": f"Host(`{site.domain}`)",
-                    "entryPoints": ["web"],
-                    "middlewares": [f"{router_name}_redirect"],
-                    "service": f"{router_name}_service"
-                }
-                
-                config["http"]["middlewares"][f"{router_name}_redirect"] = {
-                    "redirectScheme": {
-                        "scheme": "https",
-                        "permanent": True
-                    }
-                }
+            config.append("      tls: true")
+            config.append("      tls.certresolver: letsencrypt")
+            config.append("      entryPoints: websecure")
+        else:
+            config.append("      entryPoints: web")
         
-        # Add WAF configuration if enabled
-        if site.use_waf:
-            config["http"]["routers"][router_name]["middlewares"] = config["http"]["routers"][router_name].get("middlewares", [])
-            config["http"]["routers"][router_name]["middlewares"].append(f"{router_name}_waf")
-            
-            # Configure WAF middleware
-            if site.waf_rule_level == 'strict':
-                config["http"]["middlewares"][f"{router_name}_waf"] = {
-                    "plugin": {
-                        "traefik-modsecurity": {
-                            "ruleSets": ["/etc/traefik/rules/owasp-crs/rules/*.conf"],
-                            "secRuleEngine": "On",
-                            "secRequestBodyAccess": "On",
-                            "secResponseBodyAccess": "On",
-                            "secResponseBodyMimeType": "text/html application/json"
-                        }
-                    }
-                }
-            else:  # medium or basic
-                config["http"]["middlewares"][f"{router_name}_waf"] = {
-                    "plugin": {
-                        "traefik-modsecurity": {
-                            "ruleSets": ["/etc/traefik/rules/owasp-crs/rules/*.conf"],
-                            "secRuleEngine": "DetectionOnly",
-                            "secRequestBodyAccess": "On",
-                            "secResponseBodyAccess": "Off"
-                        }
-                    }
-                }
+        config.append(f"      service: {site.domain.replace('.', '-')}")
         
-        # Add cache configuration if enabled
+        # Add the service configuration
+        config.append("  services:")
+        config.append(f"    {site.domain.replace('.', '-')}:")
+        config.append("      loadBalancer:")
+        config.append("        servers:")
+        config.append(f"          - url: \"{site.origin_protocol}://{site.origin_address}:{site.origin_port}\"")
+        
+        # Add middlewares section
+        middlewares = []
+        
+        # Add caching middleware if enabled
         if site.enable_cache:
-            if "middlewares" not in config["http"]["routers"][router_name]:
-                config["http"]["routers"][router_name]["middlewares"] = []
+            cache_middleware_name = f"{site.domain.replace('.', '-')}-cache"
+            middlewares.append(cache_middleware_name)
             
-            config["http"]["routers"][router_name]["middlewares"].append(f"{router_name}_cache")
+            # Define cache configuration
+            config.append("  middlewares:")
+            config.append(f"    {cache_middleware_name}:")
+            config.append("      plugin:")
+            config.append("        httpCache:")
+            config.append(f"          maxTtl: \"{site.cache_time}s\"")
             
-            # Configure cache middleware
-            config["http"]["middlewares"][f"{router_name}_cache"] = {
-                "plugin": {
-                    "traefik-cache": {
-                        "maxTtl": f"{site.cache_time}s",
-                        "methods": ["GET", "HEAD"],
-                        "maxCacheSize": "100MB"
-                    }
-                }
-            }
-        
-        # Add GeoIP filtering if enabled
+            # Add custom cache paths
+            config.append("          paths:")
+            config.append("            - path: \"/\"")
+            config.append(f"              ttl: \"{site.cache_time}s\"")
+            config.append("            - path: \"/*.css\"")
+            config.append(f"              ttl: \"{site.cache_static_time}s\"")
+            config.append("            - path: \"/*.js\"")
+            config.append(f"              ttl: \"{site.cache_static_time}s\"")
+            config.append("            - path: \"/*.jpg\"")
+            config.append(f"              ttl: \"{site.cache_static_time}s\"")
+            config.append("            - path: \"/*.jpeg\"")
+            config.append(f"              ttl: \"{site.cache_static_time}s\"")
+            config.append("            - path: \"/*.png\"")
+            config.append(f"              ttl: \"{site.cache_static_time}s\"")
+            config.append("            - path: \"/*.gif\"")
+            config.append(f"              ttl: \"{site.cache_static_time}s\"")
+            config.append("            - path: \"/*.svg\"")
+            config.append(f"              ttl: \"{site.cache_static_time}s\"")
+            
+        # Add GeoIP middleware if enabled
         if site.use_geoip and site.geoip_countries:
-            if "middlewares" not in config["http"]["routers"][router_name]:
-                config["http"]["routers"][router_name]["middlewares"] = []
+            geoip_middleware_name = f"{site.domain.replace('.', '-')}-geoip"
+            middlewares.append(geoip_middleware_name)
             
-            config["http"]["routers"][router_name]["middlewares"].append(f"{router_name}_geoip")
+            # Ensure middlewares section exists
+            if not site.enable_cache:
+                config.append("  middlewares:")
+                
+            # Define GeoIP configuration
+            config.append(f"    {geoip_middleware_name}:")
+            config.append("      ipAllowList:")
             
+            # Add country codes based on mode
             countries = site.geoip_countries.replace(' ', '').split(',')
             
-            # Configure GeoIP middleware
-            if site.geoip_mode == 'blacklist':
-                config["http"]["middlewares"][f"{router_name}_geoip"] = {
-                    "plugin": {
-                        "traefik-geoip": {
-                            "blacklist": countries
-                        }
-                    }
-                }
-            else:  # whitelist
-                config["http"]["middlewares"][f"{router_name}_geoip"] = {
-                    "plugin": {
-                        "traefik-geoip": {
-                            "whitelist": countries
-                        }
-                    }
-                }
+            if site.geoip_mode == 'whitelist':
+                config.append("        sourceRange:")
+                for country in countries:
+                    config.append(f"          - \"countrycode:{country.strip().upper()}\"")
+            else:  # blacklist
+                config.append("        ipStrategy:")
+                config.append("          depth: 1")
+                config.append("        excludedIPs:")
+                for country in countries:
+                    config.append(f"          - \"countrycode:{country.strip().upper()}\"")
         
-        # Add site blocking if enabled
+        # Add HTTPS redirect middleware if needed
+        if site.force_https and site.protocol == 'https':
+            https_middleware_name = f"{site.domain.replace('.', '-')}-https"
+            middlewares.append(https_middleware_name)
+            
+            # Ensure middlewares section exists
+            if not site.enable_cache and not site.use_geoip:
+                config.append("  middlewares:")
+                
+            # Define HTTPS redirect configuration
+            config.append(f"    {https_middleware_name}:")
+            config.append("      redirectScheme:")
+            config.append("        scheme: https")
+            config.append("        permanent: true")
+            
+        # Add blocked site middleware if site is blocked
         if site.is_blocked:
-            if "middlewares" not in config["http"]["routers"][router_name]:
-                config["http"]["routers"][router_name]["middlewares"] = []
+            blocked_middleware_name = f"{site.domain.replace('.', '-')}-blocked"
+            middlewares.append(blocked_middleware_name)
             
-            config["http"]["routers"][router_name]["middlewares"].append(f"{router_name}_blocked")
-            
-            config["http"]["middlewares"][f"{router_name}_blocked"] = {
-                "errors": {
-                    "status": ["403"],
-                    "service": f"{router_name}_service",
-                    "query": "/{status}.html"
-                }
-            }
+            # Ensure middlewares section exists
+            if not middlewares:
+                config.append("  middlewares:")
+                
+            # Define blocked site configuration
+            config.append(f"    {blocked_middleware_name}:")
+            config.append("      errors:")
+            config.append("        status: [\"403\"]")
+            config.append("        service: error")
+            config.append("        query: \"/{status}.html\"")
         
-        # Convert the config to YAML format
-        return yaml.dump(config, default_flow_style=False)
+        # Apply middlewares to the router if any are defined
+        if middlewares:
+            middleware_list = " , ".join(middlewares)
+            # Find the router section to add the middleware
+            for i, line in enumerate(config):
+                if line.strip().startswith(f"{site.domain.replace('.', '-')}:"):
+                    # Add middleware to this router
+                    config.insert(i + 5, f"      middlewares: {middleware_list}")
+                    break
+        
+        # Add custom configuration if provided
+        if site.custom_config:
+            config.append("# Custom configuration")
+            for line in site.custom_config.split('\n'):
+                config.append(line)
+        
+        return "\n".join(config)
     
     def deploy_config(self, site_id, node_id, config_content, test_only=False):
         """
@@ -192,23 +188,22 @@ class TraefikService(ProxyServiceBase):
         try:
             # Create a temporary file with the configuration content
             temp_file_path = SSHConnectionService.create_temp_file_with_content(config_content)
-            remote_temp_path = f"/tmp/{site.domain}_traefik_test.yaml"
+            remote_temp_path = f"/tmp/{site.domain}_traefik_test.yml"
             
             with SSHConnectionService.get_sftp_connection(node) as (ssh_client, sftp):
                 # Upload the configuration to a temporary file for testing
                 sftp.put(temp_file_path, remote_temp_path)
                 os.unlink(temp_file_path)  # Clean up local temp file
                 
-                # Test the configuration (Traefik doesn't have a built-in config test, so we validate YAML syntax)
-                test_cmd = f"yamllint {remote_temp_path} 2>&1 || echo 'YAML syntax is valid'"
+                # Test the configuration
+                test_cmd = f"traefik configtest --config.file={remote_temp_path}"
                 exit_code, stdout, stderr = SSHConnectionService.execute_command(ssh_client, test_cmd)
-                output = stdout + stderr
                 
                 warnings = []
                 
-                if "error" in output.lower():
+                if exit_code != 0:
                     # Configuration test failed
-                    error_message = output
+                    error_message = stderr
                     
                     # Log the failure
                     self.log_deployment(
@@ -239,27 +234,19 @@ class TraefikService(ProxyServiceBase):
                     traefik_sites_dir = "/etc/traefik/conf.d"  # Default path
                     
                 # Ensure the sites directory exists
-                mkdir_cmd = f"sudo mkdir -p {traefik_sites_dir}"
+                mkdir_cmd = f"mkdir -p {traefik_sites_dir}"
                 exit_code, stdout, stderr = SSHConnectionService.execute_command(ssh_client, mkdir_cmd)
                 
                 if exit_code != 0:
                     error_message = stderr
-                    raise Exception(f"Failed to create Traefik sites directory: {error_message}")
+                    raise Exception(f"Failed to create Traefik configuration directory: {error_message}")
                 
                 # Deploy the valid configuration
-                config_path = f"{traefik_sites_dir}/{site.domain}.yaml"
-                sftp.put(remote_temp_path, f"/tmp/{site.domain}.yaml")
-                
-                # Move the file to final location with sudo
-                mv_cmd = f"sudo mv /tmp/{site.domain}.yaml {config_path}"
-                exit_code, stdout, stderr = SSHConnectionService.execute_command(ssh_client, mv_cmd)
-                
-                if exit_code != 0:
-                    error_message = stderr
-                    raise Exception(f"Failed to move configuration file: {error_message}")
+                config_path = f"{traefik_sites_dir}/{site.domain}.yml"
+                sftp.put(remote_temp_path, config_path)
                 
                 # Reload Traefik to apply the new configuration
-                reload_cmd = "sudo systemctl reload traefik"
+                reload_cmd = "systemctl reload traefik"
                 exit_code, stdout, stderr = SSHConnectionService.execute_command(ssh_client, reload_cmd)
                 
                 if exit_code != 0:
@@ -328,12 +315,30 @@ class TraefikService(ProxyServiceBase):
         Returns:
             tuple: (is_valid, error_message)
         """
-        # Basic YAML validation
-        try:
-            yaml.safe_load(config_content)
-            return True, ""
-        except Exception as e:
-            return False, f"Invalid YAML syntax: {str(e)}"
+        # Simple validation of Traefik YAML configuration
+        # Check for basic YAML structure
+        if not config_content.strip():
+            return False, "Empty configuration"
+        
+        if "http:" not in config_content:
+            return False, "Missing 'http:' section in Traefik configuration"
+        
+        if "routers:" not in config_content:
+            return False, "Missing 'routers:' section in Traefik configuration"
+        
+        if "services:" not in config_content:
+            return False, "Missing 'services:' section in Traefik configuration"
+        
+        # Check for indentation issues (very basic)
+        lines = config_content.split('\n')
+        for i, line in enumerate(lines):
+            if line.strip() and not line.startswith('#'):
+                # Check if indentation is a multiple of 2 spaces
+                indent = len(line) - len(line.lstrip())
+                if indent % 2 != 0:
+                    return False, f"Indentation error on line {i + 1}: '{line}'"
+        
+        return True, ""
     
     def get_service_info(self, node):
         """
@@ -351,8 +356,8 @@ class TraefikService(ProxyServiceBase):
                 exit_code, stdout, stderr = SSHConnectionService.execute_command(ssh_client, "traefik version")
                 version_output = stdout.strip()
                 
-                # Extract version
-                version_match = re.search(r'Version:\s+(\d+\.\d+\.\d+)', version_output)
+                # Extract version number from the output
+                version_match = re.search(r'Version\s+(\d+\.\d+\.\d+)', version_output)
                 version = version_match.group(1) if version_match else "Unknown"
                 
                 # Check if Traefik is running
@@ -362,28 +367,32 @@ class TraefikService(ProxyServiceBase):
                 # Get site count
                 traefik_sites_dir = node.proxy_config_path if node.proxy_config_path else "/etc/traefik/conf.d"
                 exit_code, stdout, stderr = SSHConnectionService.execute_command(
-                    ssh_client, f"find {traefik_sites_dir} -type f -name '*.yaml' | wc -l"
+                    ssh_client, f"find {traefik_sites_dir} -type f -name '*.yml' | wc -l"
                 )
                 site_count = int(stdout.strip())
                 
-                # Get enabled features and providers
-                features = []
+                # Get provider information
                 providers = []
+                exit_code, stdout, stderr = SSHConnectionService.execute_command(
+                    ssh_client, "grep -r 'providers' /etc/traefik/traefik.yml 2>/dev/null || echo ''"
+                )
                 
-                exit_code, stdout, stderr = SSHConnectionService.execute_command(ssh_client, "ps aux | grep traefik")
-                process_info = stdout
-                
-                if "--providers.file" in process_info:
-                    providers.append("file")
-                if "--providers.docker" in process_info:
-                    providers.append("docker")
+                if stdout.strip():
+                    # Extract providers from the configuration
+                    if "file" in stdout:
+                        providers.append("file")
+                    if "docker" in stdout:
+                        providers.append("docker")
+                    if "consul" in stdout:
+                        providers.append("consul")
+                    if "etcd" in stdout:
+                        providers.append("etcd")
                 
                 return {
                     'version': version,
                     'is_running': is_running,
                     'site_count': site_count,
-                    'providers': providers,
-                    'features': features
+                    'providers': providers
                 }
             
         except Exception as e:
@@ -392,7 +401,6 @@ class TraefikService(ProxyServiceBase):
                 'is_running': False,
                 'site_count': 0,
                 'providers': [],
-                'features': [],
                 'error': str(e)
             }
     
@@ -420,77 +428,45 @@ class TraefikService(ProxyServiceBase):
                 exit_code, stdout, stderr = SSHConnectionService.execute_command(ssh_client, "cat /etc/os-release")
                 os_info = stdout
                 
-                # Install Traefik using the binary method since it's the most reliable across distributions
-                commands = [
-                    # Create traefik user
-                    "sudo useradd -r -s /bin/false traefik || true",
-                    
-                    # Download Traefik binary
-                    "sudo curl -L https://github.com/traefik/traefik/releases/download/v2.9.1/traefik_v2.9.1_linux_amd64.tar.gz -o /tmp/traefik.tar.gz",
-                    "sudo tar -C /tmp -xzf /tmp/traefik.tar.gz",
-                    "sudo mv /tmp/traefik /usr/local/bin/",
-                    "sudo chmod +x /usr/local/bin/traefik",
-                    
-                    # Create directories
-                    "sudo mkdir -p /etc/traefik/conf.d",
-                    "sudo mkdir -p /etc/traefik/rules",
-                    
-                    # Create basic configuration
-                    """sudo tee /etc/traefik/traefik.yaml > /dev/null << 'EOT'
-api:
-  dashboard: true
-  insecure: true
-
-entryPoints:
-  web:
-    address: :80
-  websecure:
-    address: :443
-
-providers:
-  file:
-    directory: /etc/traefik/conf.d
-    watch: true
-
-certificatesResolvers:
-  default:
-    acme:
-      email: admin@example.com
-      storage: /etc/traefik/acme.json
-      httpChallenge:
-        entryPoint: web
-EOT""",
-                    "sudo touch /etc/traefik/acme.json",
-                    "sudo chmod 600 /etc/traefik/acme.json",
-                    
-                    # Create systemd service
-                    """sudo tee /etc/systemd/system/traefik.service > /dev/null << 'EOT'
-[Unit]
-Description=Traefik
-Documentation=https://doc.traefik.io/traefik/
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=traefik
-Group=traefik
-ExecStart=/usr/local/bin/traefik --configfile=/etc/traefik/traefik.yaml
-Restart=on-failure
-RestartSec=5s
-
-[Install]
-WantedBy=multi-user.target
-EOT""",
-                    
-                    # Set permissions
-                    "sudo chown -R traefik:traefik /etc/traefik",
-                    
-                    # Enable and start service
-                    "sudo systemctl daemon-reload",
-                    "sudo systemctl enable traefik",
-                    "sudo systemctl start traefik"
-                ]
+                if "Ubuntu" in os_info or "Debian" in os_info:
+                    # Debian/Ubuntu installation
+                    commands = [
+                        "sudo apt-get update",
+                        "sudo apt-get install -y wget",
+                        "wget -q https://github.com/traefik/traefik/releases/latest/download/traefik_linux_amd64.tar.gz -O /tmp/traefik.tar.gz",
+                        "sudo tar -xzf /tmp/traefik.tar.gz -C /tmp",
+                        "sudo mv /tmp/traefik /usr/bin/",
+                        "sudo chmod +x /usr/bin/traefik",
+                        "sudo groupadd -f traefik",
+                        "sudo useradd -g traefik -s /bin/false -M traefik || true",
+                        "sudo mkdir -p /etc/traefik/conf.d",
+                        "sudo mkdir -p /etc/traefik/acme",
+                        "sudo chown -R traefik:traefik /etc/traefik"
+                    ]
+                elif "CentOS" in os_info or "Red Hat" in os_info or "Fedora" in os_info:
+                    # RHEL/CentOS/Fedora installation
+                    commands = [
+                        "sudo yum install -y wget",
+                        "wget -q https://github.com/traefik/traefik/releases/latest/download/traefik_linux_amd64.tar.gz -O /tmp/traefik.tar.gz",
+                        "sudo tar -xzf /tmp/traefik.tar.gz -C /tmp",
+                        "sudo mv /tmp/traefik /usr/bin/",
+                        "sudo chmod +x /usr/bin/traefik",
+                        "sudo groupadd -f traefik",
+                        "sudo useradd -g traefik -s /bin/false -M traefik || true",
+                        "sudo mkdir -p /etc/traefik/conf.d",
+                        "sudo mkdir -p /etc/traefik/acme",
+                        "sudo chown -R traefik:traefik /etc/traefik"
+                    ]
+                else:
+                    # Generic installation
+                    commands = [
+                        "wget -q https://github.com/traefik/traefik/releases/latest/download/traefik_linux_amd64.tar.gz -O /tmp/traefik.tar.gz",
+                        "sudo tar -xzf /tmp/traefik.tar.gz -C /tmp",
+                        "sudo mv /tmp/traefik /usr/bin/",
+                        "sudo chmod +x /usr/bin/traefik",
+                        "sudo mkdir -p /etc/traefik/conf.d",
+                        "sudo mkdir -p /etc/traefik/acme"
+                    ]
                 
                 # Run installation commands
                 success, results = SSHConnectionService.execute_commands(ssh_client, commands)
@@ -500,6 +476,99 @@ EOT""",
                     for cmd, exit_code, stdout, stderr in results:
                         if exit_code != 0:
                             return False, f"Installation failed: {stderr}"
+                
+                # Create Traefik configuration file
+                traefik_config = """
+# Traefik static configuration
+global:
+  checkNewVersion: true
+  sendAnonymousUsage: false
+
+log:
+  level: INFO
+
+api:
+  dashboard: true
+  insecure: false
+
+entryPoints:
+  web:
+    address: ":80"
+  websecure:
+    address: ":443"
+
+providers:
+  file:
+    directory: "/etc/traefik/conf.d"
+    watch: true
+
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      email: "admin@example.com"
+      storage: "/etc/traefik/acme/acme.json"
+      caServer: "https://acme-v02.api.letsencrypt.org/directory"
+      tlsChallenge: true
+"""
+                
+                # Write Traefik configuration to a temporary file
+                temp_file_path = SSHConnectionService.create_temp_file_with_content(traefik_config)
+                
+                with SSHConnectionService.get_sftp_connection(node) as (ssh_client, sftp):
+                    sftp.put(temp_file_path, "/tmp/traefik.yml")
+                    os.unlink(temp_file_path)
+                
+                # Move the configuration file to the right location and set up systemd service
+                commands = [
+                    "sudo mv /tmp/traefik.yml /etc/traefik/traefik.yml",
+                    "sudo touch /etc/traefik/acme/acme.json",
+                    "sudo chmod 600 /etc/traefik/acme/acme.json"
+                ]
+                
+                # Set up systemd service
+                systemd_service = """
+[Unit]
+Description=Traefik
+Documentation=https://docs.traefik.io
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=traefik
+Group=traefik
+ExecStart=/usr/bin/traefik --configfile=/etc/traefik/traefik.yml
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+"""
+                
+                # Write systemd service file to a temporary file
+                temp_file_path = SSHConnectionService.create_temp_file_with_content(systemd_service)
+                
+                with SSHConnectionService.get_sftp_connection(node) as (ssh_client, sftp):
+                    sftp.put(temp_file_path, "/tmp/traefik.service")
+                    os.unlink(temp_file_path)
+                
+                # Move the service file and enable the service
+                commands.extend([
+                    "sudo mv /tmp/traefik.service /etc/systemd/system/traefik.service",
+                    "sudo systemctl daemon-reload",
+                    "sudo systemctl enable traefik",
+                    "sudo systemctl start traefik"
+                ])
+                
+                # Run final setup commands
+                success, results = SSHConnectionService.execute_commands(ssh_client, commands)
+                
+                if not success:
+                    # Find the command that failed
+                    for cmd, exit_code, stdout, stderr in results:
+                        if exit_code != 0:
+                            return False, f"Service setup failed: {stderr}"
                 
                 # Verify installation
                 exit_code, stdout, stderr = SSHConnectionService.execute_command(ssh_client, "which traefik")

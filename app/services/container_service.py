@@ -6,6 +6,9 @@ from flask import current_app
 from app.models.models import db, Node, Site, SiteNode, DeploymentLog
 from app.services.logger_service import log_activity
 from datetime import datetime
+import paramiko
+import tempfile
+import shutil
 
 class ContainerService:
     """Service for managing containerized Nginx instances"""
@@ -22,31 +25,40 @@ class ContainerService:
         """
         try:
             if not node.is_container_node:
-                raise ValueError("Node is not configured for container mode")
+                log_activity('error', f"Node {node.name} is not configured for containers", 'node', node.id)
+                return None
                 
             # For local Docker socket
             if node.container_connection_type == 'socket':
-                return docker.from_env()
+                return docker.DockerClient(base_url='unix:///var/run/docker.sock')
                 
-            # For remote Docker daemon
             elif node.container_connection_type == 'tcp':
-                url = f"tcp://{node.ip_address}:{node.container_port}"
-                return docker.DockerClient(base_url=url)
+                # For TCP connection (with TLS if needed)
+                if node.container_tls_enabled:
+                    tls_config = docker.tls.TLSConfig(
+                        client_cert=(node.container_cert_path, node.container_key_path),
+                        ca_cert=node.container_ca_path,
+                        verify=True
+                    )
+                    return docker.DockerClient(
+                        base_url=f"tcp://{node.ip_address}:{node.container_api_port}", 
+                        tls=tls_config
+                    )
+                else:
+                    return docker.DockerClient(
+                        base_url=f"tcp://{node.ip_address}:{node.container_api_port}"
+                    )
                 
-            # For SSH tunnel to Docker daemon
             elif node.container_connection_type == 'ssh':
-                # Use SSH tunnel to connect to remote Docker daemon
-                import paramiko
-                import socket
-                
-                # Create SSH tunnel to Docker socket
+                # For SSH tunneling to Docker socket
                 ssh_client = paramiko.SSHClient()
                 ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
                 
+                # Connect using key or password
                 if node.ssh_key_path:
                     ssh_client.connect(
                         hostname=node.ip_address,
-                        port=node.ssh_port,
+                        port=node.ssh_port or 22,
                         username=node.ssh_user,
                         key_filename=node.ssh_key_path,
                         timeout=10
@@ -54,35 +66,26 @@ class ContainerService:
                 else:
                     ssh_client.connect(
                         hostname=node.ip_address,
-                        port=node.ssh_port,
+                        port=node.ssh_port or 22,
                         username=node.ssh_user,
                         password=node.ssh_password,
                         timeout=10
                     )
                 
-                # Create a tunnel to Docker socket
+                # Create a transport channel
                 transport = ssh_client.get_transport()
-                dest_addr = ("localhost", node.container_port)
-                local_port = 8888  # Use a random local port for the tunnel
                 
-                # Try different ports if the default is in use
-                while True:
-                    try:
-                        channel = transport.open_channel(
-                            "direct-tcpip", dest_addr, ("localhost", local_port)
-                        )
-                        break
-                    except Exception:
-                        local_port += 1
-                        if local_port > 9000:  # Avoid infinite loop
-                            raise ValueError("Cannot find available local port for SSH tunnel")
+                # Create tunnel from local port to remote Docker socket
+                local_port = 2375
+                remote_socket = '/var/run/docker.sock'
+                transport.request_port_forward('', local_port)
                 
-                # Create a Docker client that uses the tunnel
-                url = f"tcp://localhost:{local_port}"
-                return docker.DockerClient(base_url=url)
+                # Connect to Docker through the tunnel
+                return docker.DockerClient(base_url=f'tcp://localhost:{local_port}')
             
             else:
-                raise ValueError(f"Unsupported container connection type: {node.container_connection_type}")
+                log_activity('error', f"Unknown container connection type: {node.container_connection_type}", 'node', node.id)
+                return None
                 
         except Exception as e:
             log_activity('error', f"Failed to connect to Docker on node {node.name}: {str(e)}")
