@@ -73,12 +73,15 @@ class CaddyService(ProxyServiceBase):
                 config.append(f"        body \"Access denied by geographic restriction.\"")
                 config.append(f"    }}")
             else:
-                # Whitelist specific countries
+                # Whitelist specific countries (only allow these countries)
                 country_list = ', '.join([f'"{c.strip().upper()}"' for c in countries])
                 config.append(f"    @allowed_countries {{")
                 config.append(f"        client_ip_country {country_list}")
                 config.append(f"    }}")
-                config.append(f"    respond @allowed_countries 403 {{")
+                config.append(f"    @non_allowed_countries {{")
+                config.append(f"        not client_ip_country {country_list}")
+                config.append(f"    }}")
+                config.append(f"    respond @non_allowed_countries 403 {{")
                 config.append(f"        body \"Access denied by geographic restriction.\"")
                 config.append(f"    }}")
         

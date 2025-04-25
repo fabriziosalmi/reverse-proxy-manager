@@ -162,15 +162,17 @@ class Node(db.Model):
             return None
             
         try:
-            # Get encryption key from config or generate a secure key if needed
+            # Get encryption key from config
             key = current_app.config.get('PASSWORD_ENCRYPTION_KEY')
             if not key:
                 import logging
-                logging.warning("PASSWORD_ENCRYPTION_KEY not configured in application settings")
-                # Fall back to a development key only if not in production
+                logging.error("PASSWORD_ENCRYPTION_KEY not configured in application settings")
+                # In production, never use a fallback key
                 if current_app.config.get('ENV') == 'production':
                     raise ValueError("Missing PASSWORD_ENCRYPTION_KEY in production environment")
-                key = 'fallback_key_for_development_only'
+                # Only in development, use a clearly marked development-only key
+                logging.warning("Using insecure fallback key - FOR DEVELOPMENT ONLY")
+                key = 'dev_only_insecure_key_do_not_use_in_production'
                 
             key = key.encode()
             # Create a proper Fernet key using SHA256 to ensure correct length
@@ -199,15 +201,17 @@ class Node(db.Model):
         import base64
         
         try:
-            # Get encryption key from config or generate a secure key if needed
+            # Get encryption key from config
             key = current_app.config.get('PASSWORD_ENCRYPTION_KEY')
             if not key:
                 import logging
-                logging.warning("PASSWORD_ENCRYPTION_KEY not configured in application settings")
-                # Fall back to a development key only if not in production
+                logging.error("PASSWORD_ENCRYPTION_KEY not configured in application settings")
+                # In production, never use a fallback key
                 if current_app.config.get('ENV') == 'production':
                     raise ValueError("Missing PASSWORD_ENCRYPTION_KEY in production environment")
-                key = 'fallback_key_for_development_only'
+                # Only in development, use a clearly marked development-only key
+                logging.warning("Using insecure fallback key - FOR DEVELOPMENT ONLY")
+                key = 'dev_only_insecure_key_do_not_use_in_production'
             
             key = key.encode()
             # Create a proper Fernet key using SHA256 to ensure correct length

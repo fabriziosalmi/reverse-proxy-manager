@@ -361,33 +361,56 @@
         const sslActionForm = document.getElementById('sslActionForm');
         
         function updateFormFields() {
-                const actionSelect = document.getElementById('action');
                 const selectedAction = actionSelect.value;
-                
-                // Get all form fields
-                const emailField = document.getElementById('email-field');
-                const certTypeField = document.getElementById('cert-type-field');
-                const challengeTypeField = document.getElementById('challenge-type-field');
-                const dnsProviderField = document.getElementById('dns-provider-field');
-                const dnsCredentialsFields = document.getElementById('dns-credentials-fields');
-                const renewalOptions = document.getElementById('renewal-options');
-                const allDnsProviderFields = document.querySelectorAll('.dns-provider-fields');
                 
                 // Hide all fields first
                 emailField.classList.add('d-none');
                 certTypeField.classList.add('d-none');
                 challengeTypeField.classList.add('d-none');
                 dnsProviderField.classList.add('d-none');
-                renewalOptions.classList.add('d-none');
                 
-                if (dnsCredentialsFields) {
-                    dnsCredentialsFields.classList.add('d-none');
-                }
-                
-                // Hide all DNS provider fields
-                allDnsProviderFields.forEach(field => {
+                // Hide all DNS credential fields
+                dnsCredFields.forEach(field => {
                     field.classList.add('d-none');
                 });
+                
+                // Show relevant fields based on action
+                if (selectedAction === 'request') {
+                    // Show email field for certificate request
+                    emailField.classList.remove('d-none');
+                    
+                    // Show certificate type selection
+                    certTypeField.classList.remove('d-none');
+                    
+                    // Show challenge type field
+                    challengeTypeField.classList.remove('d-none');
+                    
+                    // Check if DNS challenge is selected
+                    const challengeType = document.getElementById('challenge_type').value;
+                    if (challengeType === 'dns') {
+                        dnsProviderField.classList.remove('d-none');
+                        
+                        // Show fields for selected DNS provider
+                        const provider = document.getElementById('dns_provider').value;
+                        if (provider) {
+                            const providerField = document.getElementById(provider + '_creds');
+                            if (providerField) {
+                                providerField.classList.remove('d-none');
+                            }
+                        }
+                    }
+                    
+                    // If wildcard certificate is selected, force DNS challenge
+                    const certType = document.getElementById('cert_type').value;
+                    if (certType === 'wildcard') {
+                        document.getElementById('challenge_type').value = 'dns';
+                        document.getElementById('challenge_type').disabled = true;
+                        challengeTypeField.classList.remove('d-none');
+                        dnsProviderField.classList.remove('d-none');
+                    } else {
+                        document.getElementById('challenge_type').disabled = false;
+                    }
+                }
             }
         
         // Update fields on initial load

@@ -374,3 +374,55 @@ class ProxyServiceBase(ABC):
         db.session.add(system_log)
         db.session.commit()
         return system_log
+    
+    def handle_deployment_error(self, site_id, node_id, action, e, backup_path=None, test_only=False):
+        """
+        Common error handling for deployment operations
+        
+        Args:
+            site_id: ID of the site
+            node_id: ID of the node
+            action: Action being performed (e.g., 'deploy', 'test_config')
+            e: The exception that occurred
+            backup_path: Optional path to a backup file for restoration
+            test_only: Whether this was just a test operation
+            
+        Returns:
+            For test_only=True: tuple (False, error_message)
+            Otherwise: Raises the exception after logging
+        """
+        # Extract error message
+        error_message = str(e)
+        
+        # Log the error
+        self.log_deployment(
+            site_id=site_id,
+            node_id=node_id,
+            action=action,
+            status="error",
+            message=f"Error during {action}: {error_message}"
+        )
+        
+        # For test operations, return the result
+        if test_only:
+            return False, error_message
+            
+        # Try to restore from backup if it exists
+        if backup_path:
+            try:
+                self.restore_from_backup(backup_path, site_id, node_id)
+                # Add restoration info to the error message
+                error_message += " (Previous configuration restored)"
+            except Exception as restore_error:
+                # Log the restoration failure
+                self.log_deployment(
+                    site_id=site_id,
+                    node_id=node_id,
+                    action="restore_backup",
+                    status="error",
+                    message=f"Failed to restore backup: {str(restore_error)}"
+                )
+                error_message += f" (Failed to restore previous configuration: {str(restore_error)})"
+        
+        # Re-raise the exception with the complete error information
+        raise Exception(error_message) from e
