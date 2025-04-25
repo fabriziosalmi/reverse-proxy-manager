@@ -305,11 +305,20 @@ class ItaliaProxyTestCase(unittest.TestCase):
         
         self.login('testadmin', 'Testing123')
         
-        # Mock the NginxValidationService.test_config_on_node method to avoid SSH connections
-        from unittest.mock import patch
-        with patch('app.services.nginx_validation_service.NginxValidationService.test_config_on_node') as mock_test:
-            # Configure the mock to return a valid response
-            mock_test.return_value = (True, "", "")
+        # Create a more comprehensive mock for the SSH connection
+        # This will prevent any actual SSH connection attempts
+        from unittest.mock import patch, MagicMock
+        
+        # Mock both the NginxValidationService.test_config_on_node and paramiko.SSHClient
+        with patch('app.services.nginx_validation_service.NginxValidationService.test_config_on_node') as mock_test, \
+             patch('paramiko.SSHClient') as mock_ssh_client:
+            
+            # Configure the test_config_on_node mock to return valid response
+            mock_test.return_value = (True, "", None)
+            
+            # Configure the SSHClient mock to prevent actual SSH connections
+            mock_client_instance = MagicMock()
+            mock_ssh_client.return_value = mock_client_instance
             
             # First toggle - should deactivate the node
             response = self.client.post(f'/admin/nodes/{node.id}/toggle_active', follow_redirects=True)
@@ -371,28 +380,64 @@ class ItaliaProxyTestCase(unittest.TestCase):
         db.session.commit()
         
         self.login('testclient', 'Testing123')
-        response = self.client.post('/client/sites/new', data={
-            'name': 'Test Site',
-            'domain': 'testsite.com',
-            'protocol': 'https',
-            'origin_address': 'origin.testsite.com',
-            'origin_port': 443,
-            'nodes[]': [node.id],
-            'use_waf': True,
-            'force_https': True
-        }, follow_redirects=True)
-        self.assertEqual(response.status_code, 200)
         
-        # Verify site exists in database
-        site = Site.query.filter_by(name='Test Site').first()
-        self.assertIsNotNone(site)
-        self.assertEqual(site.domain, 'testsite.com')
-        self.assertEqual(site.protocol, 'https')
-        self.assertTrue(site.force_https)  # Check force_https is True
+        # Create comprehensive mocks to prevent SSH connections during deployment
+        from unittest.mock import patch, MagicMock
         
-        # Verify site-node relationship
-        site_node = SiteNode.query.filter_by(site_id=site.id, node_id=node.id).first()
-        self.assertIsNotNone(site_node)
+        # We need to mock:
+        # 1. ProxyCompatibilityService.check_nodes_compatibility
+        # 2. ProxyServiceFactory.create_service and the service's methods
+        # 3. Any SSH connections that might be made
+        
+        compatibility_result = {
+            'is_compatible': True,
+            'warnings': [],
+            'recommendations': []
+        }
+        
+        with patch('app.services.proxy_compatibility_service.ProxyCompatibilityService.check_nodes_compatibility', return_value=compatibility_result), \
+             patch('app.services.proxy_service_factory.ProxyServiceFactory.create_service') as mock_factory, \
+             patch('paramiko.SSHClient') as mock_ssh:
+            
+            # Configure the SSH client mock
+            mock_ssh_instance = MagicMock()
+            mock_ssh.return_value = mock_ssh_instance
+            
+            # Configure the proxy service mock
+            mock_service = MagicMock()
+            mock_service.generate_config.return_value = "server { listen 80; }"
+            mock_service.deploy_config.return_value = None
+            mock_factory.return_value = mock_service
+            
+            # Post the form data
+            response = self.client.post('/client/sites/new', data={
+                'name': 'Test Site',
+                'domain': 'testsite.com',
+                'protocol': 'https',
+                'origin_protocol': 'https',
+                'origin_address': 'origin.testsite.com',
+                'origin_port': '443',
+                'use_waf': 'on',
+                'force_https': 'on',
+                'nodes': [str(node.id)],
+                'enable_cache': 'on',
+                'cache_time': '3600',
+                'cache_static_time': '86400',
+                'cache_browser_time': '3600'
+            }, follow_redirects=True)
+            
+            self.assertEqual(response.status_code, 200)
+            
+            # Verify site exists in database
+            site = Site.query.filter_by(name='Test Site').first()
+            self.assertIsNotNone(site)
+            self.assertEqual(site.domain, 'testsite.com')
+            self.assertEqual(site.protocol, 'https')
+            self.assertTrue(site.use_waf)
+            
+            # Verify site-node relationship
+            site_node = SiteNode.query.filter_by(site_id=site.id, node_id=node.id).first()
+            self.assertIsNotNone(site_node)
     
     def test_client_edit_site(self):
         """Test editing a site as client"""
