@@ -146,24 +146,18 @@ class CaddyService(ProxyServiceBase):
                     # Configuration test failed
                     error_message = stderr
                     
-                    # Log the failure
-                    self.log_deployment(
-                        site_id=site_id,
-                        node_id=node_id,
-                        action="test_config" if test_only else "deploy",
-                        status="error",
-                        message=f"Caddy configuration test failed: {error_message}"
-                    )
-                    
+                    # Use common error handling for test failures
                     if test_only:
-                        # Return the validation result
                         return False, error_message
                     else:
-                        # Restore from backup if deployment was attempted
-                        if backup_path:
-                            self.restore_from_backup(backup_path, site_id, node_id)
-                        
-                        raise Exception(f"Caddy configuration test failed: {error_message}")
+                        # Use the common error handler
+                        return self.handle_deployment_error(
+                            site_id, 
+                            node_id, 
+                            "deploy", 
+                            Exception(f"Caddy configuration test failed: {error_message}"),
+                            backup_path
+                        )
                 
                 # If we're only testing, return success and any warnings
                 if test_only:
@@ -180,7 +174,13 @@ class CaddyService(ProxyServiceBase):
                 
                 if exit_code != 0:
                     error_message = stderr
-                    raise Exception(f"Failed to create Caddy sites directory: {error_message}")
+                    return self.handle_deployment_error(
+                        site_id, 
+                        node_id, 
+                        "deploy", 
+                        Exception(f"Failed to create Caddy sites directory: {error_message}"),
+                        backup_path
+                    )
                 
                 # Deploy the valid configuration
                 config_path = f"{caddy_sites_dir}/{site.domain}.caddy"
@@ -193,21 +193,13 @@ class CaddyService(ProxyServiceBase):
                 if exit_code != 0:
                     # Reload failed
                     error_message = stderr
-                    
-                    # Log the failure
-                    self.log_deployment(
-                        site_id=site_id,
-                        node_id=node_id,
-                        action="deploy",
-                        status="error",
-                        message=f"Caddy reload failed: {error_message}"
+                    return self.handle_deployment_error(
+                        site_id, 
+                        node_id, 
+                        "deploy", 
+                        Exception(f"Caddy reload failed: {error_message}"),
+                        backup_path
                     )
-                    
-                    # Restore from backup
-                    if backup_path:
-                        self.restore_from_backup(backup_path, site_id, node_id)
-                    
-                    raise Exception(f"Caddy reload failed: {error_message}")
                 
                 # Update the site node status
                 site_node = SiteNode.query.filter_by(site_id=site_id, node_id=node_id).first()
@@ -231,20 +223,8 @@ class CaddyService(ProxyServiceBase):
                 return True
             
         except Exception as e:
-            # Log the error
-            self.log_deployment(
-                site_id=site_id,
-                node_id=node_id,
-                action="deploy",
-                status="error",
-                message=f"Deployment error: {str(e)}"
-            )
-            
-            # Restore from backup if it exists
-            if not test_only and backup_path:
-                self.restore_from_backup(backup_path, site_id, node_id)
-            
-            raise
+            # Use the common error handler for all other exceptions
+            return self.handle_deployment_error(site_id, node_id, "deploy", e, backup_path, test_only)
     
     def validate_config(self, config_content):
         """

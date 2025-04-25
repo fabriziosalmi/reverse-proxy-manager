@@ -453,3 +453,189 @@ class AnalyticsService:
             return f"{bytes_value/(1024*1024):.2f} MB"
         else:
             return f"{bytes_value/(1024*1024*1024):.2f} GB"
+    
+    @staticmethod
+    def get_site_performance_metrics(site_id, period='week'):
+        """
+        Get detailed performance metrics for a specific site
+        
+        Args:
+            site_id: ID of the site to analyze
+            period: 'day', 'week', 'month', or 'year'
+            
+        Returns:
+            dict: Detailed performance metrics
+        """
+        try:
+            today = datetime.datetime.utcnow().date()
+            
+            # Determine start date based on period
+            if period == 'day':
+                start_date = today
+            elif period == 'week':
+                start_date = today - timedelta(days=7)
+            elif period == 'month':
+                start_date = today - timedelta(days=30)
+            elif period == 'year':
+                start_date = today - timedelta(days=365)
+            else:
+                start_date = today - timedelta(days=7)  # Default to week
+            
+            # Verify site exists
+            site = Site.query.get(site_id)
+            if not site:
+                return {'error': 'Site not found'}
+            
+            # Get basic analytics data
+            analytics_data = db.session.query(
+                func.sum(SiteAnalytics.requests).label('total_requests'),
+                func.sum(SiteAnalytics.bandwidth_bytes).label('total_bandwidth'),
+                func.sum(SiteAnalytics.cache_hits).label('total_cache_hits'),
+                func.avg(SiteAnalytics.response_time_ms).label('avg_response_time')
+            ).filter(
+                SiteAnalytics.site_id == site_id,
+                func.date(SiteAnalytics.date) >= start_date
+            ).first()
+            
+            # Calculate cache hit ratio
+            total_requests = analytics_data.total_requests or 0
+            total_cache_hits = analytics_data.total_cache_hits or 0
+            cache_hit_ratio = 0
+            if total_requests > 0:
+                cache_hit_ratio = (total_cache_hits / total_requests) * 100
+            
+            # Get HTTP status code distribution
+            status_code_distribution = db.session.query(
+                RequestLog.status_code,
+                func.count(RequestLog.id).label('count')
+            ).filter(
+                RequestLog.site_id == site_id,
+                RequestLog.timestamp >= datetime.datetime.combine(start_date, datetime.time.min)
+            ).group_by(
+                RequestLog.status_code
+            ).all()
+            
+            # Organize status codes by category
+            status_codes = {
+                '2xx': 0,  # Success
+                '3xx': 0,  # Redirection
+                '4xx': 0,  # Client Error
+                '5xx': 0   # Server Error
+            }
+            
+            for code, count in status_code_distribution:
+                if 200 <= code < 300:
+                    status_codes['2xx'] += count
+                elif 300 <= code < 400:
+                    status_codes['3xx'] += count
+                elif 400 <= code < 500:
+                    status_codes['4xx'] += count
+                elif 500 <= code < 600:
+                    status_codes['5xx'] += count
+            
+            # Get most common error paths
+            common_errors = db.session.query(
+                RequestLog.path,
+                RequestLog.status_code,
+                func.count(RequestLog.id).label('count')
+            ).filter(
+                RequestLog.site_id == site_id,
+                RequestLog.status_code >= 400,
+                RequestLog.timestamp >= datetime.datetime.combine(start_date, datetime.time.min)
+            ).group_by(
+                RequestLog.path,
+                RequestLog.status_code
+            ).order_by(
+                func.count(RequestLog.id).desc()
+            ).limit(5).all()
+            
+            # Get geographic distribution (if available)
+            geo_distribution = db.session.query(
+                RequestLog.country_code,
+                func.count(RequestLog.id).label('count')
+            ).filter(
+                RequestLog.site_id == site_id,
+                RequestLog.country_code.isnot(None),
+                RequestLog.timestamp >= datetime.datetime.combine(start_date, datetime.time.min)
+            ).group_by(
+                RequestLog.country_code
+            ).order_by(
+                func.count(RequestLog.id).desc()
+            ).limit(10).all()
+            
+            # Get hourly traffic pattern
+            hourly_traffic = db.session.query(
+                extract('hour', RequestLog.timestamp).label('hour'),
+                func.count(RequestLog.id).label('requests')
+            ).filter(
+                RequestLog.site_id == site_id,
+                RequestLog.timestamp >= datetime.datetime.combine(start_date, datetime.time.min)
+            ).group_by(
+                extract('hour', RequestLog.timestamp)
+            ).order_by(
+                extract('hour', RequestLog.timestamp)
+            ).all()
+            
+            # Format hourly data
+            hours = [0] * 24  # Initialize with zeros
+            for hour_data in hourly_traffic:
+                hours[int(hour_data.hour)] = hour_data.requests
+            
+            # Get response time percentiles
+            # This is an approximation - for precise percentiles, a specialized time-series DB is better
+            response_times = db.session.query(
+                RequestLog.response_time_ms
+            ).filter(
+                RequestLog.site_id == site_id,
+                RequestLog.timestamp >= datetime.datetime.combine(start_date, datetime.time.min)
+            ).order_by(
+                RequestLog.response_time_ms
+            ).all()
+            
+            response_times = [r.response_time_ms for r in response_times]
+            
+            # Calculate percentiles
+            percentiles = {}
+            if response_times:
+                response_times.sort()
+                count = len(response_times)
+                
+                p50_index = int(count * 0.5)
+                p90_index = int(count * 0.9)
+                p95_index = int(count * 0.95)
+                p99_index = int(count * 0.99)
+                
+                percentiles = {
+                    'p50': response_times[p50_index] if p50_index < count else 0,
+                    'p90': response_times[p90_index] if p90_index < count else 0,
+                    'p95': response_times[p95_index] if p95_index < count else 0,
+                    'p99': response_times[p99_index] if p99_index < count else 0,
+                    'max': response_times[-1] if response_times else 0
+                }
+            
+            # Compile and return all metrics
+            return {
+                'site': {
+                    'id': site.id,
+                    'domain': site.domain,
+                    'protocol': site.protocol
+                },
+                'period': period,
+                'total_requests': total_requests,
+                'total_bandwidth': analytics_data.total_bandwidth or 0,
+                'total_bandwidth_formatted': AnalyticsService.format_bytes(analytics_data.total_bandwidth or 0),
+                'average_response_time': round(analytics_data.avg_response_time or 0, 2),
+                'cache_hit_ratio': round(cache_hit_ratio, 2),
+                'status_codes': status_codes,
+                'common_errors': common_errors,
+                'geo_distribution': geo_distribution,
+                'hourly_traffic': hours,
+                'response_time_percentiles': percentiles
+            }
+        except Exception as e:
+            current_app.logger.error(f"Error getting site performance metrics: {str(e)}")
+            return {
+                'error': f"Error retrieving performance metrics: {str(e)}",
+                'site_id': site_id,
+                'period': period
+            }

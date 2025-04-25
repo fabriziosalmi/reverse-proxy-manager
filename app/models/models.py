@@ -167,12 +167,8 @@ class Node(db.Model):
             if not key:
                 import logging
                 logging.error("PASSWORD_ENCRYPTION_KEY not configured in application settings")
-                # In production, never use a fallback key
-                if current_app.config.get('ENV') == 'production':
-                    raise ValueError("Missing PASSWORD_ENCRYPTION_KEY in production environment")
-                # Only in development, use a clearly marked development-only key
-                logging.warning("Using insecure fallback key - FOR DEVELOPMENT ONLY")
-                key = 'dev_only_insecure_key_do_not_use_in_production'
+                # No fallback key in any environment for security reasons
+                raise ValueError("Missing PASSWORD_ENCRYPTION_KEY in configuration")
                 
             key = key.encode()
             # Create a proper Fernet key using SHA256 to ensure correct length
@@ -206,12 +202,8 @@ class Node(db.Model):
             if not key:
                 import logging
                 logging.error("PASSWORD_ENCRYPTION_KEY not configured in application settings")
-                # In production, never use a fallback key
-                if current_app.config.get('ENV') == 'production':
-                    raise ValueError("Missing PASSWORD_ENCRYPTION_KEY in production environment")
-                # Only in development, use a clearly marked development-only key
-                logging.warning("Using insecure fallback key - FOR DEVELOPMENT ONLY")
-                key = 'dev_only_insecure_key_do_not_use_in_production'
+                # No fallback key in any environment for security reasons
+                raise ValueError("Missing PASSWORD_ENCRYPTION_KEY in configuration")
             
             key = key.encode()
             # Create a proper Fernet key using SHA256 to ensure correct length
