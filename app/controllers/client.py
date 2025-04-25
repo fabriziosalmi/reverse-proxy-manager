@@ -460,13 +460,13 @@ def manage_ssl_certificates(site_id):
                 elif dns_provider == 'godaddy':
                     dns_credentials['key'] = request.form.get('godaddy_key')
                     dns_credentials['secret'] = request.form.get('godaddy_secret')
-                    if not dns_credentials['key'] or dns_credentials['secret']:
+                    if not dns_credentials['key'] or not dns_credentials['secret']:
                         flash('Please provide both GoDaddy API Key and Secret', 'error')
                         return redirect(url_for('client.manage_ssl_certificates', site_id=site_id))
                 elif dns_provider == 'namecheap':
                     dns_credentials['username'] = request.form.get('namecheap_username')
                     dns_credentials['api_key'] = request.form.get('namecheap_api_key')
-                    if not dns_credentials['username'] or dns_credentials['api_key']:
+                    if not dns_credentials['username'] or not dns_credentials['api_key']:
                         flash('Please provide both Namecheap Username and API Key', 'error')
                         return redirect(url_for('client.manage_ssl_certificates', site_id=site_id))
             

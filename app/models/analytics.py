@@ -13,11 +13,30 @@ class SiteAnalytics(db.Model):
     cache_hits = db.Column(db.Integer, default=0)
     response_time_ms = db.Column(db.Float, default=0)
     
-    # Relationships - fixed relationship definition
+    # Define the relationship with the site model
     site = db.relationship('Site', backref=db.backref('analytics_data', lazy=True, cascade='all, delete-orphan'))
+    
+    # Add index for better performance
+    __table_args__ = (
+        db.Index('idx_site_date', site_id, date),
+    )
     
     def __repr__(self):
         return f'<SiteAnalytics site_id={self.site_id} date={self.date}>'
+        
+    def to_dict(self):
+        """Convert model to dictionary for API responses"""
+        return {
+            'id': self.id,
+            'site_id': self.site_id,
+            'date': self.date.isoformat() if self.date else None,
+            'requests': self.requests,
+            'bandwidth_bytes': self.bandwidth_bytes,
+            'bandwidth_mb': round(self.bandwidth_bytes / (1024 * 1024), 2) if self.bandwidth_bytes else 0,
+            'cache_hits': self.cache_hits,
+            'response_time_ms': self.response_time_ms,
+            'cache_hit_ratio': round(self.cache_hits / self.requests * 100, 2) if self.requests > 0 else 0
+        }
 
 
 class RequestLog(db.Model):
