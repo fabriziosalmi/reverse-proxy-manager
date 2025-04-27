@@ -6,8 +6,9 @@ A centralized proxy management system for distributed proxy nodes, providing rob
 ![Python](https://img.shields.io/badge/python-3.12+-green)
 ![Flask](https://img.shields.io/badge/flask-2.3+-green)
 ![License](https://img.shields.io/badge/license-MIT-yellow)
+![Docker](https://img.shields.io/badge/docker-required-blue)
 
-> **IMPORTANT**: This application is designed to be used exclusively via Docker Compose. Running the application outside of Docker Compose is not supported and may lead to unexpected behavior.
+> **⚠️ DOCKER REQUIRED**: This application must be run using Docker and Docker Compose. Running the application outside of Docker is not supported and will lead to unexpected behavior.
 
 ## Overview
 
@@ -39,11 +40,12 @@ The system supports multiple reverse proxy types (Nginx, Caddy, and Traefik), al
 
 ## Docker Setup
 
-The application must be run using Docker Compose in both development and production environments.
+The application **must** be run using Docker Compose in both development and production environments.
 
 ### Prerequisites
 
-- Docker and Docker Compose installed on your system
+- Docker Engine (version 20.10.0 or higher)
+- Docker Compose (V2 compatible)
 - Git (for cloning the repository)
 
 ### Quick Start
@@ -54,7 +56,7 @@ The application must be run using Docker Compose in both development and product
    cd reverse-proxy-manager
    ```
 
-2. Create a `.env` file with your configuration (or use the defaults):
+2. Create a `.env` file with your configuration (use the example as a template):
    ```bash
    cp .env.example .env
    # Edit .env with your preferred settings
@@ -62,19 +64,21 @@ The application must be run using Docker Compose in both development and product
 
 3. Start the application in development mode:
    ```bash
-   docker-compose up app-dev
+   docker compose up app-dev
    ```
 
    Or in production mode:
    ```bash
-   docker-compose up -d app-prod
+   docker compose up -d app-prod
    ```
+
+   Note: If you're using an older version of Docker Compose (v1), use `docker-compose` instead of `docker compose`.
 
 4. Access the application at http://localhost:5002
 
 ### Environment Configuration
 
-Configure the application by setting environment variables in the docker-compose.yml file or by creating a `.env` file.
+Configure the application by setting environment variables in the `.env` file, which will be used by Docker Compose:
 
 Example `.env` file:
 ```
@@ -89,27 +93,41 @@ AUTO_ACTIVATE_DISCOVERED_NODES=true
 RATELIMIT_STORAGE_URI=memcached://memcached:11211
 ```
 
-### Management Commands
+### Docker Management Commands
 
-The application includes various management commands that can be run through the `manage.py` script within Docker:
+The application includes various management commands that must be run within Docker:
 
 ```bash
 # Database Management
-docker-compose run --rm manage init-db              # Initialize the database
-docker-compose run --rm manage backup-db            # Backup the database
-docker-compose run --rm manage restore-db --input=backup.sql  # Restore from backup
+docker compose run --rm manage init-db              # Initialize the database
+docker compose run --rm manage backup-db            # Backup the database
+docker compose run --rm manage restore-db --input=backup.sql  # Restore from backup
 
 # User Management
-docker-compose run --rm manage create-admin         # Create an admin user
-docker-compose run --rm manage list-users           # List all users
+docker compose run --rm manage create-admin         # Create an admin user
+docker compose run --rm manage list-users           # List all users
 
 # Node Management
-docker-compose run --rm manage list-nodes           # List all nodes
-docker-compose run --rm manage discover-nodes       # Discover nodes from YAML
-docker-compose run --rm manage create-migration-is-discovered  # Create migration
+docker compose run --rm manage list-nodes           # List all nodes
+docker compose run --rm manage discover-nodes       # Discover nodes from YAML
 
 # Site Management
-docker-compose run --rm manage list-sites           # List all sites
+docker compose run --rm manage list-sites           # List all sites
+
+# System Management
+docker compose run --rm manage system-check         # Run a system health check
+```
+
+### Docker Volumes
+
+The application uses Docker volumes to persist data:
+- `db-data`: Database files
+- `nginx-configs`: Generated Nginx configuration files
+- `cert-data`: SSL certificates and related files
+
+You can inspect these volumes with:
+```bash
+docker volume ls | grep italiacdn-proxy
 ```
 
 ## Automatic Node Discovery
@@ -381,7 +399,7 @@ Users can add custom Nginx directives to their site configurations:
 For development, the application code is mounted as a volume, so code changes are reflected immediately:
 
 ```bash
-docker-compose up app-dev
+docker compose up app-dev
 ```
 
 ### Local Development Setup (Not Recommended)
@@ -418,7 +436,7 @@ Note: Some features that depend on Docker services (like memcached for rate limi
 For production deployment, use the production service with Docker Compose:
 
 ```bash
-docker-compose up -d app-prod
+docker compose up -d app-prod
 ```
 
 This starts the application with Gunicorn as the WSGI server for better performance and reliability.
@@ -454,30 +472,55 @@ When updating the application, follow these steps:
 
 2. Rebuild and restart containers:
    ```bash
-   docker-compose down
-   docker-compose up -d --build
+   docker compose down
+   docker compose up -d --build
    ```
 
-This process will automatically apply database migrations and update dependencies.
+3. Apply any new database migrations (if needed):
+   ```bash
+   docker compose run --rm manage db upgrade
+   ```
 
-## Troubleshooting
+This process will update all Docker containers and apply the necessary database changes.
 
-### Common Issues
+## Docker Troubleshooting
 
-- **Connection Refused**: Check SSH credentials and node connectivity
-- **Nginx Configuration Errors**: Validate custom configurations before deployment
-- **Certificate Issuance Failures**: Verify DNS provider credentials and domain ownership
-- **Database Errors**: Ensure database migrations are up to date
-- **Rate Limiting Issues**: Verify memcached service is running
+### Common Docker Issues
 
-### Logs
+- **Container Startup Failures**: Check container logs with `docker compose logs app-dev` or `docker compose logs app-prod`
+- **Database Connection Issues**: Ensure the database volume is properly mounted and has correct permissions
+- **Networking Problems**: Verify ports are correctly mapped in `docker-compose.yml` and not blocked by firewalls
+- **Memory Issues**: If containers crash or become unresponsive, increase Docker memory allocation in Docker Desktop settings
+- **Volume Permission Issues**: Check file permissions in mounted volumes, especially for SSL certificates and config files
 
-- Application logs are available in the Docker container logs:
-  ```bash
-  docker-compose logs app-dev
-  ```
-- Deployment logs are stored in the database and viewable in the admin interface
-- System logs can be accessed from the admin dashboard
+### Container Health Checks
+
+You can check the health of containers with:
+```bash
+docker compose ps
+```
+
+If containers are constantly restarting, check logs:
+```bash
+docker compose logs --tail=100 app-dev
+```
+
+### Rebuilding Containers
+
+If you encounter persistent issues, you may need to rebuild the containers completely:
+```bash
+docker compose down
+docker compose build --no-cache
+docker compose up -d
+```
+
+### Docker Network Inspection
+
+To inspect the Docker network:
+```bash
+docker network ls
+docker network inspect italiacdn-proxy_default
+```
 
 ## Architecture
 
@@ -535,4 +578,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Important Note
 
-This application is designed to be used exclusively via Docker Compose. Running the application outside of Docker Compose is not supported and may lead to unexpected behavior.
+This application is designed to be used exclusively via Docker Compose. Running the application outside of Docker Compose is not supported and will lead to unexpected behavior.
