@@ -7,23 +7,22 @@ services:
     volumes:
       - .:/app
     ports:
-      - "5000:5000"
+      - "5002:5000"
     environment:
       - FLASK_ENV=development
       - FLASK_DEBUG=1
-    command: flask run --host=0.0.0.0
+      - RATELIMIT_STORAGE_URI=memcached://memcached:11211
+    command: python run.py
     restart: unless-stopped
+    depends_on:
+      - memcached
 
-  # Production service
-  app-prod:
-    build: .
+  # Memcached service for rate limiting
+  memcached:
+    image: memcached:1.6-alpine
     ports:
-      - "5000:5000"
-    environment:
-      - FLASK_ENV=production
-      - FLASK_DEBUG=0
-    restart: always
-    # For production, we use the default CMD from the Dockerfile (gunicorn)
+      - "11211:11211"
+    restart: unless-stopped
 
   # Separate service for database operations and management commands
   manage:
@@ -35,3 +34,5 @@ services:
       - tools
     depends_on:
       - app-dev
+
+# This application is designed to be used exclusively via Docker Compose

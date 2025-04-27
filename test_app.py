@@ -1886,8 +1886,8 @@ server {
         try:
             with patch('app.services.config_versioning_service.get_config_versions', return_value=versions), \
                  patch('app.services.config_versioning_service.get_config_content', return_value=config_content), \
-                 patch('app.services.config_versioning_service.compare_configs', return_value(diff_content)), \
-                 patch('app.services.config_versioning_service.rollback_config', return_value(True)), \
+                 patch('app.services.config_versioning_service.compare_configs', return_value=diff_content), \
+                 patch('app.services.config_versioning_service.rollback_config', return_value=True), \
                  patch('paramiko.SSHClient'):
                 
                 self.login('testadmin', 'Testing123')

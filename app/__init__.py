@@ -11,7 +11,11 @@ import os
 db = SQLAlchemy()
 login_manager = LoginManager()
 migrate = Migrate()
-limiter = Limiter(key_func=get_remote_address)
+# Configure Limiter with proper storage options
+limiter = Limiter(
+    key_func=get_remote_address,
+    default_limits=["200 per day", "50 per hour"]
+)
 csrf = CSRFProtect()
 
 def create_app(config_name="default"):
@@ -20,6 +24,12 @@ def create_app(config_name="default"):
     # Import config here to avoid circular imports
     from config import config
     app.config.from_object(config[config_name])
+    
+    # Set up Flask-Limiter with appropriate storage backend
+    app.config['RATELIMIT_STORAGE_URI'] = os.environ.get('RATELIMIT_STORAGE_URI', 'memory://')
+    # Remove the distributed option that's causing the error
+    app.config['RATELIMIT_STORAGE_OPTIONS'] = {}
+    app.config['RATELIMIT_HEADERS_ENABLED'] = True
     
     # Initialize extensions
     db.init_app(app)

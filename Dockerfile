@@ -35,5 +35,6 @@ ENV FLASK_APP=run.py
 # Use the entrypoint script
 ENTRYPOINT ["/app/scripts/docker-entrypoint.sh"]
 
+# Remove the CMD instruction to prevent running the app directly from the Dockerfile
 # Command to run the application with Gunicorn
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "4", "run:app"]
+# CMD ["gunicorn", "--bind", "0.0.0.0:5002", "--workers", "4", "run:app"]

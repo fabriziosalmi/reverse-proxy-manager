@@ -407,11 +407,12 @@ import re
 import tempfile
 import paramiko
 from datetime import datetime
+import logging
 from app import db
 from app.models.models import Node, Site, SiteNode, DeploymentLog, SystemLog
-from app.services.logger_service import LoggerService
+from app.services.logger_service import log_activity
 
-logger = LoggerService.get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 class NodeInspectionService:
     """Service for inspecting Nginx configurations on nodes and importing them into the application"""

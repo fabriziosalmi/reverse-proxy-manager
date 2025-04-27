@@ -531,3 +531,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [Let's Encrypt](https://letsencrypt.org/) for free SSL certificates
 - [ModSecurity](https://modsecurity.org/) for WAF capabilities
 - [All contributors](https://github.com/fabriziosalmi/reverse-proxy-manager/graphs/contributors) who have helped with the project
+
+## Important Note
+
+This application is designed to be used exclusively via Docker Compose. Running the application outside of Docker Compose is not supported and may lead to unexpected behavior.
