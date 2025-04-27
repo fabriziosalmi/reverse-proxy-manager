@@ -974,13 +974,13 @@ def check_node_connectivity(node):
 
 def check_node_performance(node):
     """
-    Check the performance metrics of a node
+    Check the performance of a node by checking CPU, memory, and disk usage
     
     Args:
         node: Node object to check
         
     Returns:
-        dict: Dictionary with performance metrics
+        dict: Dictionary containing performance metrics or error information
     """
     try:
         # Create SSH client
@@ -994,7 +994,7 @@ def check_node_performance(node):
                 port=node.ssh_port,
                 username=node.ssh_user,
                 key_filename=node.ssh_key_path,
-                timeout=10
+                timeout=10  # Add a reasonable timeout
             )
         else:
             ssh_client.connect(
@@ -1002,32 +1002,92 @@ def check_node_performance(node):
                 port=node.ssh_port,
                 username=node.ssh_user,
                 password=node.ssh_password,
-                timeout=10
+                timeout=10  # Add a reasonable timeout
             )
         
-        # Get CPU usage
+        # Get CPU load average
         stdin, stdout, stderr = ssh_client.exec_command("cat /proc/loadavg | awk '{print $1}'")
-        cpu_load = stdout.read().decode('utf-8').strip()
+        cpu_load_output = stdout.read().decode('utf-8').strip()
+        
+        # Get CPU cores for accurate load calculation
+        stdin, stdout, stderr = ssh_client.exec_command("nproc")
+        cpu_cores_output = stdout.read().decode('utf-8').strip()
+        
         try:
-            cpu_usage = float(cpu_load) * 100 / multiprocessing.cpu_count() if hasattr(multiprocessing, 'cpu_count') else float(cpu_load) * 25
+            cpu_load = float(cpu_load_output)
+            cpu_cores = int(cpu_cores_output) if cpu_cores_output.isdigit() else multiprocessing.cpu_count() if hasattr(multiprocessing, 'cpu_count') else 1
+            cpu_usage = min(round((cpu_load * 100 / cpu_cores), 1), 100.0)  # Cap at 100%
         except (ValueError, ZeroDivisionError):
+            # Fallback if we can't get proper values
             cpu_usage = 0
+            log_activity(
+                category='warning',
+                action='node_performance_check',
+                resource_type='node',
+                resource_id=node.id,
+                details=f"Error parsing CPU load: '{cpu_load_output}'"
+            )
         
-        # Get memory usage
-        stdin, stdout, stderr = ssh_client.exec_command("free | grep Mem | awk '{print $3/$2 * 100.0}'")
+        # Get memory usage with error handling
+        stdin, stdout, stderr = ssh_client.exec_command("free | grep Mem | awk '{print $3,$2}'")
         memory_output = stdout.read().decode('utf-8').strip()
-        try:
-            memory_usage = float(memory_output)
-        except ValueError:
-            memory_usage = 0
         
-        # Get disk usage
-        stdin, stdout, stderr = ssh_client.exec_command("df / | tail -n 1 | awk '{print $5}' | sed 's/%//'")
-        disk_output = stdout.read().decode('utf-8').strip()
         try:
-            disk_usage = float(disk_output)
-        except ValueError:
+            # The output should be "used total"
+            mem_parts = memory_output.split()
+            if len(mem_parts) == 2:
+                mem_used = float(mem_parts[0])
+                mem_total = float(mem_parts[1])
+                memory_usage = round((mem_used / mem_total * 100), 1) if mem_total > 0 else 0
+                
+                # Keep memory values for detailed reporting
+                memory_used_bytes = int(mem_used)
+                memory_total_bytes = int(mem_total)
+            else:
+                raise ValueError(f"Unexpected memory output format: {memory_output}")
+        except (ValueError, IndexError, ZeroDivisionError):
+            memory_usage = 0
+            memory_used_bytes = 0
+            memory_total_bytes = 0
+            log_activity(
+                category='warning',
+                action='node_performance_check',
+                resource_type='node',
+                resource_id=node.id,
+                details=f"Error parsing memory usage: '{memory_output}'"
+            )
+        
+        # Get disk usage with better error handling
+        stdin, stdout, stderr = ssh_client.exec_command("df / | tail -n 1 | awk '{print $3,$2,$5}'")
+        disk_output = stdout.read().decode('utf-8').strip()
+        
+        try:
+            # The output should be "used total percentage%"
+            disk_parts = disk_output.split()
+            if len(disk_parts) >= 3:
+                disk_used = float(disk_parts[0])
+                disk_total = float(disk_parts[1])
+                
+                # The percentage might have a % sign, so we need to remove it
+                disk_percentage = disk_parts[2].replace('%', '')
+                disk_usage = float(disk_percentage)
+                
+                # Keep disk values for detailed reporting
+                disk_used_bytes = int(disk_used * 1024)  # df outputs in KB
+                disk_total_bytes = int(disk_total * 1024)  # df outputs in KB
+            else:
+                raise ValueError(f"Unexpected disk output format: {disk_output}")
+        except (ValueError, IndexError, ZeroDivisionError):
             disk_usage = 0
+            disk_used_bytes = 0
+            disk_total_bytes = 0
+            log_activity(
+                category='warning',
+                action='node_performance_check',
+                resource_type='node',
+                resource_id=node.id,
+                details=f"Error parsing disk usage: '{disk_output}'"
+            )
         
         # Close the connection
         ssh_client.close()
@@ -1035,7 +1095,13 @@ def check_node_performance(node):
         return {
             'cpu_usage': cpu_usage,
             'memory_usage': memory_usage,
-            'disk_usage': disk_usage
+            'disk_usage': disk_usage,
+            'memory_used_bytes': memory_used_bytes,
+            'memory_total_bytes': memory_total_bytes,
+            'disk_used_bytes': disk_used_bytes,
+            'disk_total_bytes': disk_total_bytes,
+            'cpu_load': cpu_load if 'cpu_load' in locals() else 0,
+            'cpu_cores': cpu_cores if 'cpu_cores' in locals() else 1
         }
         
     except Exception as e:
@@ -1051,5 +1117,9 @@ def check_node_performance(node):
             'cpu_usage': 0,
             'memory_usage': 0,
             'disk_usage': 0,
+            'memory_used_bytes': 0,
+            'memory_total_bytes': 0,
+            'disk_used_bytes': 0,
+            'disk_total_bytes': 0,
             'error': str(e)
         }

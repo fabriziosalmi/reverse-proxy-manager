@@ -221,15 +221,22 @@ class SSLCertificateService:
                     is_expired = valid_until and now > valid_until
                     is_not_yet_valid = valid_from and now < valid_from
                     
-                    # Determine status
+                    # Determine status with more granular expiration levels
                     if is_expired:
                         status = "expired"
                     elif is_not_yet_valid:
                         status = "not_yet_valid"
-                    elif days_remaining is not None and days_remaining <= 7:
-                        status = "critical"
-                    elif days_remaining is not None and days_remaining <= 30:
-                        status = "expiring_soon"
+                    elif days_remaining is not None:
+                        if days_remaining <= 3:
+                            status = "critical"  # Critical: 3 days or less
+                        elif days_remaining <= 7:
+                            status = "high_risk"  # High risk: 7 days or less
+                        elif days_remaining <= 14:
+                            status = "medium_risk"  # Medium risk: 14 days or less
+                        elif days_remaining <= 30:
+                            status = "expiring_soon"  # Low risk: 30 days or less
+                        else:
+                            status = "valid"
                     else:
                         status = "valid"
                     

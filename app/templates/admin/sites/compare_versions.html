@@ -179,60 +179,73 @@
             }
         }
         
-        // Copy to clipboard functionality
+        // Improved clipboard functionality with better error handling
         const copyButton = document.getElementById('copyDiff');
         const diffContent = document.getElementById('diffContent');
         
         if (copyButton && diffContent) {
             copyButton.addEventListener('click', function() {
                 // Get text without HTML tags
-                const text = diffContent.innerText;
+                const text = diffContent.innerText || diffContent.textContent;
                 
-                // Use modern Clipboard API with fallback
-                if (navigator.clipboard && navigator.clipboard.writeText) {
-                    navigator.clipboard.writeText(text)
-                        .then(() => {
-                            // Show feedback
-                            const originalText = copyButton.innerHTML;
-                            copyButton.innerHTML = '<i class="fas fa-check me-1"></i>Copied!';
-                            copyButton.classList.replace('btn-outline-secondary', 'btn-success');
-                            
-                            // Reset button after a delay
-                            setTimeout(function() {
-                                copyButton.innerHTML = originalText;
-                                copyButton.classList.replace('btn-success', 'btn-outline-secondary');
-                            }, 2000);
-                        })
-                        .catch(err => {
-                            console.error('Failed to copy: ', err);
-                            alert('Failed to copy to clipboard. Please try manually selecting and copying the text.');
-                        });
+                // Show temporary feedback during copy
+                const originalText = copyButton.innerHTML;
+                
+                // Attempt to copy with modern Clipboard API
+                copyToClipboard(text)
+                    .then(() => {
+                        // Success feedback
+                        copyButton.innerHTML = '<i class="fas fa-check me-1"></i>Copied!';
+                        copyButton.classList.replace('btn-outline-secondary', 'btn-success');
+                        
+                        // Reset button after a delay
+                        setTimeout(function() {
+                            copyButton.innerHTML = originalText;
+                            copyButton.classList.replace('btn-success', 'btn-outline-secondary');
+                        }, 2000);
+                    })
+                    .catch(err => {
+                        // Error feedback
+                        console.error('Failed to copy:', err);
+                        copyButton.innerHTML = '<i class="fas fa-times me-1"></i>Failed';
+                        copyButton.classList.replace('btn-outline-secondary', 'btn-danger');
+                        
+                        // Reset button after a delay
+                        setTimeout(function() {
+                            copyButton.innerHTML = originalText;
+                            copyButton.classList.replace('btn-danger', 'btn-outline-secondary');
+                        }, 2000);
+                        
+                        alert('Failed to copy to clipboard. You may need to copy the text manually.');
+                    });
+            });
+        }
+        
+        // Cross-browser clipboard copy function
+        async function copyToClipboard(text) {
+            // Try the modern clipboard API first
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                return navigator.clipboard.writeText(text);
+            }
+            
+            // Fall back to the older execCommand method
+            const textArea = document.createElement('textarea');
+            textArea.value = text;
+            textArea.style.position = 'fixed';
+            textArea.style.left = '-999999px';
+            textArea.style.top = '-999999px';
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            
+            return new Promise((resolve, reject) => {
+                const successful = document.execCommand('copy');
+                document.body.removeChild(textArea);
+                
+                if (successful) {
+                    resolve();
                 } else {
-                    // Fallback for browsers that don't support clipboard API
-                    const textarea = document.createElement('textarea');
-                    textarea.value = text;
-                    textarea.setAttribute('readonly', '');
-                    textarea.style.position = 'absolute';
-                    textarea.style.left = '-9999px';
-                    document.body.appendChild(textarea);
-                    
-                    // Select and copy
-                    textarea.select();
-                    document.execCommand('copy');
-                    
-                    // Remove the textarea
-                    document.body.removeChild(textarea);
-                    
-                    // Show feedback
-                    const originalText = copyButton.innerHTML;
-                    copyButton.innerHTML = '<i class="fas fa-check me-1"></i>Copied!';
-                    copyButton.classList.replace('btn-outline-secondary', 'btn-success');
-                    
-                    // Reset button after a delay
-                    setTimeout(function() {
-                        copyButton.innerHTML = originalText;
-                        copyButton.classList.replace('btn-success', 'btn-outline-secondary');
-                    }, 2000);
+                    reject(new Error('execCommand failed'));
                 }
             });
         }

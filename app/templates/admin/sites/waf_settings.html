@@ -441,6 +441,182 @@ document.addEventListener('DOMContentLoaded', function() {
             return true;
         });
     }
+    
+    // Form validation logic
+    document.getElementById('wafForm').addEventListener('submit', function(event) {
+        // Reset validation state
+        let isValid = true;
+        let errorMessage = '';
+        
+        // Reset any previous validation feedback
+        const customRulesField = document.getElementById('custom_rules');
+        const disabledRuleIdsField = document.getElementById('disabled_rule_ids');
+        
+        if (customRulesField) {
+            customRulesField.classList.remove('is-invalid');
+        }
+        
+        if (disabledRuleIdsField) {
+            disabledRuleIdsField.classList.remove('is-invalid');
+        }
+        
+        // Validate paranoia level (if present and enabled)
+        const wafEnabledField = document.getElementById('waf_enabled');
+        const paranoiaLevelField = document.getElementById('paranoia_level');
+        
+        if (wafEnabledField && wafEnabledField.checked && paranoiaLevelField) {
+            const paranoiaLevel = parseInt(paranoiaLevelField.value);
+            
+            if (isNaN(paranoiaLevel) || paranoiaLevel < 1 || paranoiaLevel > 4) {
+                isValid = false;
+                errorMessage += 'Paranoia level should be between 1 and 4\n';
+                paranoiaLevelField.classList.add('is-invalid');
+            } else {
+                paranoiaLevelField.classList.remove('is-invalid');
+            }
+        }
+        
+        // Validate custom rules if provided (improved ModSecurity syntax check)
+        if (customRulesField && customRulesField.value.trim() !== '') {
+            const customRules = customRulesField.value.trim();
+            
+            // Check for unmatched quotes
+            const singleQuotes = (customRules.match(/'/g) || []).length;
+            const doubleQuotes = (customRules.match(/"/g) || []).length;
+            
+            if (singleQuotes % 2 !== 0) {
+                isValid = false;
+                errorMessage += 'Custom rules contain unmatched single quotes (\')\n';
+                customRulesField.classList.add('is-invalid');
+            }
+            
+            if (doubleQuotes % 2 !== 0) {
+                isValid = false;
+                errorMessage += 'Custom rules contain unmatched double quotes (")\n';
+                customRulesField.classList.add('is-invalid');
+            }
+            
+            // Check for basic ModSecurity rule structure
+            if (!customRules.includes('SecRule') && 
+                !customRules.includes('#') && 
+                !customRules.includes('SecAction') && 
+                !customRules.includes('SecMarker') && 
+                customRules.length > 10) {
+                // Not an error, just a warning
+                console.warn('Custom rules might not be in ModSecurity format. Make sure syntax is correct.');
+                
+                // Show a warning to the user
+                const warningEl = document.createElement('div');
+                warningEl.className = 'alert alert-warning mt-2';
+                warningEl.textContent = 'Warning: Your custom rules don\'t appear to contain ModSecurity directives (SecRule). Please verify the syntax.';
+                
+                // Only add the warning if it doesn't already exist
+                if (!customRulesField.nextElementSibling || !customRulesField.nextElementSibling.classList.contains('alert-warning')) {
+                    customRulesField.parentNode.insertBefore(warningEl, customRulesField.nextElementSibling);
+                }
+            }
+            
+            // Check for potential syntax issues
+            const lines = customRules.split('\n');
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i].trim();
+                if (line === '') continue;
+                if (line.startsWith('#')) continue; // Skip comments
+                
+                // Check for common ModSecurity syntax errors
+                if (line.includes('SecRule') && !line.includes(',') && !line.endsWith('\\')) {
+                    isValid = false;
+                    errorMessage += `Line ${i+1} appears to be a SecRule without actions (missing comma)\n`;
+                    customRulesField.classList.add('is-invalid');
+                }
+                
+                // Check for missing quotes in actions with spaces
+                if (line.includes('msg:') && !line.includes('msg:\'') && !line.includes('msg:"')) {
+                    isValid = false;
+                    errorMessage += `Line ${i+1} has 'msg:' without quotes. Messages require quotes.\n`;
+                    customRulesField.classList.add('is-invalid');
+                }
+                
+                // Check for unclosed line continuations
+                if (line.endsWith('\\') && i === lines.length - 1) {
+                    isValid = false;
+                    errorMessage += 'Last line ends with a continuation character (\\) but has no continuation\n';
+                    customRulesField.classList.add('is-invalid');
+                }
+            }
+        }
+        
+        // Validate disabled rule IDs (should be comma-separated numbers or ranges)
+        if (disabledRuleIdsField && disabledRuleIdsField.value.trim() !== '') {
+            const disabledIds = disabledRuleIdsField.value.trim();
+            
+            // Should be comma-separated numbers or ranges (e.g., 123, 456-789)
+            const validFormat = /^(\d+(-\d+)?)(,\s*\d+(-\d+)?)*$/.test(disabledIds);
+            
+            if (!validFormat) {
+                isValid = false;
+                errorMessage += 'Disabled rule IDs should be comma-separated numbers or ranges (e.g., 123, 456-789)\n';
+                disabledRuleIdsField.classList.add('is-invalid');
+            } else {
+                disabledRuleIdsField.classList.remove('is-invalid');
+                
+                // Check that ranges are valid (start < end)
+                const ranges = disabledIds.split(',');
+                for (const range of ranges) {
+                    if (range.includes('-')) {
+                        const [start, end] = range.split('-').map(x => parseInt(x.trim()));
+                        if (start >= end) {
+                            isValid = false;
+                            errorMessage += `Invalid range: ${start}-${end} (start must be less than end)\n`;
+                            disabledRuleIdsField.classList.add('is-invalid');
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Show error message and prevent submission if validation fails
+        if (!isValid) {
+            event.preventDefault();
+            alert('Please fix the following errors:\n\n' + errorMessage);
+        }
+    });
+    
+    // Toggle WAF settings visibility based on WAF enabled checkbox
+    const wafEnabledCheckbox = document.getElementById('waf_enabled');
+    const wafSettingsPanel = document.getElementById('wafSettingsPanel');
+    
+    function toggleWafSettings() {
+        if (wafEnabledCheckbox.checked) {
+            wafSettingsPanel.classList.remove('d-none');
+        } else {
+            wafSettingsPanel.classList.add('d-none');
+        }
+    }
+    
+    if (wafEnabledCheckbox && wafSettingsPanel) {
+        wafEnabledCheckbox.addEventListener('change', toggleWafSettings);
+        toggleWafSettings(); // Initial state
+    }
+    
+    // Initialize ModSecurity rule editor with syntax highlighting if available
+    const customRulesField = document.getElementById('custom_rules');
+    if (customRulesField && typeof CodeMirror !== 'undefined') {
+        const editor = CodeMirror.fromTextArea(customRulesField, {
+            mode: 'nginx',
+            theme: 'monokai',
+            lineNumbers: true,
+            lineWrapping: true,
+            matchBrackets: true,
+            autoCloseBrackets: true,
+            extraKeys: {"Tab": "indentMore", "Shift-Tab": "indentLess"}
+        });
+        
+        // Sync back to textarea on submit
+        document.getElementById('wafForm').addEventListener('submit', function() {
+            editor.save();
+        });
+    }
 });
 </script>
 {% endblock %}

@@ -612,6 +612,62 @@ def system_check():
         else:
             click.echo(click.style(f"  ✗ {desc} missing ({dir_name}/)", fg="red"))
     
+    # Enhanced check for nginx_templates directory
+    templates_dir = app.config.get('NGINX_TEMPLATES_DIR', 'nginx_templates')
+    if os.path.isdir(templates_dir):
+        click.echo("\nNginx Templates:")
+        
+        # Check for crucial template files
+        essential_templates = ['http.conf', 'https.conf']
+        missing_templates = []
+        
+        for template in essential_templates:
+            template_path = os.path.join(templates_dir, template)
+            if not os.path.isfile(template_path):
+                missing_templates.append(template)
+                continue
+            
+            # Check file permissions
+            try:
+                mode = os.stat(template_path).st_mode
+                is_readable = bool(mode & 0o400)  # Check if file is readable
+                
+                if not is_readable:
+                    click.echo(click.style(f"  ⚠ Template {template} has insufficient permissions", fg="yellow"))
+                    continue
+                
+                # Basic template validation
+                try:
+                    with open(template_path, 'r') as f:
+                        content = f.read()
+                        
+                    # Check for basic required directives in templates
+                    required_directives = ['server_name', 'listen']
+                    missing_directives = [d for d in required_directives if d not in content]
+                    
+                    # Check for unmatched brackets
+                    open_braces = content.count('{')
+                    close_braces = content.count('}')
+                    
+                    if missing_directives:
+                        click.echo(click.style(f"  ⚠ Template {template} is missing essential directives: {', '.join(missing_directives)}", fg="yellow"))
+                    elif open_braces != close_braces:
+                        click.echo(click.style(f"  ⚠ Template {template} has unmatched braces ({open_braces} opening vs {close_braces} closing)", fg="yellow"))
+                    else:
+                        click.echo(click.style(f"  ✓ Template {template} is valid", fg="green"))
+                        
+                except Exception as e:
+                    click.echo(click.style(f"  ⚠ Error validating template {template}: {str(e)}", fg="yellow"))
+            except Exception as e:
+                click.echo(click.style(f"  ⚠ Error checking template {template} permissions: {str(e)}", fg="yellow"))
+        
+        if missing_templates:
+            click.echo(click.style(f"  ✗ Missing essential templates: {', '.join(missing_templates)}", fg="red"))
+        
+        # Check total number of templates
+        template_files = [f for f in os.listdir(templates_dir) if f.endswith('.conf')]
+        click.echo(f"  • Total templates: {len(template_files)}")
+    
     # Check users
     click.echo("\nUsers:")
     admin_count = User.query.filter_by(role='admin').count()

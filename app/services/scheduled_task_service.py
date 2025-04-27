@@ -1034,17 +1034,49 @@ def check_ssl_certificates():
                 # Update days_remaining in the database
                 cert.days_remaining = days_remaining
                 
-                # Check if it's expiring soon (less than 30 days)
-                if days_remaining <= 30:
-                    if days_remaining <= 7:
-                        cert.status = 'expiring_soon'
+                # More granular status levels for certificate expiration
+                if days_remaining <= 3:
+                    cert.status = 'critical'
                     expiring_soon.append({
                         'id': cert.id,
                         'domain': cert.domain,
                         'days_remaining': days_remaining,
                         'site_id': cert.site_id,
-                        'node_id': cert.node_id
+                        'node_id': cert.node_id,
+                        'priority': 'critical'
                     })
+                elif days_remaining <= 7:
+                    cert.status = 'high_risk'
+                    expiring_soon.append({
+                        'id': cert.id,
+                        'domain': cert.domain,
+                        'days_remaining': days_remaining,
+                        'site_id': cert.site_id,
+                        'node_id': cert.node_id,
+                        'priority': 'high'
+                    })
+                elif days_remaining <= 14:
+                    cert.status = 'medium_risk'
+                    expiring_soon.append({
+                        'id': cert.id,
+                        'domain': cert.domain,
+                        'days_remaining': days_remaining,
+                        'site_id': cert.site_id,
+                        'node_id': cert.node_id,
+                        'priority': 'medium'
+                    })
+                elif days_remaining <= 30:
+                    cert.status = 'expiring_soon'
+                    expiring_soon.append({
+                        'id': cert.id,
+                        'domain': cert.domain,
+                        'days_remaining': days_remaining,
+                        'site_id': cert.site_id,
+                        'node_id': cert.node_id,
+                        'priority': 'low'
+                    })
+                else:
+                    cert.status = 'valid'
             elif cert.valid_until and cert.valid_until <= now:
                 # Certificate has expired
                 cert.status = 'expired'
@@ -1055,6 +1087,7 @@ def check_ssl_certificates():
                     'days_remaining': 0,
                     'site_id': cert.site_id,
                     'node_id': cert.node_id,
+                    'priority': 'critical',
                     'expired': True
                 })
         
@@ -1063,12 +1096,20 @@ def check_ssl_certificates():
         
         # Send notifications for expiring certificates
         if expiring_soon:
-            # Log the expiring certificates
+            # Log the expiring certificates with more detailed information
+            critical_count = sum(1 for cert in expiring_soon if cert.get('priority') == 'critical' or cert.get('expired', False))
+            high_count = sum(1 for cert in expiring_soon if cert.get('priority') == 'high')
+            medium_count = sum(1 for cert in expiring_soon if cert.get('priority') == 'medium')
+            low_count = sum(1 for cert in expiring_soon if cert.get('priority') == 'low')
+            
+            log_message = f"Found {len(expiring_soon)} certificates requiring attention: "
+            log_message += f"{critical_count} critical, {high_count} high, {medium_count} medium, {low_count} low priority"
+            
             log_activity(
-                category='warning',
+                category='warning' if critical_count > 0 else 'info',
                 action='ssl_expiry_check',
                 resource_type='ssl',
-                details=f"Found {len(expiring_soon)} certificates expiring soon or already expired"
+                details=log_message
             )
             
             # Notify admins if notifications are enabled
