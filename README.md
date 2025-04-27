@@ -7,6 +7,8 @@ A centralized proxy management system for distributed proxy nodes, providing rob
 ![Flask](https://img.shields.io/badge/flask-2.3+-green)
 ![License](https://img.shields.io/badge/license-MIT-yellow)
 
+> **IMPORTANT**: This application is designed to be used exclusively via Docker Compose. Running the application outside of Docker Compose is not supported and may lead to unexpected behavior.
+
 ## Overview
 
 Reverse Proxy Manager is a comprehensive solution for managing multiple proxy nodes from a centralized interface. It simplifies deployment, configuration, and monitoring of proxy infrastructure at scale, making it ideal for content delivery networks, load balancing, and distributed web hosting environments.
@@ -29,6 +31,7 @@ The system supports multiple reverse proxy types (Nginx, Caddy, and Traefik), al
 - **Real-time Monitoring**: Live statistics for nodes including CPU, memory, connections
 - **Deployment Tracking**: Comprehensive logs for all deployments
 - **Automatic Node Discovery**: Add and manage nodes via YAML configuration
+- **Rate Limiting**: Configurable request rate limiting with memcached storage
 
 ## Screenshots
 
@@ -36,7 +39,7 @@ The system supports multiple reverse proxy types (Nginx, Caddy, and Traefik), al
 
 ## Docker Setup
 
-The application can be run using Docker in both development and production environments.
+The application must be run using Docker Compose in both development and production environments.
 
 ### Prerequisites
 
@@ -67,7 +70,7 @@ The application can be run using Docker in both development and production envir
    docker-compose up -d app-prod
    ```
 
-4. Access the application at http://localhost:5000
+4. Access the application at http://localhost:5002
 
 ### Environment Configuration
 
@@ -78,16 +81,17 @@ Example `.env` file:
 FLASK_ENV=development
 ADMIN_USERNAME=admin
 ADMIN_EMAIL=admin@example.com
-ADMIN_PASSWORD=secure_password
+ADMIN_PASSWORD=Admin123!  # Must contain uppercase, lowercase, and digits
 SECRET_KEY=your_secure_secret_key
 AUTO_NODE_DISCOVERY=true
 NODES_YAML_PATH=/path/to/custom/nodes.yaml
 AUTO_ACTIVATE_DISCOVERED_NODES=true
+RATELIMIT_STORAGE_URI=memcached://memcached:11211
 ```
 
 ### Management Commands
 
-The application includes various management commands that can be run through the `manage.py` script:
+The application includes various management commands that can be run through the `manage.py` script within Docker:
 
 ```bash
 # Database Management
@@ -372,7 +376,17 @@ Users can add custom Nginx directives to their site configurations:
 
 ## Development
 
-### Local Development Setup
+### Docker Development (Recommended)
+
+For development, the application code is mounted as a volume, so code changes are reflected immediately:
+
+```bash
+docker-compose up app-dev
+```
+
+### Local Development Setup (Not Recommended)
+
+While the application is designed to run via Docker Compose, you can set up a local development environment for testing specific components:
 
 1. Create a virtual environment:
    ```bash
@@ -387,27 +401,21 @@ Users can add custom Nginx directives to their site configurations:
 
 3. Initialize the database:
    ```bash
-   ./manage.py init-db
+   python manage.py init-db
    ```
 
 4. Run the application:
    ```bash
-   ./run.py
+   python run.py
    ```
 
 5. Access the application at http://localhost:5000
 
-### Docker Development
-
-For development with Docker, the application code is mounted as a volume, so code changes are reflected immediately:
-
-```bash
-docker-compose up app-dev
-```
+Note: Some features that depend on Docker services (like memcached for rate limiting) may not work correctly in this setup.
 
 ## Production Deployment
 
-For production deployment, use the production service:
+For production deployment, use the production service with Docker Compose:
 
 ```bash
 docker-compose up -d app-prod
@@ -424,11 +432,12 @@ FLASK_ENV=production
 DEBUG=False
 LOG_LEVEL=INFO
 PROXY_FIX=True  # If behind a reverse proxy
+RATELIMIT_STORAGE_URI=memcached://memcached:11211
 ```
 
 ### Security Considerations
 
-- Use strong passwords for admin accounts
+- Use strong passwords for admin accounts (must contain uppercase, lowercase, and digits)
 - Store SSH keys securely
 - Keep API tokens with minimal required permissions
 - Regular updates and security patches
@@ -443,27 +452,13 @@ When updating the application, follow these steps:
    git pull
    ```
 
-2. Apply database migrations:
-   ```bash
-   flask db upgrade
-   ```
-
-3. Restart the application:
+2. Rebuild and restart containers:
    ```bash
    docker-compose down
-   docker-compose up -d app-prod
+   docker-compose up -d --build
    ```
 
-## API Access
-
-The application provides a RESTful API for programmatic access to its functionality:
-
-- **Authentication**: API key or JWT based authentication
-- **Site Management**: Create, read, update, and delete sites
-- **WAF Configuration**: Configure WAF settings for sites
-- **Deployment**: Deploy configurations to nodes
-
-API documentation is available at `/api/docs` when in development mode.
+This process will automatically apply database migrations and update dependencies.
 
 ## Troubleshooting
 
@@ -473,10 +468,14 @@ API documentation is available at `/api/docs` when in development mode.
 - **Nginx Configuration Errors**: Validate custom configurations before deployment
 - **Certificate Issuance Failures**: Verify DNS provider credentials and domain ownership
 - **Database Errors**: Ensure database migrations are up to date
+- **Rate Limiting Issues**: Verify memcached service is running
 
 ### Logs
 
-- Application logs are available in the Docker container logs
+- Application logs are available in the Docker container logs:
+  ```bash
+  docker-compose logs app-dev
+  ```
 - Deployment logs are stored in the database and viewable in the admin interface
 - System logs can be accessed from the admin dashboard
 
@@ -530,6 +529,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [Flask](https://flask.palletsprojects.com/) for the web framework
 - [Let's Encrypt](https://letsencrypt.org/) for free SSL certificates
 - [ModSecurity](https://modsecurity.org/) for WAF capabilities
+- [Memcached](https://memcached.org/) for rate limiting storage
+- [Docker](https://www.docker.com/) for containerization
 - [All contributors](https://github.com/fabriziosalmi/reverse-proxy-manager/graphs/contributors) who have helped with the project
 
 ## Important Note
