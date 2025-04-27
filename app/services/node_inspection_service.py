@@ -6,7 +6,7 @@ import tempfile
 import multiprocessing
 from flask import current_app
 from datetime import datetime
-from app.models.models import db, Site, Node, SiteNode, DeploymentLog
+from app.models.models import db, Site, Node, SiteNode, DeploymentLog, SystemLog
 from app.services.logger_service import log_activity
 
 class NginxConfigParser:
@@ -922,3 +922,134 @@ class NodeInspectionService:
                 "message": str(e),
                 "timestamp": datetime.utcnow().isoformat()
             }
+
+# Add standalone functions for node connectivity and performance checks
+def check_node_connectivity(node):
+    """
+    Check if a node is reachable via SSH
+    
+    Args:
+        node: Node object to check
+        
+    Returns:
+        bool: True if node is reachable, False otherwise
+    """
+    try:
+        # Create SSH client
+        ssh_client = paramiko.SSHClient()
+        ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        
+        # Set a shorter timeout for connectivity check
+        if node.ssh_key_path:
+            ssh_client.connect(
+                hostname=node.ip_address,
+                port=node.ssh_port,
+                username=node.ssh_user,
+                key_filename=node.ssh_key_path,
+                timeout=5
+            )
+        else:
+            ssh_client.connect(
+                hostname=node.ip_address,
+                port=node.ssh_port,
+                username=node.ssh_user,
+                password=node.ssh_password,
+                timeout=5
+            )
+        
+        # If we get here, the connection was successful
+        ssh_client.close()
+        return True
+        
+    except (paramiko.SSHException, socket.timeout, socket.error, Exception) as e:
+        # Log the error
+        log_activity(
+            category='error',
+            action='node_connectivity_check',
+            resource_type='node',
+            resource_id=node.id,
+            details=f"Node {node.name} is unreachable: {str(e)}"
+        )
+        return False
+
+def check_node_performance(node):
+    """
+    Check the performance metrics of a node
+    
+    Args:
+        node: Node object to check
+        
+    Returns:
+        dict: Dictionary with performance metrics
+    """
+    try:
+        # Create SSH client
+        ssh_client = paramiko.SSHClient()
+        ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        
+        # Connect to the node
+        if node.ssh_key_path:
+            ssh_client.connect(
+                hostname=node.ip_address,
+                port=node.ssh_port,
+                username=node.ssh_user,
+                key_filename=node.ssh_key_path,
+                timeout=10
+            )
+        else:
+            ssh_client.connect(
+                hostname=node.ip_address,
+                port=node.ssh_port,
+                username=node.ssh_user,
+                password=node.ssh_password,
+                timeout=10
+            )
+        
+        # Get CPU usage
+        stdin, stdout, stderr = ssh_client.exec_command("cat /proc/loadavg | awk '{print $1}'")
+        cpu_load = stdout.read().decode('utf-8').strip()
+        try:
+            cpu_usage = float(cpu_load) * 100 / multiprocessing.cpu_count() if hasattr(multiprocessing, 'cpu_count') else float(cpu_load) * 25
+        except (ValueError, ZeroDivisionError):
+            cpu_usage = 0
+        
+        # Get memory usage
+        stdin, stdout, stderr = ssh_client.exec_command("free | grep Mem | awk '{print $3/$2 * 100.0}'")
+        memory_output = stdout.read().decode('utf-8').strip()
+        try:
+            memory_usage = float(memory_output)
+        except ValueError:
+            memory_usage = 0
+        
+        # Get disk usage
+        stdin, stdout, stderr = ssh_client.exec_command("df / | tail -n 1 | awk '{print $5}' | sed 's/%//'")
+        disk_output = stdout.read().decode('utf-8').strip()
+        try:
+            disk_usage = float(disk_output)
+        except ValueError:
+            disk_usage = 0
+        
+        # Close the connection
+        ssh_client.close()
+        
+        return {
+            'cpu_usage': cpu_usage,
+            'memory_usage': memory_usage,
+            'disk_usage': disk_usage
+        }
+        
+    except Exception as e:
+        # Log the error
+        log_activity(
+            category='error',
+            action='node_performance_check',
+            resource_type='node',
+            resource_id=node.id,
+            details=f"Error checking node performance: {str(e)}"
+        )
+        return {
+            'cpu_usage': 0,
+            'memory_usage': 0,
+            'disk_usage': 0,
+            'error': str(e)
+        }

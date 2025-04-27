@@ -1387,3 +1387,155 @@ def restore_from_backup(backup_file):
             )
             
             return False, error_msg
+
+import threading
+import time
+import logging
+from datetime import datetime, timedelta
+from flask import current_app
+
+class ScheduledTaskService:
+    """Service for running scheduled tasks at regular intervals"""
+    
+    # Flag to control when to stop the scheduler thread
+    _should_stop = False
+    
+    # Thread object for the scheduler
+    _scheduler_thread = None
+    
+    # Interval in seconds between checking tasks
+    _check_interval = 60  # Check every minute
+    
+    # Registered tasks with their intervals and last run times
+    _tasks = []
+    
+    @classmethod
+    def register_task(cls, name, func, interval_seconds, initial_delay=0):
+        """Register a new task to be executed periodically
+        
+        Args:
+            name: Name of the task for identification
+            func: Function to execute
+            interval_seconds: Interval between executions in seconds
+            initial_delay: Delay before first execution in seconds
+        """
+        # Calculate next run time based on current time and initial delay
+        next_run = datetime.now() + timedelta(seconds=initial_delay)
+        
+        cls._tasks.append({
+            'name': name,
+            'func': func,
+            'interval': interval_seconds,
+            'next_run': next_run,
+            'last_run': None,
+            'last_status': None,
+            'error_count': 0
+        })
+        
+        logging.info(f"Registered scheduled task: {name} with interval {interval_seconds}s")
+    
+    @classmethod
+    def start_scheduler(cls):
+        """Start the scheduler in a background thread"""
+        if cls._scheduler_thread is not None and cls._scheduler_thread.is_alive():
+            logging.warning("Scheduler is already running")
+            return
+        
+        cls._should_stop = False
+        cls._scheduler_thread = threading.Thread(target=cls._scheduler_loop, daemon=True)
+        cls._scheduler_thread.start()
+        
+        logging.info("Scheduler started")
+    
+    @classmethod
+    def stop_scheduler(cls):
+        """Stop the scheduler thread"""
+        cls._should_stop = True
+        if cls._scheduler_thread and cls._scheduler_thread.is_alive():
+            cls._scheduler_thread.join(timeout=5)
+            logging.info("Scheduler stopped")
+    
+    @classmethod
+    def _scheduler_loop(cls):
+        """Main scheduler loop that runs in a background thread"""
+        while not cls._should_stop:
+            now = datetime.now()
+            
+            for task in cls._tasks:
+                if now >= task['next_run']:
+                    # Time to run this task
+                    task_name = task['name']
+                    logging.debug(f"Running scheduled task: {task_name}")
+                    
+                    try:
+                        task['func']()
+                        task['last_status'] = 'success'
+                        task['error_count'] = 0
+                    except Exception as e:
+                        task['last_status'] = f"error: {str(e)}"
+                        task['error_count'] += 1
+                        logging.error(f"Error in scheduled task {task_name}: {str(e)}")
+                    
+                    # Update task timing
+                    task['last_run'] = now
+                    task['next_run'] = now + timedelta(seconds=task['interval'])
+            
+            # Sleep until next check
+            time.sleep(cls._check_interval)
+    
+    @classmethod
+    def get_tasks_status(cls):
+        """Get status of all registered tasks
+        
+        Returns:
+            list: List of task status dictionaries
+        """
+        return [
+            {
+                'name': task['name'],
+                'interval': task['interval'],
+                'next_run': task['next_run'].isoformat() if task['next_run'] else None,
+                'last_run': task['last_run'].isoformat() if task['last_run'] else None,
+                'last_status': task['last_status'],
+                'error_count': task['error_count']
+            }
+            for task in cls._tasks
+        ]
+
+# Register essential scheduled tasks
+def initialize_scheduled_tasks(app):
+    """Initialize scheduled tasks for the application
+    
+    Args:
+        app: Flask application instance
+    """
+    with app.app_context():
+        # Register GeoIP update task - check daily if auto-update is enabled
+        from app.services.geoip_service import check_geoip_updates
+        ScheduledTaskService.register_task(
+            name="GeoIP Database Update",
+            func=check_geoip_updates,
+            interval_seconds=24 * 60 * 60,  # Once per day
+            initial_delay=300  # 5 minutes after startup
+        )
+        
+        # SSL certificate expiry check - runs every 12 hours
+        from app.services.ssl_certificate_service import SSLCertificateService
+        ScheduledTaskService.register_task(
+            name="SSL Certificate Expiry Check",
+            func=SSLCertificateService.certificate_health_check,
+            interval_seconds=12 * 60 * 60,  # Every 12 hours
+            initial_delay=600  # 10 minutes after startup
+        )
+        
+        # Node health check - runs every hour
+        from app.services.node_inspection_service import NodeInspectionService
+        ScheduledTaskService.register_task(
+            name="Node Health Check",
+            func=NodeInspectionService.health_check_all_nodes,
+            interval_seconds=60 * 60,  # Every hour
+            initial_delay=120  # 2 minutes after startup
+        )
+        
+        # Start the scheduler
+        ScheduledTaskService.start_scheduler()

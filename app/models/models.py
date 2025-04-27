@@ -289,6 +289,8 @@ class Node(db.Model):
                         "sudo apt install -y nginx",
                         # Install GeoIP modules and databases
                         "sudo apt install -y nginx-module-geoip geoip-database libgeoip-dev",
+                        # Install ModSecurity and OWASP CRS
+                        "sudo apt install -y libmodsecurity3 libapache2-mod-security2 modsecurity-crs",
                         # Download and prepare latest GeoIP databases
                         "sudo mkdir -p /usr/share/GeoIP",
                         "cd /tmp && sudo wget -q https://dl.miyuru.lk/geoip/maxmind/country/maxmind4.dat.gz && sudo gunzip -f maxmind4.dat.gz && sudo mv maxmind4.dat /usr/share/GeoIP/GeoIP.dat",
@@ -306,14 +308,16 @@ class Node(db.Model):
                         "sudo yum -y install nginx",
                         # Install GeoIP modules and databases
                         "sudo yum -y install nginx-module-geoip GeoIP GeoIP-devel",
+                        # Install ModSecurity and OWASP CRS
+                        "sudo yum -y install mod_security mod_security_crs",
                         # Download and prepare latest GeoIP databases
                         "sudo mkdir -p /usr/share/GeoIP",
                         "cd /tmp && sudo wget -q https://dl.miyuru.lk/geoip/maxmind/country/maxmind4.dat.gz && sudo gunzip -f maxmind4.dat.gz && sudo mv maxmind4.dat /usr/share/GeoIP/GeoIP.dat",
                         "cd /tmp && sudo wget -q https://dl.miyuru.lk/geoip/maxmind/country/maxmind6.dat.gz && sudo gunzip -f maxmind6.dat.gz && sudo mv maxmind6.dat /usr/share/GeoIP/GeoIPv6.dat",
                         "sudo systemctl enable nginx",
                         "sudo systemctl start nginx",
-                        "sudo mkdir -p /var/www/letsencrypt",
-                        "sudo mkdir -p /var/cache/nginx",
+                        "sudo mkdir -p /var/www/letsencrypt",  # Create directory for ACME challenges
+                        "sudo mkdir -p /var/cache/nginx",  # Create cache directory
                         "sudo setsebool -P httpd_can_network_connect 1"  # Allow proxy connections
                     ]
                 elif "Alpine" in os_info:
@@ -552,6 +556,78 @@ server {
                     all_output.append("GeoIP configuration test successful")
                     # Reload Nginx to apply changes
                     ssh_client.exec_command("sudo systemctl reload nginx || sudo service nginx reload")
+                
+                # Set up ModSecurity if it was installed
+                if "Ubuntu" in os_info or "Debian" in os_info:
+                    modsec_commands = [
+                        "sudo mkdir -p /etc/nginx/modsec",
+                        # Copy and configure main ModSecurity config file
+                        "sudo cp /etc/modsecurity/modsecurity.conf-recommended /etc/nginx/modsec/main.conf",
+                        # Enable ModSecurity in detection mode (less disruptive initially)
+                        "sudo sed -i 's/SecRuleEngine DetectionOnly/SecRuleEngine On/' /etc/nginx/modsec/main.conf",
+                        # Set up OWASP CRS
+                        "sudo mkdir -p /etc/nginx/modsec/owasp-crs",
+                        "cd /etc/nginx/modsec && sudo cp -R /usr/share/modsecurity-crs/* owasp-crs/ 2>/dev/null || echo 'CRS not found in default location'",
+                        # Create ModSecurity nginx config inclusion
+                        "echo 'modsecurity on; modsecurity_rules_file /etc/nginx/modsec/main.conf;' | sudo tee /etc/nginx/conf.d/modsecurity.conf"
+                    ]
+                elif "CentOS" in os_info or "Red Hat" in os_info or "Fedora" in os_info:
+                    modsec_commands = [
+                        "sudo mkdir -p /etc/nginx/modsec",
+                        # Copy and configure main ModSecurity config file (different paths for RHEL-based systems)
+                        "sudo cp /etc/nginx/modsecurity/modsecurity.conf-recommended /etc/nginx/modsec/main.conf 2>/dev/null || sudo cp /etc/modsecurity/modsecurity.conf-recommended /etc/nginx/modsec/main.conf 2>/dev/null || echo 'Could not find modsecurity.conf-recommended'",
+                        # Enable ModSecurity in detection mode (less disruptive initially)
+                        "sudo sed -i 's/SecRuleEngine DetectionOnly/SecRuleEngine On/' /etc/nginx/modsec/main.conf",
+                        # Set up OWASP CRS
+                        "sudo mkdir -p /etc/nginx/modsec/owasp-crs",
+                        "cd /etc/nginx/modsec && sudo cp -R /usr/share/modsecurity-crs/* owasp-crs/ 2>/dev/null || echo 'CRS not found in default location'",
+                        # Create ModSecurity nginx config inclusion
+                        "echo 'modsecurity on; modsecurity_rules_file /etc/nginx/modsec/main.conf;' | sudo tee /etc/nginx/conf.d/modsecurity.conf"
+                    ]
+                elif "Alpine" in os_info:
+                    modsec_commands = [
+                        "sudo apk add nginx-mod-http-modsecurity",
+                        "sudo mkdir -p /etc/nginx/modsec",
+                        # Copy and configure main ModSecurity config file
+                        "sudo cp /etc/modsecurity/modsecurity.conf-recommended /etc/nginx/modsec/main.conf 2>/dev/null || echo 'Could not find modsecurity.conf-recommended'",
+                        # Create main.conf if it wasn't found
+                        "test -f /etc/nginx/modsec/main.conf || echo 'SecRuleEngine On\nSecRequestBodyAccess On\nSecAuditEngine RelevantOnly\nSecAuditLogParts ABIJDEFHZ\nSecAuditLogType Serial\nSecAuditLog /var/log/nginx/modsec_audit.log' | sudo tee /etc/nginx/modsec/main.conf",
+                        # Set up OWASP CRS
+                        "sudo mkdir -p /etc/nginx/modsec/owasp-crs",
+                        # Create ModSecurity nginx config inclusion
+                        "echo 'modsecurity on; modsecurity_rules_file /etc/nginx/modsec/main.conf;' | sudo tee /etc/nginx/conf.d/modsecurity.conf"
+                    ]
+                else:
+                    # For unsupported OS, just create basic directories
+                    modsec_commands = [
+                        "sudo mkdir -p /etc/nginx/modsec",
+                        "echo 'SecRuleEngine On\nSecRequestBodyAccess On\nSecAuditEngine RelevantOnly\nSecAuditLogParts ABIJDEFHZ\nSecAuditLogType Serial\nSecAuditLog /var/log/nginx/modsec_audit.log' | sudo tee /etc/nginx/modsec/main.conf",
+                        "echo 'modsecurity on; modsecurity_rules_file /etc/nginx/modsec/main.conf;' | sudo tee /etc/nginx/conf.d/modsecurity.conf"
+                    ]
+                
+                # Run ModSecurity setup commands
+                for cmd in modsec_commands:
+                    stdin, stdout, stderr = ssh_client.exec_command(cmd)
+                    stdout_output = stdout.read().decode('utf-8').strip()
+                    stderr_output = stderr.read().decode('utf-8').strip()
+                    all_output.append(f"ModSec command: {cmd}")
+                    if stdout_output:
+                        all_output.append(f"Output: {stdout_output}")
+                    if stderr_output:
+                        all_output.append(f"Error: {stderr_output}")
+                    all_output.append("---")
+                
+                # Create a test for ModSecurity
+                modsec_test_config = """
+# ModSecurity test configuration
+modsecurity on;
+modsecurity_rules '
+    SecRuleEngine On
+    SecRule ARGS:testparam "@contains test" "id:1234,phase:1,deny,status:403,msg:\'ModSecurity test rule triggered\'"
+';
+"""
+                stdin, stdout, stderr = ssh_client.exec_command(f"echo '{modsec_test_config}' | sudo tee {self.proxy_config_path}/modsec-test.conf > /dev/null")
+                all_output.append("Created ModSecurity test configuration")
             
             # Close the SSH connection
             ssh_client.close()

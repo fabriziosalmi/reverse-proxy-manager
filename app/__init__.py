@@ -68,6 +68,10 @@ def create_app(config_name="default"):
     from app.controllers.api import api as api_blueprint
     app.register_blueprint(api_blueprint, url_prefix='/api')
     
+    # Register GeoIP blueprint
+    from app.services.geoip_service import geoip_bp
+    app.register_blueprint(geoip_bp)
+    
     # Initialize auto node discovery if enabled
     with app.app_context():
         if app.config.get('AUTO_NODE_DISCOVERY', False):
@@ -88,6 +92,14 @@ def create_app(config_name="default"):
                 app.logger.info(f"Node discovery results: {added} added, {updated} updated, {failed} failed")
                 for msg in messages:
                     app.logger.debug(f"Node discovery: {msg}")
+    
+    # Initialize configuration service
+    from app.services.configuration_service import ConfigurationService
+    ConfigurationService.initialize()
+    
+    # Initialize our scheduled task service for automated GeoIP updates and SSL checks
+    from app.services.scheduled_task_service import initialize_scheduled_tasks
+    initialize_scheduled_tasks(app)
     
     # Route for the index page
     @app.route('/')

@@ -507,3 +507,565 @@ class ContainerService:
             
             # Re-raise the exception
             raise
+
+    @staticmethod
+    def start_container(node, user_id=None):
+        """
+        Start an existing container for a node
+        
+        Args:
+            node: Node object
+            user_id: Optional user ID for activity logging
+            
+        Returns:
+            dict: Result of container start operation
+        """
+        if not node.is_container_node:
+            return {
+                'success': False,
+                'message': 'Not a container node'
+            }
+            
+        docker_client = ContainerService.get_docker_client(node)
+        
+        if not docker_client:
+            return {
+                'success': False,
+                'message': 'Failed to connect to Docker'
+            }
+            
+        try:
+            if isinstance(docker_client, dict) and docker_client.get('is_ssh_tunnel'):
+                # Using SSH tunnel
+                ssh_client = docker_client['ssh_client']
+                
+                # Check if container exists
+                container_name = node.container_name
+                stdin, stdout, stderr = ssh_client.exec_command(f"docker ps -a --filter name=^/{container_name}$ --format '{{{{.Status}}}}'")
+                container_status = stdout.read().decode('utf-8').strip()
+                
+                if not container_status:
+                    ssh_client.close()
+                    return {
+                        'success': False,
+                        'message': 'Container does not exist'
+                    }
+                    
+                # Start the container if it's not already running
+                if not container_status.startswith('Up'):
+                    stdin, stdout, stderr = ssh_client.exec_command(f"docker start {container_name}")
+                    exit_code = stdout.channel.recv_exit_status()
+                    
+                    if exit_code != 0:
+                        error_msg = stderr.read().decode('utf-8')
+                        ssh_client.close()
+                        return {
+                            'success': False,
+                            'message': f"Failed to start container: {error_msg}"
+                        }
+                    
+                    # Log the container start
+                    log_activity(
+                        'info',
+                        f"Started container for node {node.name}",
+                        'node',
+                        node.id,
+                        user_id=user_id
+                    )
+                    
+                ssh_client.close()
+                
+                return {
+                    'success': True,
+                    'message': 'Container started successfully'
+                }
+            else:
+                # Direct Docker client connection
+                try:
+                    container = docker_client.containers.get(node.container_name)
+                    
+                    if container.status != 'running':
+                        container.start()
+                        
+                        # Log the container start
+                        log_activity(
+                            'info',
+                            f"Started container for node {node.name}",
+                            'node',
+                            node.id,
+                            user_id=user_id
+                        )
+                    
+                    return {
+                        'success': True,
+                        'message': 'Container started successfully'
+                    }
+                except docker.errors.NotFound:
+                    return {
+                        'success': False,
+                        'message': 'Container does not exist'
+                    }
+                except Exception as e:
+                    return {
+                        'success': False,
+                        'message': f"Error starting container: {str(e)}"
+                    }
+                    
+        except Exception as e:
+            if isinstance(docker_client, dict) and docker_client.get('is_ssh_tunnel'):
+                docker_client['ssh_client'].close()
+                
+            error_msg = f"Error starting container: {str(e)}"
+            
+            log_activity(
+                'error',
+                error_msg,
+                'node',
+                node.id,
+                user_id=user_id
+            )
+            
+            return {
+                'success': False,
+                'message': error_msg
+            }
+    
+    @staticmethod
+    def stop_container(node, user_id=None):
+        """
+        Stop a running container for a node
+        
+        Args:
+            node: Node object
+            user_id: Optional user ID for activity logging
+            
+        Returns:
+            dict: Result of container stop operation
+        """
+        if not node.is_container_node:
+            return {
+                'success': False,
+                'message': 'Not a container node'
+            }
+            
+        docker_client = ContainerService.get_docker_client(node)
+        
+        if not docker_client:
+            return {
+                'success': False,
+                'message': 'Failed to connect to Docker'
+            }
+            
+        try:
+            if isinstance(docker_client, dict) and docker_client.get('is_ssh_tunnel'):
+                # Using SSH tunnel
+                ssh_client = docker_client['ssh_client']
+                
+                # Check if container exists and is running
+                container_name = node.container_name
+                stdin, stdout, stderr = ssh_client.exec_command(f"docker ps --filter name=^/{container_name}$ --format '{{{{.Status}}}}'")
+                container_status = stdout.read().decode('utf-8').strip()
+                
+                if not container_status:
+                    ssh_client.close()
+                    return {
+                        'success': True,
+                        'message': 'Container is not running'
+                    }
+                    
+                # Stop the container
+                stdin, stdout, stderr = ssh_client.exec_command(f"docker stop {container_name}")
+                exit_code = stdout.channel.recv_exit_status()
+                
+                if exit_code != 0:
+                    error_msg = stderr.read().decode('utf-8')
+                    ssh_client.close()
+                    return {
+                        'success': False,
+                        'message': f"Failed to stop container: {error_msg}"
+                    }
+                
+                # Log the container stop
+                log_activity(
+                    'info',
+                    f"Stopped container for node {node.name}",
+                    'node',
+                    node.id,
+                    user_id=user_id
+                )
+                
+                ssh_client.close()
+                
+                return {
+                    'success': True,
+                    'message': 'Container stopped successfully'
+                }
+            else:
+                # Direct Docker client connection
+                try:
+                    container = docker_client.containers.get(node.container_name)
+                    
+                    if container.status == 'running':
+                        container.stop()
+                        
+                        # Log the container stop
+                        log_activity(
+                            'info',
+                            f"Stopped container for node {node.name}",
+                            'node',
+                            node.id,
+                            user_id=user_id
+                        )
+                    
+                    return {
+                        'success': True,
+                        'message': 'Container stopped successfully'
+                    }
+                except docker.errors.NotFound:
+                    return {
+                        'success': False,
+                        'message': 'Container does not exist'
+                    }
+                except Exception as e:
+                    return {
+                        'success': False,
+                        'message': f"Error stopping container: {str(e)}"
+                    }
+                    
+        except Exception as e:
+            if isinstance(docker_client, dict) and docker_client.get('is_ssh_tunnel'):
+                docker_client['ssh_client'].close()
+                
+            error_msg = f"Error stopping container: {str(e)}"
+            
+            log_activity(
+                'error',
+                error_msg,
+                'node',
+                node.id,
+                user_id=user_id
+            )
+            
+            return {
+                'success': False,
+                'message': error_msg
+            }
+    
+    @staticmethod
+    def delete_container(node, user_id=None):
+        """
+        Delete a container for a node
+        
+        Args:
+            node: Node object
+            user_id: Optional user ID for activity logging
+            
+        Returns:
+            dict: Result of container deletion
+        """
+        if not node.is_container_node:
+            return {
+                'success': False,
+                'message': 'Not a container node'
+            }
+            
+        docker_client = ContainerService.get_docker_client(node)
+        
+        if not docker_client:
+            return {
+                'success': False,
+                'message': 'Failed to connect to Docker'
+            }
+            
+        try:
+            if isinstance(docker_client, dict) and docker_client.get('is_ssh_tunnel'):
+                # Using SSH tunnel
+                ssh_client = docker_client['ssh_client']
+                
+                # Stop the container if it's running
+                container_name = node.container_name
+                stdin, stdout, stderr = ssh_client.exec_command(f"docker stop {container_name} 2>/dev/null || true")
+                stdout.channel.recv_exit_status()  # Wait for command to complete
+                
+                # Remove the container
+                stdin, stdout, stderr = ssh_client.exec_command(f"docker rm {container_name} 2>/dev/null || true")
+                exit_code = stdout.channel.recv_exit_status()
+                
+                # Reset container_id in database
+                node.container_id = None
+                db.session.commit()
+                
+                # Log the container deletion
+                log_activity(
+                    'info',
+                    f"Deleted container for node {node.name}",
+                    'node',
+                    node.id,
+                    user_id=user_id
+                )
+                
+                ssh_client.close()
+                
+                return {
+                    'success': True,
+                    'message': 'Container deleted successfully'
+                }
+            else:
+                # Direct Docker client connection
+                try:
+                    container = docker_client.containers.get(node.container_name)
+                    
+                    # Stop container if running
+                    if container.status == 'running':
+                        container.stop()
+                        
+                    # Remove the container
+                    container.remove()
+                    
+                    # Reset container_id in database
+                    node.container_id = None
+                    db.session.commit()
+                    
+                    # Log the container deletion
+                    log_activity(
+                        'info',
+                        f"Deleted container for node {node.name}",
+                        'node',
+                        node.id,
+                        user_id=user_id
+                    )
+                    
+                    return {
+                        'success': True,
+                        'message': 'Container deleted successfully'
+                    }
+                except docker.errors.NotFound:
+                    # Reset container_id in database since container doesn't exist
+                    node.container_id = None
+                    db.session.commit()
+                    
+                    return {
+                        'success': True,
+                        'message': 'Container does not exist'
+                    }
+                except Exception as e:
+                    return {
+                        'success': False,
+                        'message': f"Error deleting container: {str(e)}"
+                    }
+                    
+        except Exception as e:
+            if isinstance(docker_client, dict) and docker_client.get('is_ssh_tunnel'):
+                docker_client['ssh_client'].close()
+                
+            error_msg = f"Error deleting container: {str(e)}"
+            
+            log_activity(
+                'error',
+                error_msg,
+                'node',
+                node.id,
+                user_id=user_id
+            )
+            
+            return {
+                'success': False,
+                'message': error_msg
+            }
+    
+    @staticmethod
+    def deploy_to_container(site_id, node_id, nginx_config, test_only=False):
+        """
+        Deploy a site configuration to a containerized node
+        
+        Args:
+            site_id: ID of the site
+            node_id: ID of the node
+            nginx_config: Nginx configuration content
+            test_only: Whether to just test the configuration without deploying
+            
+        Returns:
+            If test_only=True: tuple (is_valid, warnings)
+            Otherwise: True on success or raises an exception
+        """
+        from app.models.models import Site, Node
+        
+        site = Site.query.get(site_id)
+        node = Node.query.get(node_id)
+        
+        if not site or not node:
+            raise ValueError("Site or node not found")
+            
+        if not node.is_container_node:
+            raise ValueError("Node is not a container node")
+            
+        # Check if container is running
+        container_status = ContainerService.check_container_status(node)
+        
+        if not container_status.get('success', False):
+            raise ValueError(f"Could not check container status: {container_status.get('message', 'Unknown error')}")
+            
+        if not container_status.get('running', False):
+            # Try to start the container or set it up if it doesn't exist
+            if container_status.get('exists', False):
+                start_result = ContainerService.start_container(node)
+                
+                if not start_result.get('success', False):
+                    raise ValueError(f"Failed to start container: {start_result.get('message', 'Unknown error')}")
+            else:
+                setup_result = ContainerService.setup_container(node)
+                
+                if not setup_result.get('success', False):
+                    raise ValueError(f"Failed to set up container: {setup_result.get('message', 'Unknown error')}")
+        
+        # Create a backup of the existing configuration if not in test mode
+        backup_config = None
+        if not test_only:
+            from app.services.config_rollback_service import ConfigRollbackService
+            backup_config = ConfigRollbackService.create_backup_config(site_id, node_id)
+        
+        try:
+            # Create a temporary file with the configuration content
+            with tempfile.NamedTemporaryFile(mode='w', delete=False) as temp_file:
+                temp_file.write(nginx_config)
+                temp_file_path = temp_file.name
+            
+            docker_client = ContainerService.get_docker_client(node)
+            
+            if not docker_client:
+                os.unlink(temp_file_path)
+                raise ValueError("Failed to connect to Docker")
+                
+            try:
+                if isinstance(docker_client, dict) and docker_client.get('is_ssh_tunnel'):
+                    # Using SSH tunnel
+                    ssh_client = docker_client['ssh_client']
+                    sftp = ssh_client.open_sftp()
+                    
+                    # Define paths
+                    config_file_path = f"{node.container_config_path}/{site.domain}.conf"
+                    test_config_path = f"{node.container_config_path}/test.conf"
+                    
+                    # Upload the configuration for testing
+                    sftp.put(temp_file_path, test_config_path)
+                    
+                    # Test the configuration
+                    if test_only:
+                        test_cmd = f"docker exec {node.container_name} nginx -t -c /etc/nginx/nginx.conf 2>&1"
+                        stdin, stdout, stderr = ssh_client.exec_command(test_cmd)
+                        output = stdout.read().decode('utf-8') + stderr.read().decode('utf-8')
+                        exit_code = stdout.channel.recv_exit_status()
+                        
+                        # Clean up the test file
+                        sftp.remove(test_config_path)
+                        sftp.close()
+                        ssh_client.close()
+                        os.unlink(temp_file_path)
+                        
+                        warnings = []
+                        if 'warning' in output.lower():
+                            warnings = [line for line in output.split('\n') if 'warning' in line.lower()]
+                        
+                        return exit_code == 0, warnings
+                    
+                    # Upload the configuration to its final location
+                    sftp.put(temp_file_path, config_file_path)
+                    
+                    # Reload Nginx in the container
+                    reload_cmd = f"docker exec {node.container_name} nginx -s reload"
+                    stdin, stdout, stderr = ssh_client.exec_command(reload_cmd)
+                    exit_code = stdout.channel.recv_exit_status()
+                    
+                    if exit_code != 0:
+                        error_msg = stderr.read().decode('utf-8')
+                        sftp.close()
+                        ssh_client.close()
+                        os.unlink(temp_file_path)
+                        
+                        # Attempt to restore from backup if available
+                        if backup_config:
+                            # Try to restore the backup config
+                            from app.services.config_rollback_service import ConfigRollbackService
+                            ConfigRollbackService.restore_config(site_id, node_id, backup_config)
+                        
+                        raise ValueError(f"Failed to reload Nginx in container: {error_msg}")
+                    
+                    # Update site node status
+                    site_node = SiteNode.query.filter_by(site_id=site_id, node_id=node_id).first()
+                    if site_node:
+                        site_node.status = 'deployed'
+                        site_node.deployed_at = time.strftime('%Y-%m-%d %H:%M:%S')
+                    else:
+                        site_node = SiteNode(
+                            site_id=site_id,
+                            node_id=node_id,
+                            status='deployed',
+                            deployed_at=time.strftime('%Y-%m-%d %H:%M:%S')
+                        )
+                        db.session.add(site_node)
+                        
+                    db.session.commit()
+                    
+                    # Log the successful deployment
+                    log = DeploymentLog(
+                        site_id=site_id,
+                        node_id=node_id,
+                        action="deploy_container",
+                        status="success",
+                        message=f"Successfully deployed {site.domain} to containerized node {node.name}"
+                    )
+                    db.session.add(log)
+                    db.session.commit()
+                    
+                    # Clean up
+                    sftp.close()
+                    ssh_client.close()
+                    os.unlink(temp_file_path)
+                    
+                    return True
+                else:
+                    # Direct Docker client connection
+                    # TODO: Implement this branch
+                    # For now, we'll just raise an error
+                    os.unlink(temp_file_path)
+                    raise ValueError("Direct Docker connection not implemented yet")
+                    
+            except Exception as e:
+                if isinstance(docker_client, dict) and docker_client.get('is_ssh_tunnel'):
+                    try:
+                        docker_client['ssh_client'].close()
+                    except:
+                        pass
+                        
+                os.unlink(temp_file_path)
+                raise e
+                
+        except Exception as e:
+            os.unlink(temp_file_path)
+            
+            # Log the error
+            log = DeploymentLog(
+                site_id=site_id,
+                node_id=node_id,
+                action="deploy_container",
+                status="error",
+                message=f"Failed to deploy to container: {str(e)}"
+            )
+            db.session.add(log)
+            db.session.commit()
+            
+            # Try to restore from backup if available
+            if backup_config:
+                try:
+                    from app.services.config_rollback_service import ConfigRollbackService
+                    ConfigRollbackService.restore_config(site_id, node_id, backup_config)
+                except Exception as restore_error:
+                    # Just log the restore error, but raise the original error
+                    log_activity(
+                        'error',
+                        f"Failed to restore config after deployment error: {str(restore_error)}",
+                        'site',
+                        site_id
+                    )
+            
+            raise e

@@ -11,6 +11,21 @@ from app.services.logger_service import log_activity
 from app.services.proxy_service_base import ProxyServiceBase
 from app.services.ssh_connection_service import SSHConnectionService
 
+# Add these wrapper functions to maintain backward compatibility
+def deploy_to_node(site_id, node_id, config_content, test_only=False):
+    """
+    Backward compatibility wrapper for NginxService.deploy_config
+    """
+    service = NginxService()
+    return service.deploy_config(site_id, node_id, config_content, test_only)
+
+def generate_nginx_config(site, node=None):
+    """
+    Backward compatibility wrapper for NginxService.generate_config
+    """
+    service = NginxService()
+    return service.generate_config(site)
+
 class NginxService(ProxyServiceBase):
     """
     Nginx proxy service implementation
@@ -301,6 +316,13 @@ class NginxService(ProxyServiceBase):
                     commands = [
                         "sudo apt-get update",
                         "sudo apt-get install -y nginx",
+                        # Install ModSecurity and OWASP CRS
+                        "sudo apt-get install -y libmodsecurity3 libapache2-mod-security2 modsecurity-crs",
+                        # Set up ModSecurity
+                        "sudo mkdir -p /etc/nginx/modsec",
+                        "sudo cp /etc/modsecurity/modsecurity.conf-recommended /etc/nginx/modsec/main.conf 2>/dev/null || echo 'ModSecurity config not found'",
+                        "sudo sed -i 's/SecRuleEngine DetectionOnly/SecRuleEngine On/' /etc/nginx/modsec/main.conf 2>/dev/null || echo 'ModSecurity config update failed'",
+                        "echo 'modsecurity on; modsecurity_rules_file /etc/nginx/modsec/main.conf;' | sudo tee /etc/nginx/conf.d/modsecurity.conf",
                         "sudo systemctl enable nginx",
                         "sudo systemctl start nginx"
                     ]
@@ -309,6 +331,13 @@ class NginxService(ProxyServiceBase):
                     commands = [
                         "sudo yum install -y epel-release",
                         "sudo yum install -y nginx",
+                        # Install ModSecurity and OWASP CRS
+                        "sudo yum install -y mod_security mod_security_crs",
+                        # Set up ModSecurity
+                        "sudo mkdir -p /etc/nginx/modsec",
+                        "sudo cp /etc/nginx/modsecurity/modsecurity.conf-recommended /etc/nginx/modsec/main.conf 2>/dev/null || echo 'ModSecurity config not found'",
+                        "sudo sed -i 's/SecRuleEngine DetectionOnly/SecRuleEngine On/' /etc/nginx/modsec/main.conf 2>/dev/null || echo 'ModSecurity config update failed'",
+                        "echo 'modsecurity on; modsecurity_rules_file /etc/nginx/modsec/main.conf;' | sudo tee /etc/nginx/conf.d/modsecurity.conf",
                         "sudo systemctl enable nginx",
                         "sudo systemctl start nginx"
                     ]
@@ -340,11 +369,11 @@ class NginxService(ProxyServiceBase):
                             action='install_nginx',
                             resource_type='node',
                             resource_id=node.id,
-                            details=f"Installed Nginx on node {node.name}",
+                            details=f"Installed Nginx with ModSecurity on node {node.name}",
                             user_id=user_id
                         )
                     
-                    return True, f"Nginx successfully installed at {nginx_path}"
+                    return True, f"Nginx successfully installed at {nginx_path} with ModSecurity support"
                 else:
                     return False, "Nginx installation failed: Nginx binary not found after installation"
                 
@@ -353,1162 +382,442 @@ class NginxService(ProxyServiceBase):
     
     def _generate_waf_config(self, site):
         """
-        Generate WAF configuration for a site
+        Generate ModSecurity WAF configuration for a site
         
         Args:
-            site: Site object
+            site: Site object with WAF settings
             
         Returns:
-            str: WAF configuration section
+            str: ModSecurity configuration directives
         """
-        if not site.use_waf:
-            return "# WAF not enabled for this site"
+        from app.services.configuration_service import ConfigurationService
+
+        if not site.waf_enabled:
+            return ""
+            
+        # Get ModSecurity paths from configuration
+        modsec_dir = ConfigurationService.get('paths.modsecurity_dir', '/etc/nginx/modsec')
+        crs_dir = ConfigurationService.get('paths.crs_dir', '/usr/share/modsecurity-crs')
+            
+        # Build base configuration
+        config = []
+        config.append("# ModSecurity WAF Configuration")
+        config.append("modsecurity on;")
+        config.append(f"modsecurity_rules_file {modsec_dir}/main.conf;")
+
+        # Add OWASP CRS if enabled
+        if site.waf_ruleset_type == 'OWASP-CRS':
+            config.append(f"# OWASP Core Rule Set")
+            
+            # Set paranoia level
+            paranoia_level = site.waf_paranoia_level or ConfigurationService.get_int('waf.paranoia_level', 1)
+            config.append(f"modsecurity_rules 'SecRuleEngine On';")
+            config.append(f"modsecurity_rules 'SecParanoiaLevel {paranoia_level}';")
+            
+            # Set anomaly thresholds
+            anomaly_threshold = site.waf_anomaly_threshold or ConfigurationService.get_int('waf.anomaly_threshold', 5)
+            config.append(f"modsecurity_rules 'SecAction \"id:900110,phase:1,pass,nolog,setvar:tx.inbound_anomaly_score_threshold={anomaly_threshold}\"';")
+            config.append(f"modsecurity_rules 'SecAction \"id:900110,phase:1,pass,nolog,setvar:tx.outbound_anomaly_score_threshold={anomaly_threshold}\"';")
         
-        waf_config = [
-            "# WAF Configuration",
-            "location / {",
-            "    modsecurity on;",
-            "    modsecurity_rules_file /etc/nginx/modsec/main.conf;"
-        ]
+            # Include CRS specific rules
+            config.append(f"modsecurity_rules_file {crs_dir}/crs-setup.conf;")
+            config.append(f"modsecurity_rules_file {crs_dir}/rules/*.conf;")
+            
+        # Add trusted IPs to bypass WAF
+        if site.waf_trusted_ips:
+            trusted_ips = site.waf_trusted_ips.split(',')
+            for ip in trusted_ips:
+                ip = ip.strip()
+                if ip:
+                    config.append(f"modsecurity_rules 'SecRule REMOTE_ADDR \"^{ip}$\" \"id:1000,phase:1,pass,nolog,ctl:ruleEngine=Off\"';")
+
+        # Add WAF rules from settings (if provided)
+        if site.waf_custom_rules:
+            config.append("# Custom WAF rules")
+            for rule in site.waf_custom_rules.split('\n'):
+                if rule.strip():
+                    config.append(f"modsecurity_rules '{rule.strip()}';")
         
-        # Add rule level settings
-        if site.waf_rule_level == 'strict':
-            waf_config.append("    # Strict WAF rules")
-            waf_config.append("    modsecurity_rules 'SecRuleEngine On';")
-            waf_config.append("    modsecurity_rules 'SecAuditLogParts ABIJDEFHZ';")
-        elif site.waf_rule_level == 'medium':
-            waf_config.append("    # Medium WAF rules")
-            waf_config.append("    modsecurity_rules 'SecRuleEngine On';")
-            waf_config.append("    modsecurity_rules 'SecAuditLogParts ABIJDEFHZ';")
-        else:
-            waf_config.append("    # Basic WAF rules")
-            waf_config.append("    modsecurity_rules 'SecRuleEngine On';")
-            waf_config.append("    modsecurity_rules 'SecAuditLogParts ABIJDZ';")
+        return "\n".join(config)
+    
+    def _generate_geoip_config(self, site):
+        """
+        Generate GeoIP country blocking configuration for a site
         
-        # Add custom rules if provided
-        if hasattr(site, 'waf_custom_rules') and site.waf_custom_rules:
-            waf_config.append("    # Custom WAF rules")
-            for rule in site.waf_custom_rules.split("\n"):
-                waf_config.append(f"    modsecurity_rules '{rule}';")
+        Args:
+            site: Site object with GeoIP settings
+            
+        Returns:
+            str: GeoIP configuration directives
+        """
+        from app.services.configuration_service import ConfigurationService
         
-        waf_config.append("    proxy_pass http://backend;")
-        waf_config.append("}")
+        if not site.geoip_enabled:
+            return ""
+            
+        # Get GeoIP paths from configuration
+        geoip_dir = ConfigurationService.get('paths.geoip_dir', '/usr/share/GeoIP')
+            
+        config = []
+        config.append("# GeoIP Country Blocking")
         
-        return "\n".join(waf_config)
+        # Add GeoIP database paths
+        config.append(f"geoip_country {geoip_dir}/GeoIP.dat;")
+        config.append(f"geoip2 {geoip_dir}/GeoLite2-Country.mmdb;")
+        
+        # Define map for GeoIP blocking
+        config.append("map $geoip_country_code $allowed_country {")
+        config.append("    default yes;")
+        
+        # Add blocked countries
+        if site.geoip_blocked_countries:
+            blocked_countries = site.geoip_blocked_countries.split(',')
+            for country in blocked_countries:
+                country = country.strip().upper()
+                if country:
+                    config.append(f"    {country} no;")
+        
+        config.append("}")
+        
+        # Add the access control directive
+        config.append("if ($allowed_country = no) {")
+        config.append("    return 403 \"Access Denied: Your country is blocked.\";")
+        config.append("}")
+        
+        return "\n".join(config)
+    
+    def _generate_ssl_config(self, site):
+        """
+        Generate SSL configuration for a site
+        
+        Args:
+            site: Site object with SSL settings
+            
+        Returns:
+            str: SSL configuration directives
+        """
+        from app.services.configuration_service import ConfigurationService
+        
+        if site.protocol != 'https':
+            return ""
+            
+        # Get SSL settings from configuration
+        ssl_protocols = ConfigurationService.get('ssl.protocols', 'TLSv1.2 TLSv1.3')
+        ssl_ciphers = ConfigurationService.get('ssl.ciphers', 'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384')
+        prefer_server_ciphers = ConfigurationService.get('ssl.prefer_server_ciphers', 'on')
+        ssl_session_cache = ConfigurationService.get('ssl.session_cache', 'shared:SSL:10m')
+        ssl_session_timeout = ConfigurationService.get('ssl.session_timeout', '10m')
+        ssl_session_tickets = ConfigurationService.get('ssl.session_tickets', 'off')
+        hsts_max_age = ConfigurationService.get_int('ssl.hsts_max_age', 31536000)
+            
+        config = []
+        config.append("# SSL Configuration")
+        config.append(f"ssl_protocols {ssl_protocols};")
+        config.append(f"ssl_ciphers {ssl_ciphers};")
+        config.append(f"ssl_prefer_server_ciphers {prefer_server_ciphers};")
+        config.append(f"ssl_session_cache {ssl_session_cache};")
+        config.append(f"ssl_session_timeout {ssl_session_timeout};")
+        config.append(f"ssl_session_tickets {ssl_session_tickets};")
+        
+        # Add HSTS if enabled
+        if site.hsts_enabled:
+            config.append(f"add_header Strict-Transport-Security \"max-age={hsts_max_age}; includeSubDomains; preload\" always;")
+        
+        # Add OCSP stapling if enabled
+        if site.ocsp_stapling_enabled:
+            config.append("ssl_stapling on;")
+            config.append("ssl_stapling_verify on;")
+        
+        return "\n".join(config)
+    
+    def _generate_rate_limit_config(self, site):
+        """
+        Generate rate limiting configuration for a site
+        
+        Args:
+            site: Site object with rate limiting settings
+            
+        Returns:
+            str: Rate limiting configuration directives
+        """
+        if not site.rate_limiting_enabled:
+            return ""
+            
+        config = []
+        config.append("# Rate Limiting Configuration")
+        
+        # Define request limit zones based on IP or cookie
+        if site.rate_limiting_type == 'ip':
+            config.append(f"limit_req_zone $binary_remote_addr zone=site{site.id}:10m rate={site.rate_limiting_rate}r/s;")
+        elif site.rate_limiting_type == 'cookie':
+            config.append(f"limit_req_zone $cookie_sessionid zone=site{site.id}:10m rate={site.rate_limiting_rate}r/s;")
+        else:  # combined
+            config.append(f"limit_req_zone $binary_remote_addr$cookie_sessionid zone=site{site.id}:10m rate={site.rate_limiting_rate}r/s;")
+        
+        # Apply rate limiting to all locations
+        config.append(f"limit_req zone=site{site.id} burst={site.rate_limiting_burst} nodelay;")
+        
+        # Add custom error page if defined
+        if site.rate_limiting_error_page:
+            config.append(f"error_page 429 = @rate_limited;")
+            config.append(f"location @rate_limited {{")
+            config.append(f"    add_header Retry-After 60 always;")
+            config.append(f"    return 429 \"{site.rate_limiting_error_page}\";")
+            config.append(f"}}")
+        
+        return "\n".join(config)
     
     def _generate_cache_config(self, site):
         """
         Generate caching configuration for a site
         
         Args:
-            site: Site object
+            site: Site object with caching settings
             
         Returns:
-            str: Caching configuration section
+            str: Caching configuration directives
         """
-        if not site.enable_cache:
-            return "# Caching not enabled for this site"
+        from app.services.configuration_service import ConfigurationService
         
-        cache_config = [
-            "# Caching Configuration",
-            f"proxy_cache_path /var/cache/nginx/{site.domain} levels=1:2 keys_zone={site.domain}_cache:10m max_size=100m inactive=60m use_temp_path=off;",
-            "",
-            "server {",
-            "    location / {",
-            f"        proxy_cache {site.domain}_cache;",
-            f"        proxy_cache_valid 200 {site.cache_time}s;",
-            f"        proxy_cache_valid 404 {site.cache_time // 10}s;",
-            "        proxy_cache_use_stale error timeout invalid_header updating http_500 http_502 http_503 http_504;",
-            "        add_header X-Cache-Status $upstream_cache_status;",
-            "    }",
-            "",
-            "    # Static files caching",
-            "    location ~* \\.(jpg|jpeg|png|gif|ico|css|js)$ {",
-            f"        expires {site.cache_static_time}s;",
-            f"        add_header Cache-Control \"public, max-age={site.cache_static_time}\";",
-            "    }",
-            "}"
-        ]
+        if not site.cache_enabled:
+            return ""
+            
+        # Get cache directory from configuration
+        cache_dir = ConfigurationService.get('paths.cache_dir', '/var/cache/nginx')
         
-        # Add custom cache rules if provided
-        if hasattr(site, 'custom_cache_rules') and site.custom_cache_rules:
-            cache_config.append("# Custom cache rules")
-            cache_config.extend(site.custom_cache_rules.split("\n"))
+        config = []
+        config.append("# Caching Configuration")
         
-        return "\n".join(cache_config)
-    
-    def _generate_geoip_config(self, site):
+        # Set up proxy cache path with levels, keys_zone, inactive and max_size
+        cache_size = site.cache_max_size or '1g'
+        cache_time = site.cache_inactive_time or '60m'
+        
+        config.append(f"proxy_cache_path {cache_dir}/site{site.id} levels=1:2 keys_zone=site{site.id}:10m inactive={cache_time} max_size={cache_size};")
+        config.append(f"proxy_cache site{site.id};")
+        
+        # Set cache key based on settings
+        if site.cache_use_stale:
+            config.append("proxy_cache_use_stale error timeout invalid_header updating http_500 http_502 http_503 http_504;")
+        
+        # Set varying cache key based on selected parameters
+        cache_key_parts = ["$scheme$host$request_uri"]
+        
+        if site.cache_vary_cookie:
+            cache_key_parts.append("$cookie_nocache")
+        
+        if site.cache_vary_user_agent:
+            cache_key_parts.append("$http_user_agent")
+        
+        config.append(f"proxy_cache_key {' '.join(cache_key_parts)};")
+        
+        # Set cache valid time for different response codes
+        cache_valid_time = site.cache_valid_time or '60m'
+        config.append(f"proxy_cache_valid 200 301 302 {cache_valid_time};")
+        
+        # Skip cache for POST requests
+        config.append("proxy_cache_bypass $http_pragma $http_authorization $cookie_nocache $arg_nocache;")
+        config.append("proxy_no_cache $http_pragma $http_authorization $cookie_nocache $arg_nocache;")
+        
+        # Add cache debugging headers
+        if site.cache_debug_header:
+            config.append("add_header X-Cache-Status $upstream_cache_status;")
+        
+        return "\n".join(config)
+        
+    def generate_nginx_config(self, site, node=None):
         """
-        Generate GeoIP configuration for a site
+        Generate Nginx configuration for a site
         
         Args:
-            site: Site object
+            site: Site object to generate configuration for
+            node: Optional Node object to customize configuration for
             
         Returns:
-            str: GeoIP configuration section
+            str: Complete Nginx configuration
         """
-        if not site.use_geoip:
-            return "# GeoIP filtering not enabled for this site"
+        from app.services.configuration_service import ConfigurationService
         
-        geoip_config = [
-            "# GeoIP Configuration"
+        # Get template based on protocol
+        template_name = 'https.conf' if site.protocol == 'https' else 'http.conf'
+        template_path = os.path.join(current_app.root_path, '../nginx_templates', template_name)
+        
+        if not os.path.exists(template_path):
+            raise FileNotFoundError(f"Template not found: {template_path}")
+        
+        with open(template_path, 'r') as f:
+            template = f.read()
+        
+        # Build complete configuration
+        context = {
+            'site': site,
+            'server_name': site.domain,
+            'port': site.port or (443 if site.protocol == 'https' else 80),
+            'backend_protocol': site.origin_protocol or 'http',
+            'backend_host': site.origin,
+            'backend_port': site.origin_port or (443 if site.origin_protocol == 'https' else 80),
+            'config_date': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'waf_config': self._generate_waf_config(site),
+            'geoip_config': self._generate_geoip_config(site),
+            'ssl_config': self._generate_ssl_config(site),
+            'rate_limit_config': self._generate_rate_limit_config(site),
+            'cache_config': self._generate_cache_config(site),
+            'client_max_body_size': ConfigurationService.get('proxy.client_max_body_size', '10M'),
+            'proxy_connect_timeout': ConfigurationService.get('proxy.connect_timeout', '60s'),
+            'proxy_send_timeout': ConfigurationService.get('proxy.send_timeout', '60s'),
+            'proxy_read_timeout': ConfigurationService.get('proxy.read_timeout', '60s'),
+            'proxy_buffer_size': ConfigurationService.get('proxy.buffer_size', '8k'),
+            'server_tokens': ConfigurationService.get('proxy.server_tokens', 'off'),
+        }
+        
+        # Add certificate paths for HTTPS sites
+        if site.protocol == 'https':
+            letsencrypt_dir = ConfigurationService.get('paths.letsencrypt_dir', '/etc/letsencrypt')
+            context['ssl_certificate'] = f"{letsencrypt_dir}/live/{site.domain}/fullchain.pem"
+            context['ssl_certificate_key'] = f"{letsencrypt_dir}/live/{site.domain}/privkey.pem"
+            context['ssl_trusted_certificate'] = f"{letsencrypt_dir}/live/{site.domain}/chain.pem"
+            
+            # If this is a container node, adjust certificate paths accordingly
+            if node and node.is_container_node:
+                context['ssl_certificate'] = f"/etc/letsencrypt/live/{site.domain}/fullchain.pem"
+                context['ssl_certificate_key'] = f"/etc/letsencrypt/live/{site.domain}/privkey.pem"
+                context['ssl_trusted_certificate'] = f"/etc/letsencrypt/live/{site.domain}/chain.pem"
+        
+        # Add custom configuration if provided
+        if site.custom_configuration:
+            context['custom_config'] = site.custom_configuration
+        else:
+            context['custom_config'] = ''
+            
+        # Apply context variables to template
+        config = template
+        for key, value in context.items():
+            placeholder = '{{' + key + '}}'
+            if isinstance(value, str):
+                config = config.replace(placeholder, value)
+            else:
+                config = config.replace(placeholder, str(value))
+        
+        return config
+    
+    def deploy_to_node(site_id, node_id, nginx_config, test_only=False):
+        """
+        Deploy a site configuration to a node
+        
+        Args:
+            site_id: ID of the site
+            node_id: ID of the node to deploy to
+            nginx_config: The Nginx configuration content
+            test_only: If True, only test the configuration without deploying
+            
+        Returns:
+            If test_only=True: tuple (is_valid, warnings)
+            Otherwise: True on success or raises an exception
+        """
+        # Validate input parameters
+        if not isinstance(site_id, int) or not isinstance(node_id, int):
+            raise ValueError("site_id and node_id must be integers")
+        
+        if not nginx_config or not isinstance(nginx_config, str):
+            raise ValueError("nginx_config must be a non-empty string")
+        
+        # Sanitize nginx_config - remove any potential dangerous shell metacharacters
+        # This helps prevent command injection when the config is tested
+        dangerous_patterns = [
+            '$(', '`', '&&', '||', ';', '|', '>', '<', 
+            'rm -rf', 'mkfifo', 'mknod', ':(){ :|:& };:'
         ]
         
-        if site.geoip_level == 'nginx':
-            countries = site.geoip_countries.replace(' ', '').split(',') if site.geoip_countries else []
-            
-            if site.geoip_mode == 'blacklist':
-                if countries:
-                    geoip_config.append("if ($geoip_country_code ~ '^(" + "|".join(countries) + ")$') {")
-                    geoip_config.append("    return 403 'Access denied by geographic restriction';")
-                    geoip_config.append("}")
-            else:  # whitelist
-                if countries:
-                    geoip_config.append("if ($geoip_country_code !~ '^(" + "|".join(countries) + ")$') {")
-                    geoip_config.append("    return 403 'Access denied by geographic restriction';")
-                    geoip_config.append("}")
+        for pattern in dangerous_patterns:
+            if pattern in nginx_config:
+                suspicious_content = nginx_config[max(0, nginx_config.find(pattern)-10):nginx_config.find(pattern)+len(pattern)+10]
+                log_activity('security', f"Suspicious content in nginx config: {suspicious_content}", 'site', site_id, 
+                            f"Pattern '{pattern}' found in nginx config during deployment", None)
+                # Don't modify the config but alert about it
         
-        return "\n".join(geoip_config)
-
-def generate_nginx_config(site):
-    """
-    Generate an Nginx configuration for a site.
-    
-    Args:
-        site: Site object containing configuration details
+        site = Site.query.get(site_id)
+        node = Node.query.get(node_id)
         
-    Returns:
-        str: Nginx configuration file content
-    """
-    # If site is blocked, return a blocked site configuration
-    if site.is_blocked:
-        return generate_blocked_site_config(site)
+        if not site or not node:
+            raise ValueError("Site or node not found")
         
-    # Load the appropriate template
-    template_path = os.path.join(
-        current_app.config['NGINX_TEMPLATES_DIR'], 
-        'https.conf' if site.protocol == 'https' else 'http.conf'
-    )
-    
-    # If template doesn't exist, use a default one
-    if not os.path.exists(template_path):
-        # Create basic template
+        # Handle containerized nodes
+        if node.is_container_node:
+            from app.services.container_service import ContainerService
+            if test_only:
+                return ContainerService.deploy_to_container(site_id, node_id, nginx_config, test_only=True)
+            else:
+                return ContainerService.deploy_to_container(site_id, node_id, nginx_config)
+        
+        # Create a backup of the current configuration before deploying
+        from app.services.config_rollback_service import ConfigRollbackService
+        backup_path = None
+        if not test_only:
+            backup_path = ConfigRollbackService.create_backup_config(site_id, node_id)
+        
+        # Validate the configuration first
+        from app.services.nginx_validation_service import NginxValidationService
+        
+        # Parse the domain name from the nginx_config (assumes server_name is present)
+        domain_match = re.search(r'server_name\s+([^;]+);', nginx_config)
+        domain = domain_match.group(1).strip() if domain_match else site.domain
+        
+        # Get deployment warnings (for SSL, security headers, etc.)
+        warnings = []
+        
+        # Validate SSL configuration if HTTPS
         if site.protocol == 'https':
-            template = r"""
-server {
-    listen 443 ssl http2;
-    server_name {{domain}};
-    
-    ssl_certificate /etc/letsencrypt/live/{{domain}}/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/{{domain}}/privkey.pem;
-    ssl_trusted_certificate /etc/letsencrypt/live/{{domain}}/chain.pem;
-    
-    # SSL configuration
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_prefer_server_ciphers on;
-    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384;
-    ssl_session_timeout 1d;
-    ssl_session_cache shared:SSL:50m;
-    ssl_stapling on;
-    ssl_stapling_verify on;
-    
-    # GeoIP configuration
-    {{geoip_config}}
-    
-    # Cache configuration
-    {{cache_config}}
-    
-    location / {
-        # GeoIP access control
-        {{geoip_restrictions}}
-        
-        proxy_pass {{origin_protocol}}://{{origin_address}}:{{origin_port}};
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        
-        # Websocket support
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        
-        # Timeouts
-        proxy_connect_timeout 60s;
-        proxy_send_timeout 60s;
-        proxy_read_timeout 60s;
-        
-        # Cache headers
-        {{cache_proxy_config}}
-    }
-    
-    # Static files caching
-    location ~* \.(jpg|jpeg|png|gif|ico|css|js|svg|woff|woff2|ttf|eot)$ {
-        # GeoIP access control
-        {{geoip_restrictions}}
-        
-        proxy_pass {{origin_protocol}}://{{origin_address}}:{{origin_port}};
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        
-        # Static file caching
-        {{static_cache_config}}
-        
-        # No need to track these requests
-        access_log off;
-        log_not_found off;
-    }
-    
-    # Custom configuration
-    {{custom_config}}
-}
-
-# HTTP to HTTPS redirect
-server {
-    listen 80;
-    server_name {{domain}};
-    
-    location /.well-known/acme-challenge/ {
-        root /var/www/letsencrypt;
-    }
-    
-    location / {
-        return 301 https://$host$request_uri;
-    }
-}
-"""
-        else:  # HTTP template
-            # Check if we need to force HTTPS redirect for HTTP sites
-            if site.force_https:
-                template = """
-# HTTP site with forced HTTPS redirect
-server {
-    listen 80;
-    server_name {{domain}};
-    
-    location /.well-known/acme-challenge/ {
-        root /var/www/letsencrypt;
-    }
-    
-    location / {
-        return 301 https://$host$request_uri;
-    }
-}
-"""
-            else:
-                template = """
-server {
-    listen 80;
-    server_name {{domain}};
-    
-    # GeoIP configuration
-    {{geoip_config}}
-    
-    # Cache configuration
-    {{cache_config}}
-    
-    location / {
-        # GeoIP access control
-        {{geoip_restrictions}}
-        
-        proxy_pass {{origin_protocol}}://{{origin_address}}:{{origin_port}};
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        
-        # Websocket support
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        
-        # Timeouts
-        proxy_connect_timeout 60s;
-        proxy_send_timeout 60s;
-        proxy_read_timeout 60s;
-        
-        # Cache headers
-        {{cache_proxy_config}}
-    }
-    
-    # Static files caching
-    location ~* \.(jpg|jpeg|png|gif|ico|css|js|svg|woff|woff2|ttf|eot)$ {
-        # GeoIP access control
-        {{geoip_restrictions}}
-        
-        proxy_pass {{origin_protocol}}://{{origin_address}}:{{origin_port}};
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        
-        # Static file caching
-        {{static_cache_config}}
-        
-        # No need to track these requests
-        access_log off;
-        log_not_found off;
-    }
-    
-    # Custom configuration
-    {{custom_config}}
-}
-"""
-    else:
-        # Read template from file
-        with open(template_path, 'r') as file:
-            template = file.read()
-    
-    # Replace placeholders
-    config = template.replace('{{domain}}', site.domain)
-    config = config.replace('{{origin_protocol}}', site.protocol)
-    config = config.replace('{{origin_address}}', site.origin_address)
-    config = config.replace('{{origin_port}}', str(site.origin_port))
-    
-    # Add custom config if provided
-    if site.custom_config:
-        config = config.replace('{{custom_config}}', site.custom_config)
-    else:
-        config = config.replace('{{custom_config}}', '')
-    
-    # Add GeoIP configuration if enabled
-    if site.use_geoip:
-        geoip_countries = site.geoip_countries.strip().split(',') if site.geoip_countries else []
-        
-        # Generate map for country codes
-        if site.geoip_level == 'nginx':
-            # For Nginx-level GeoIP filtering
-            if site.geoip_mode == 'blacklist':
-                # Blacklist mode - deny specific countries
-                country_map = "\n    # GeoIP country blacklist\n"
-                if geoip_countries:
-                    country_map += "    map $geoip_country_code $allowed_country {\n"
-                    country_map += "        default 1;\n"
-                    for country in geoip_countries:
-                        country_map += f"        {country.strip().upper()} 0;\n"
-                    country_map += "    }\n"
-                else:
-                    # If no countries specified, don't block any
-                    country_map += "    # No countries blacklisted\n"
-                    country_map += "    map $geoip_country_code $allowed_country {\n"
-                    country_map += "        default 1;\n"
-                    country_map += "    }\n"
-            else:
-                # Whitelist mode - allow only specific countries
-                country_map = "\n    # GeoIP country whitelist\n"
-                if geoip_countries:
-                    country_map += "    map $geoip_country_code $allowed_country {\n"
-                    country_map += "        default 0;\n"
-                    for country in geoip_countries:
-                        country_map += f"        {country.strip().upper()} 1;\n"
-                    country_map += "    }\n"
-                else:
-                    # If no countries specified, allow all
-                    country_map += "    # No countries whitelisted, allowing all\n"
-                    country_map += "    map $geoip_country_code $allowed_country {\n"
-                    country_map += "        default 1;\n"
-                    country_map += "    }\n"
-                    
-            # Add restrictions to location blocks
-            geoip_restrictions = """
-        # GeoIP country restrictions
-        if ($allowed_country = 0) {
-            return 403 '<!DOCTYPE html>
-<html>
-<head>
-    <title>Access Denied</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            text-align: center;
-            padding: 50px;
-            background-color: #f5f5f5;
-        }
-        .container {
-            max-width: 600px;
-            margin: 0 auto;
-            background-color: white;
-            padding: 30px;
-            border-radius: 5px;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-        }
-        h1 {
-            color: #d9534f;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Access Denied</h1>
-        <p>Your access to this site has been restricted based on your geographic location.</p>
-        <p>Country code: $geoip_country_code</p>
-    </div>
-</body>
-</html>';
-            add_header Content-Type text/html;
-        }
-"""
+            _, ssl_warnings = NginxValidationService.validate_ssl_config(nginx_config)
+            warnings.extend(ssl_warnings)
             
-            # Combine for final geoip_config
-            geoip_config = country_map
+            # Check if SSL certificate files exist on node
+            certificates_exist, missing_files, cert_warnings = NginxValidationService.check_ssl_certificate_paths(node_id, nginx_config)
+            warnings.extend(cert_warnings)
+            
+            # If certificates don't exist and we're in test mode, record this issue
+            if not certificates_exist and test_only:
+                warnings.append("SSL certificates not found. You may need to request SSL certificates.")
+                
+                # Extract paths for user reference
+                ssl_certificate, ssl_certificate_key = NginxValidationService.extract_ssl_file_paths(nginx_config)
+                if ssl_certificate:
+                    warnings.append(f"Certificate path: {ssl_certificate}")
+                if ssl_certificate_key:
+                    warnings.append(f"Certificate key path: {ssl_certificate_key}")
+
+        # Validate security headers
+        _, security_warnings = NginxValidationService.validate_security_headers(nginx_config)
+        warnings.extend(security_warnings)
         
+        # Before deploying a site, prepare all necessary SSL directories on the node
+        from app.services.ssl_certificate_service import SSLCertificateService
+        
+        # First, ensure all SSL directories and certificates exist for any domains
+        # referenced in Nginx configurations, not just for the current domain
+        ssl_dirs_result = SSLCertificateService.ensure_all_ssl_directories_on_node(node_id)
+        
+        if not ssl_dirs_result.get('success', False):
+            log_activity('warning', f"Error preparing SSL directories for node {node.name}: {ssl_dirs_result.get('message', 'Unknown error')}")
+            warnings.append(f"Warning: Failed to prepare all SSL directories: {ssl_dirs_result.get('message', 'Unknown error')}")
         else:
-            # For iptables-level GeoIP filtering, we don't need Nginx config
-            # This will be handled by a separate iptables configuration
-            geoip_config = "\n    # GeoIP filtering handled at iptables level\n"
-            geoip_restrictions = ""
-            
-            # Update iptables on all nodes where this site is deployed
-            # Note: This is a placeholder, the actual implementation would
-            # need to run in a separate process or job to avoid blocking
-            from app import db
-            from app.models.models import SiteNode
-            site_nodes = SiteNode.query.filter_by(site_id=site.id).all()
-            for site_node in site_nodes:
-                try:
-                    # Schedule an async task to update iptables
-                    pass
-                except Exception as e:
-                    log_activity('error', f"Failed to update iptables GeoIP rules for site {site.domain} on node {site_node.node_id}: {str(e)}")
-    else:
-        # GeoIP not enabled
-        geoip_config = ""
-        geoip_restrictions = ""
-    
-    # Replace GeoIP placeholders
-    config = config.replace('{{geoip_config}}', geoip_config)
-    config = config.replace('{{geoip_restrictions}}', geoip_restrictions)
-    
-    # Add cache configuration
-    if site.enable_cache:
-        # Define the proxy cache configuration
-        cache_config = f"""
-    # Cache configuration
-    proxy_cache_path /var/cache/nginx/{site.domain}_cache levels=1:2 keys_zone={site.domain}_cache:10m max_size=500m inactive=60m;
-    proxy_cache_key "$scheme$host$request_uri";
-    proxy_cache_valid 200 {site.cache_time}s;
-    proxy_cache_bypass $http_pragma $http_cache_control;
-    proxy_cache_use_stale error timeout invalid_header updating http_500 http_502 http_503 http_504;
-"""
-        # Define cache headers for proxy
-        cache_proxy_config = f"""
-        # Cache control
-        proxy_cache {site.domain}_cache;
-        proxy_cache_valid 200 {site.cache_time}s;
-        
-        # Browser caching headers
-        add_header Cache-Control "public, max-age={site.cache_browser_time}";
-        expires {site.cache_browser_time}s;
-"""
-        # Static files cache directives
-        static_cache_config = f"""
-        # Static file caching
-        proxy_cache {site.domain}_cache;
-        proxy_cache_valid 200 {site.cache_static_time}s;
-        add_header Cache-Control "public, max-age={site.cache_static_time}";
-        expires {site.cache_static_time}s;
-"""
-        # If custom cache rules are provided, append them
-        if site.custom_cache_rules:
-            cache_config += f"\n    # Custom cache rules\n    {site.custom_cache_rules}\n"
-    else:
-        # If caching is disabled
-        cache_config = """
-    # Caching disabled
-    add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate";
-    add_header Pragma "no-cache";
-    expires 0;
-"""
-        cache_proxy_config = """
-        # Cache disabled
-        add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate";
-        add_header Pragma "no-cache";
-        expires 0;
-"""
-        static_cache_config = """
-        # Static file caching disabled
-        add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate";
-        add_header Pragma "no-cache";
-        expires 0;
-"""
-    
-    # Replace cache placeholders
-    config = config.replace('{{cache_config}}', cache_config)
-    config = config.replace('{{cache_proxy_config}}', cache_proxy_config)
-    config = config.replace('{{static_cache_config}}', static_cache_config)
-    
-    # Add WAF configuration if needed
-    if site.use_waf:
-        # Create WAF configuration based on the advanced settings
-        waf_config = """
-    # WAF Configuration
-"""
-        # Add ModSecurity basic setup
-        waf_config += """
-    # Enable ModSecurity
-    modsecurity on;
-    modsecurity_rules_file /etc/nginx/modsec/main.conf;
-"""
-
-        # Set protection level based on rule_level setting
-        if site.waf_rule_level == 'basic':
-            waf_config += """
-    # Basic WAF Protection Level
-    modsecurity_rules '
-        SecRuleEngine On
-        # Use OWASP Core Rule Set with basic paranoia level
-        SecAction "id:900000,phase:1,pass,nolog,setvar:tx.paranoia_level=1"
-    ';
-"""
-        elif site.waf_rule_level == 'medium':
-            waf_config += """
-    # Medium WAF Protection Level
-    modsecurity_rules '
-        SecRuleEngine On
-        # Use OWASP Core Rule Set with medium paranoia level
-        SecAction "id:900000,phase:1,pass,nolog,setvar:tx.paranoia_level=3"
-    ';
-"""
-        elif site.waf_rule_level == 'strict':
-            waf_config += """
-    # Strict WAF Protection Level
-    modsecurity_rules '
-        SecRuleEngine On
-        # Use OWASP Core Rule Set with high paranoia level
-        SecAction "id:900000,phase:1,pass,nolog,setvar:tx.paranoia_level=4"
-    ';
-"""
-
-        # Add request size limiting if configured
-        waf_config += f"""
-    # Limit request size to {site.waf_max_request_size}MB
-    client_max_body_size {site.waf_max_request_size}m;
-"""
-
-        # Add request timeout if configured
-        waf_config += f"""
-    # Request timeout settings
-    client_body_timeout {site.waf_request_timeout}s;
-    client_header_timeout {site.waf_request_timeout}s;
-    proxy_connect_timeout {site.waf_request_timeout}s;
-    proxy_send_timeout {site.waf_request_timeout}s;
-    proxy_read_timeout {site.waf_request_timeout}s;
-"""
-
-        # Add Tor exit node blocking if enabled
-        if site.waf_block_tor_exit_nodes:
-            waf_config += """
-    # Block Tor exit nodes
-    modsecurity_rules '
-        SecRule REMOTE_ADDR "@ipMatchFromFile /etc/nginx/modsec/tor-exit-nodes.conf" \\
-            "id:10000,phase:1,deny,status:403,log,msg:\'Access from Tor exit node blocked\'"
-    ';
-"""
-
-        # Add rate limiting if enabled
-        if site.waf_rate_limiting_enabled:
-            waf_config += f"""
-    # Rate limiting settings
-    limit_req_zone $binary_remote_addr zone=waf_limit:10m rate={site.waf_rate_limiting_requests}r/m;
-    limit_req zone=waf_limit burst={site.waf_rate_limiting_burst} nodelay;
-"""
-
-        # Add custom WAF rules if provided
-        if site.waf_custom_rules:
-            custom_rules = site.waf_custom_rules.replace("'", "\\'")  # Escape single quotes
-            waf_config += f"""
-    # Custom WAF rules
-    modsecurity_rules '
-{custom_rules}
-    ';
-"""
-
-        config = config.replace('{{custom_config}}', waf_config + (site.custom_config if site.custom_config else ''))
-    
-    # Save to Git repo
-    save_config_to_git(site, config)
-    
-    return config
-
-def generate_blocked_site_config(site):
-    """
-    Generate a configuration for a blocked site.
-    
-    Args:
-        site: Site object containing configuration details
-        
-    Returns:
-        str: Nginx configuration file content for a blocked site
-    """
-    # For HTTP sites
-    if site.protocol == 'http':
-        template = r"""
-server {
-    listen 80;
-    server_name {{domain}};
-    
-    # Security headers
-    add_header X-Content-Type-Options nosniff;
-    add_header X-Frame-Options SAMEORIGIN;
-    add_header X-XSS-Protection "1; mode=block";
-    
-    # Return blocked message for all requests
-    location / {
-        return 403 '<!DOCTYPE html>
-<html>
-<head>
-    <title>Site Blocked</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            text-align: center;
-            padding: 50px;
-            background-color: #f5f5f5;
-        }
-        .container {
-            max-width: 600px;
-            margin: 0 auto;
-            background-color: white;
-            padding: 30px;
-            border-radius: 5px;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-        }
-        h1 {
-            color: #d9534f;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Site Blocked</h1>
-        <p>This site has been temporarily blocked by the administrator.</p>
-        <p>Please contact the site owner for more information.</p>
-    </div>
-</body>
-</html>';
-        add_header Content-Type text/html;
-    }
-    
-    # Allow ACME challenges for future SSL certificate renewal
-    location /.well-known/acme-challenge/ {
-        root /var/www/letsencrypt;
-    }
-}
-"""
-    # For HTTPS sites
-    else:
-        template = """
-server {
-    listen 443 ssl http2;
-    server_name {{domain}};
-    
-    ssl_certificate /etc/letsencrypt/live/{{domain}}/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/{{domain}}/privkey.pem;
-    ssl_trusted_certificate /etc/letsencrypt/live/{{domain}}/chain.pem;
-    
-    # SSL configuration
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_prefer_server_ciphers on;
-    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384;
-    ssl_session_timeout 1d;
-    ssl_session_cache shared:SSL:50m;
-    ssl_stapling on;
-    ssl_stapling_verify on;
-    
-    # Security headers
-    add_header X-Content-Type-Options nosniff;
-    add_header X-Frame-Options SAMEORIGIN;
-    add_header X-XSS-Protection "1; mode=block";
-    
-    # Return blocked message for all requests
-    location / {
-        return 403 '<!DOCTYPE html>
-<html>
-<head>
-    <title>Site Blocked</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            text-align: center;
-            padding: 50px;
-            background-color: #f5f5f5;
-        }
-        .container {
-            max-width: 600px;
-            margin: 0 auto;
-            background-color: white;
-            padding: 30px;
-            border-radius: 5px;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-        }
-        h1 {
-            color: #d9534f;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Site Blocked</h1>
-        <p>This site has been temporarily blocked by the administrator.</p>
-        <p>Please contact the site owner for more information.</p>
-    </div>
-</body>
-</html>';
-        add_header Content-Type text/html;
-    }
-}
-
-# HTTP to HTTPS redirect
-server {
-    listen 80;
-    server_name {{domain}};
-    
-    location /.well-known/acme-challenge/ {
-        root /var/www/letsencrypt;
-    }
-    
-    location / {
-        return 301 https://$host$request_uri;
-    }
-}
-"""
-    
-    # Replace domain placeholder
-    config = template.replace('{{domain}}', site.domain)
-    
-    # Save to Git repo
-    save_config_to_git(site, config)
-    
-    return config
-
-def save_config_to_git(site, config_content):
-    """
-    Save the Nginx configuration to the Git repository
-    
-    Args:
-        site: Site object
-        config_content: Nginx configuration content
-    """
-    repo_path = current_app.config['NGINX_CONFIG_GIT_REPO']
-    
-    try:
-        # Create repo if it doesn't exist
-        if not os.path.exists(os.path.join(repo_path, '.git')):
-            os.makedirs(repo_path, exist_ok=True)
-            repo = git.Repo.init(repo_path)
-            # Add a README file for the initial commit
-            readme_path = os.path.join(repo_path, 'README.md')
-            with open(readme_path, 'w') as f:
-                f.write("# Nginx Configuration Repository\n\nStores Nginx configurations managed by the Italia CDN Proxy system.\n")
-            repo.git.add(readme_path)
-            repo.git.commit('-m', 'Initial commit')
-        else:
-            repo = git.Repo(repo_path)
-        
-        # Ensure we have the latest changes
-        try:
-            # Only pull if there's a remote configured
-            if len(repo.remotes) > 0:
-                # Stash any local changes before pulling
-                repo.git.stash('save', 'Auto-stash before pull')
-                repo.git.pull('--rebase')
-                # Try to apply stashed changes
-                try:
-                    repo.git.stash('pop')
-                except git.GitCommandError:
-                    # If there are conflicts, just keep the stashed changes
-                    log_activity('warning', f"Conflicts during git stash pop in save_config_to_git for {site.domain}")
-        except git.GitCommandError as e:
-            # Log but continue, we'll work with the local copy
-            log_activity('warning', f"Failed to pull latest changes: {str(e)}")
-        
-        # Create site directory if it doesn't exist
-        site_dir = os.path.join(repo_path, 'sites')
-        os.makedirs(site_dir, exist_ok=True)
-        
-        # Write config file with atomic operation
-        file_path = os.path.join(site_dir, f"{site.domain}.conf")
-        temp_file_path = f"{file_path}.temp"
-        with open(temp_file_path, 'w') as f:
-            f.write(config_content)
-        os.replace(temp_file_path, file_path)  # Atomic replace operation
-        
-        # Add to Git with proper error handling
-        try:
-            repo.git.add(file_path)
-            
-            # Check if there are changes to commit - fixed the issue with --cached reference
-            has_changes = False
-            
-            # First check if the file is untracked
-            untracked_files = repo.untracked_files
-            if os.path.relpath(file_path, repo.working_dir) in untracked_files:
-                has_changes = True
-            
-            # Then check for modifications to tracked files
-            if not has_changes and repo.head.is_valid():
-                try:
-                    # Only check diff with HEAD if we have a valid HEAD reference
-                    diff_index = repo.index.diff('HEAD')
-                    modified_files = [item.a_path for item in diff_index]
-                    rel_path = os.path.relpath(file_path, repo.working_dir)
-                    has_changes = rel_path in modified_files
-                except git.GitCommandError:
-                    # If diff fails, assume there are changes
-                    has_changes = True
-            
-            # Only commit if there are actual changes
-            if has_changes:
-                # Get committer info from app config, fallback to generic values
-                committer_name = current_app.config.get('GIT_COMMITTER_NAME', 'Italia CDN Proxy')
-                committer_email = current_app.config.get('GIT_COMMITTER_EMAIL', 'system@italiacdn.example.com')
+            created_domains = ssl_dirs_result.get('domains_created', [])
+            if created_domains:
+                log_activity('info', f"Created temporary certificates for domains: {', '.join(created_domains)}")
+                warnings.append(f"Created temporary certificates for domains referenced in configuration: {', '.join(created_domains)}")
                 
-                # Set Git environment variables for commit
-                my_env = os.environ.copy()
-                my_env['GIT_AUTHOR_NAME'] = committer_name
-                my_env['GIT_AUTHOR_EMAIL'] = committer_email
-                my_env['GIT_COMMITTER_NAME'] = committer_name
-                my_env['GIT_COMMITTER_EMAIL'] = committer_email
-                
-                # Format an informative commit message
-                message = f"Updated config for {site.domain}\n\n"
-                message += f"Protocol: {site.protocol}\n"
-                message += f"Origin: {site.origin_protocol}://{site.origin_address}:{site.origin_port}\n"
-                message += f"Cache enabled: {'Yes' if site.enable_cache else 'No'}\n"
-                message += f"Updated at: {datetime.utcnow().isoformat()}"
-                
-                # Commit the changes with the configured identity
-                repo.git.commit('-m', message, env=my_env)
-                
-                # Try to push if a remote is configured
-                if len(repo.remotes) > 0:
-                    try:
-                        repo.git.push()
-                    except git.GitCommandError as e:
-                        # Log but don't fail if push fails
-                        log_activity('warning', f"Failed to push config changes: {str(e)}")
-        except git.GitCommandError as e:
-            # Log the error but don't fail the operation
-            log_activity('warning', f"Git error when saving config for {site.domain}: {str(e)}")
-    except Exception as e:
-        # Log errors but allow the operation to continue
-        log_activity('error', f"Failed to save config to Git for {site.domain}: {str(e)}")
-        # Don't re-raise, as saving to git is not critical for the main functionality
-
-def deploy_to_node(site_id, node_id, nginx_config, test_only=False):
-    """
-    Deploy a site configuration to a node
-    
-    Args:
-        site_id: ID of the site
-        node_id: ID of the node to deploy to
-        nginx_config: The Nginx configuration content
-        test_only: If True, only test the configuration without deploying
+        # Now ensure SSL directories for the current domain specifically
+        ssl_dir_result = SSLCertificateService.ensure_ssl_directories(site_id, node_id)
         
-    Returns:
-        If test_only=True: tuple (is_valid, warnings)
-        Otherwise: True on success or raises an exception
-    """
-    # Validate input parameters
-    if not isinstance(site_id, int) or not isinstance(node_id, int):
-        raise ValueError("site_id and node_id must be integers")
-    
-    if not nginx_config or not isinstance(nginx_config, str):
-        raise ValueError("nginx_config must be a non-empty string")
-    
-    # Sanitize nginx_config - remove any potential dangerous shell metacharacters
-    # This helps prevent command injection when the config is tested
-    dangerous_patterns = [
-        '$(', '`', '&&', '||', ';', '|', '>', '<', 
-        'rm -rf', 'mkfifo', 'mknod', ':(){ :|:& };:'
-    ]
-    
-    for pattern in dangerous_patterns:
-        if pattern in nginx_config:
-            suspicious_content = nginx_config[max(0, nginx_config.find(pattern)-10):nginx_config.find(pattern)+len(pattern)+10]
-            log_activity('security', f"Suspicious content in nginx config: {suspicious_content}", 'site', site_id, 
-                        f"Pattern '{pattern}' found in nginx config during deployment", None)
-            # Don't modify the config but alert about it
-    
-    site = Site.query.get(site_id)
-    node = Node.query.get(node_id)
-    
-    if not site or not node:
-        raise ValueError("Site or node not found")
-    
-    # Handle containerized nodes
-    if node.is_container_node:
-        from app.services.container_service import ContainerService
-        if test_only:
-            return ContainerService.deploy_to_container(site_id, node_id, nginx_config, test_only=True)
-        else:
-            return ContainerService.deploy_to_container(site_id, node_id, nginx_config)
-    
-    # Create a backup of the current configuration before deploying
-    from app.services.config_rollback_service import ConfigRollbackService
-    backup_path = None
-    if not test_only:
-        backup_path = ConfigRollbackService.create_backup_config(site_id, node_id)
-    
-    # Validate the configuration first
-    from app.services.nginx_validation_service import NginxValidationService
-    
-    # Parse the domain name from the nginx_config (assumes server_name is present)
-    domain_match = re.search(r'server_name\s+([^;]+);', nginx_config)
-    domain = domain_match.group(1).strip() if domain_match else site.domain
-    
-    # Get deployment warnings (for SSL, security headers, etc.)
-    warnings = []
-    
-    # Validate SSL configuration if HTTPS
-    if site.protocol == 'https':
-        _, ssl_warnings = NginxValidationService.validate_ssl_config(nginx_config)
-        warnings.extend(ssl_warnings)
-        
-        # Check if SSL certificate files exist on node
-        certificates_exist, missing_files, cert_warnings = NginxValidationService.check_ssl_certificate_paths(node_id, nginx_config)
-        warnings.extend(cert_warnings)
-        
-        # If certificates don't exist and we're in test mode, record this issue
-        if not certificates_exist and test_only:
-            warnings.append("SSL certificates not found. You may need to request SSL certificates.")
+        if not ssl_dir_result.get('success', False):
+            log_activity('error', f"Failed to prepare SSL directories for {site.domain} on node {node.name}: {ssl_dir_result.get('message', 'Unknown error')}")
             
-            # Extract paths for user reference
-            ssl_certificate, ssl_certificate_key = NginxValidationService.extract_ssl_file_paths(nginx_config)
-            if ssl_certificate:
-                warnings.append(f"Certificate path: {ssl_certificate}")
-            if ssl_certificate_key:
-                warnings.append(f"Certificate key path: {ssl_certificate_key}")
-
-    # Validate security headers
-    _, security_warnings = NginxValidationService.validate_security_headers(nginx_config)
-    warnings.extend(security_warnings)
-    
-    # Before deploying a site, prepare all necessary SSL directories on the node
-    from app.services.ssl_certificate_service import SSLCertificateService
-    
-    # First, ensure all SSL directories and certificates exist for any domains
-    # referenced in Nginx configurations, not just for the current domain
-    ssl_dirs_result = SSLCertificateService.ensure_all_ssl_directories_on_node(node_id)
-    
-    if not ssl_dirs_result.get('success', False):
-        log_activity('warning', f"Error preparing SSL directories for node {node.name}: {ssl_dirs_result.get('message', 'Unknown error')}")
-        warnings.append(f"Warning: Failed to prepare all SSL directories: {ssl_dirs_result.get('message', 'Unknown error')}")
-    else:
-        created_domains = ssl_dirs_result.get('domains_created', [])
-        if created_domains:
-            log_activity('info', f"Created temporary certificates for domains: {', '.join(created_domains)}")
-            warnings.append(f"Created temporary certificates for domains referenced in configuration: {', '.join(created_domains)}")
-            
-    # Now ensure SSL directories for the current domain specifically
-    ssl_dir_result = SSLCertificateService.ensure_ssl_directories(site_id, node_id)
-    
-    if not ssl_dir_result.get('success', False):
-        log_activity('error', f"Failed to prepare SSL directories for {site.domain} on node {node.name}: {ssl_dir_result.get('message', 'Unknown error')}")
-        
-        # If setup didn't succeed, try fallback method - create a simple self-signed certificate directly
-        try:
-            # Connect to the node directly to verify SSL setup
-            ssh_client_direct = paramiko.SSHClient()
-            ssh_client_direct.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            
-            if node.ssh_key_path:
-                ssh_client_direct.connect(
-                    hostname=node.ip_address,
-                    port=node.ssh_port,
-                    username=node.ssh_user,
-                    key_filename=node.ssh_key_path,
-                    timeout=10
-                )
-            else:
-                ssh_client_direct.connect(
-                    hostname=node.ip_address,
-                    port=node.ssh_port,
-                    username=node.ssh_user,
-                    password=node.ssh_password,
-                    timeout=10
-                )
-            
-            # Check if letsencrypt directory exists, create it if not
-            ssh_client_direct.exec_command("sudo mkdir -p /etc/letsencrypt/live")
-            
-            # Create domain certificate directory
-            domain_dir = f"/etc/letsencrypt/live/{domain}"
-            ssh_client_direct.exec_command(f"sudo mkdir -p {domain_dir}")
-            
-            # Create a minimal self-signed certificate
-            cert_cmd = f"""
-sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \\
-  -keyout {domain_dir}/privkey.pem \\
-  -out {domain_dir}/fullchain.pem \\
-  -subj "/CN={domain}" && \\
-sudo cp {domain_dir}/fullchain.pem {domain_dir}/chain.pem && \\
-sudo chmod 644 {domain_dir}/fullchain.pem {domain_dir}/chain.pem && \\
-sudo chmod 600 {domain_dir}/privkey.pem && \\
-echo "success"
-"""
-            stdin, stdout, stderr = ssh_client_direct.exec_command(cert_cmd)
-            cert_result = stdout.read().decode('utf-8').strip()
-            
-            if "success" in cert_result:
-                log_activity('info', f"Created emergency self-signed certificate for {domain} on node {node.name}")
-                warnings.append("Created emergency self-signed certificate as primary method failed. Please request a real certificate.")
-            else:
-                error = stderr.read().decode('utf-8')
-                log_activity('error', f"Failed to create emergency certificate for {domain} on node {node.name}: {error}")
-                warnings.append(f"Warning: Failed to create SSL certificates: {error}")
-            
-            ssh_client_direct.close()
-            
-        except Exception as e:
-            log_activity('error', f"Failed in emergency certificate creation for {domain} on node {node.name}: {str(e)}")
-            warnings.append(f"Warning: {ssl_dir_result.get('message', 'Failed to prepare SSL directories')}")
-    elif ssl_dir_result.get('certificate_exists', False) == False:
-        warnings.append("Created temporary self-signed certificate. Remember to request a real certificate.")
-    
-    # Test the configuration
-        log_activity('warning', f"Error preparing SSL directories for node {node.name}: {ssl_dirs_result.get('message', 'Unknown error')}")
-        warnings.append(f"Warning: Failed to prepare all SSL directories: {ssl_dirs_result.get('message', 'Unknown error')}")
-    else:
-        created_domains = ssl_dirs_result.get('domains_created', [])
-        if created_domains:
-            log_activity('info', f"Created temporary certificates for domains: {', '.join(created_domains)}")
-            warnings.append(f"Created temporary certificates for domains referenced in configuration: {', '.join(created_domains)}")
-            
-    # Now ensure SSL directories for the current domain specifically
-    ssl_dir_result = SSLCertificateService.ensure_ssl_directories(site_id, node_id)
-    
-    if not ssl_dir_result.get('success', False):
-        log_activity('error', f"Failed to prepare SSL directories for {site.domain} on node {node.name}: {ssl_dir_result.get('message', 'Unknown error')}")
-        
-        # If setup didn't succeed, try fallback method - create a simple self-signed certificate directly
-        try:
-            # Connect to the node directly to verify SSL setup
-            ssh_client_direct = paramiko.SSHClient()
-            ssh_client_direct.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            
-            if node.ssh_key_path:
-                ssh_client_direct.connect(
-                    hostname=node.ip_address,
-                    port=node.ssh_port,
-                    username=node.ssh_user,
-                    key_filename=node.ssh_key_path,
-                    timeout=10
-                )
-            else:
-                ssh_client_direct.connect(
-                    hostname=node.ip_address,
-                    port=node.ssh_port,
-                    username=node.ssh_user,
-                    password=node.ssh_password,
-                    timeout=10
-                )
-            
-            # Check if letsencrypt directory exists, create it if not
-            ssh_client_direct.exec_command("sudo mkdir -p /etc/letsencrypt/live")
-            
-            # Create domain certificate directory
-            domain_dir = f"/etc/letsencrypt/live/{domain}"
-            ssh_client_direct.exec_command(f"sudo mkdir -p {domain_dir}")
-            
-            # Create a minimal self-signed certificate
-            cert_cmd = f"""
-sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \\
-  -keyout {domain_dir}/privkey.pem \\
-  -out {domain_dir}/fullchain.pem \\
-  -subj "/CN={domain}" && \\
-sudo cp {domain_dir}/fullchain.pem {domain_dir}/chain.pem && \\
-sudo chmod 644 {domain_dir}/fullchain.pem {domain_dir}/chain.pem && \\
-sudo chmod 600 {domain_dir}/privkey.pem && \\
-echo "success"
-"""
-            stdin, stdout, stderr = ssh_client_direct.exec_command(cert_cmd)
-            cert_result = stdout.read().decode('utf-8').strip()
-            
-            if "success" in cert_result:
-                log_activity('info', f"Created emergency self-signed certificate for {domain} on node {node.name}")
-                warnings.append("Created emergency self-signed certificate as primary method failed. Please request a real certificate.")
-            else:
-                error = stderr.read().decode('utf-8')
-                log_activity('error', f"Failed to create emergency certificate for {domain} on node {node.name}: {error}")
-                warnings.append(f"Warning: Failed to create SSL certificates: {error}")
-            
-            ssh_client_direct.close()
-            
-        except Exception as e:
-            log_activity('error', f"Failed in emergency certificate creation for {domain} on node {node.name}: {str(e)}")
-            warnings.append(f"Warning: {ssl_dir_result.get('message', 'Failed to prepare SSL directories')}")
-    elif ssl_dir_result.get('certificate_exists', False) == False:
-        warnings.append("Created temporary self-signed certificate. Remember to request a real certificate.")
-    
-    # Test the configuration
-    is_valid, error_message, ssl_details = NginxValidationService.test_config_on_node(node_id, nginx_config, domain)
-    
-    # Handle SSL details if available
-    if ssl_details and ssl_details.get('is_https', False):
-        if ssl_details.get('certificates_needed', False):
-            warnings.append("SSL certificates need to be provisioned")
-            if ssl_details.get('ssl_certificate'):
-                warnings.append(f"Certificate path: {ssl_details['ssl_certificate']}")
-            if ssl_details.get('ssl_certificate_key'):
-                warnings.append(f"Certificate key path: {ssl_details['ssl_certificate_key']}")
-    
-    # Special handling for SSL certificate errors - they're expected if certs don't exist yet
-    # We'll let the deployment proceed but warn the user
-    if not is_valid and "SSL certificate" in error_message and "missing" in error_message:
-        warnings.append("Configuration test passed with SSL warnings (certificates missing)")
-        is_valid = True  # Allow deployment to proceed
-    
-    # For test_only mode, return validation results
-    if test_only:
-        if not is_valid:
-            # Analyze the error and add suggestions
-            error_analysis = NginxValidationService.analyze_validation_error(error_message)
-            warnings.append(f"Configuration test failed: {error_message}")
-            warnings.append(f"Suggestion: {error_analysis['suggestion']}")
-            
-            if error_analysis['error_type'] == 'ssl_certificate' and 'alternate_solution' in error_analysis:
-                warnings.append(f"Alternative: {error_analysis['alternate_solution']}")
-        
-        return is_valid, warnings
-    
-    # If configuration is invalid, log and raise exception
-    if not is_valid:
-        error_analysis = NginxValidationService.analyze_validation_error(error_message)
-        log = DeploymentLog(
-            site_id=site_id,
-            node_id=node_id,
-            action="deploy",
-            status="error",
-            message=f"Configuration validation failed: {error_message}"
-        )
-        db.session.add(log)
-        db.session.commit()
-        
-        raise ValueError(f"Configuration validation failed: {error_message}\nSuggestion: {error_analysis['suggestion']}")
-    
-    # Variables for proper cleanup in finally block
-    ssh_client = None
-    sftp = None
-    temp_file_path = None
-    config_file_path = None
-    
-    try:
-        # Connect to the node
-        ssh_client = paramiko.SSHClient()
-        ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        
-        # Enhanced connection error handling
-        connection_attempts = 0
-        max_attempts = 3
-        connection_error = None
-        
-        while connection_attempts < max_attempts:
+            # If setup didn't succeed, try fallback method - create a simple self-signed certificate directly
             try:
+                # Connect to the node directly to verify SSL setup
+                ssh_client_direct = paramiko.SSHClient()
+                ssh_client_direct.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                
                 if node.ssh_key_path:
-                    ssh_client.connect(
+                    ssh_client_direct.connect(
                         hostname=node.ip_address,
                         port=node.ssh_port,
                         username=node.ssh_user,
@@ -1516,260 +825,453 @@ echo "success"
                         timeout=10
                     )
                 else:
-                    ssh_client.connect(
+                    ssh_client_direct.connect(
                         hostname=node.ip_address,
                         port=node.ssh_port,
                         username=node.ssh_user,
                         password=node.ssh_password,
                         timeout=10
                     )
-                # If we get here, connection succeeded
-                connection_error = None
-                break
+                
+                # Check if letsencrypt directory exists, create it if not
+                ssh_client_direct.exec_command("sudo mkdir -p /etc/letsencrypt/live")
+                
+                # Create domain certificate directory
+                domain_dir = f"/etc/letsencrypt/live/{domain}"
+                ssh_client_direct.exec_command(f"sudo mkdir -p {domain_dir}")
+                
+                # Create a minimal self-signed certificate
+                cert_cmd = f"""
+sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \\
+  -keyout {domain_dir}/privkey.pem \\
+  -out {domain_dir}/fullchain.pem \\
+  -subj "/CN={domain}" && \\
+sudo cp {domain_dir}/fullchain.pem {domain_dir}/chain.pem && \\
+sudo chmod 644 {domain_dir}/fullchain.pem {domain_dir}/chain.pem && \\
+sudo chmod 600 {domain_dir}/privkey.pem && \\
+echo "success"
+"""
+                stdin, stdout, stderr = ssh_client_direct.exec_command(cert_cmd)
+                cert_result = stdout.read().decode('utf-8').strip()
+                
+                if "success" in cert_result:
+                    log_activity('info', f"Created emergency self-signed certificate for {domain} on node {node.name}")
+                    warnings.append("Created emergency self-signed certificate as primary method failed. Please request a real certificate.")
+                else:
+                    error = stderr.read().decode('utf-8')
+                    log_activity('error', f"Failed to create emergency certificate for {domain} on node {node.name}: {error}")
+                    warnings.append(f"Warning: Failed to create SSL certificates: {error}")
+                
+                ssh_client_direct.close()
+                
             except Exception as e:
-                connection_error = str(e)
-                connection_attempts += 1
-                time.sleep(2)  # Short delay before retry
+                log_activity('error', f"Failed in emergency certificate creation for {domain} on node {node.name}: {str(e)}")
+                warnings.append(f"Warning: {ssl_dir_result.get('message', 'Failed to prepare SSL directories')}")
+        elif ssl_dir_result.get('certificate_exists', False) == False:
+            warnings.append("Created temporary self-signed certificate. Remember to request a real certificate.")
         
-        if connection_error:
-            log = DeploymentLog(
-                site_id=site_id,
-                node_id=node_id,
-                action="deploy",
-                status="error", 
-                message=f"Failed to connect to node after {max_attempts} attempts: {connection_error}"
-            )
-            db.session.add(log)
-            db.session.commit()
-            raise ValueError(f"Failed to connect to node: {connection_error}")
+        # Test the configuration
+            log_activity('warning', f"Error preparing SSL directories for node {node.name}: {ssl_dirs_result.get('message', 'Unknown error')}")
+            warnings.append(f"Warning: Failed to prepare all SSL directories: {ssl_dirs_result.get('message', 'Unknown error')}")
+        else:
+            created_domains = ssl_dirs_result.get('domains_created', [])
+            if created_domains:
+                log_activity('info', f"Created temporary certificates for domains: {', '.join(created_domains)}")
+                warnings.append(f"Created temporary certificates for domains referenced in configuration: {', '.join(created_domains)}")
+                
+        # Now ensure SSL directories for the current domain specifically
+        ssl_dir_result = SSLCertificateService.ensure_ssl_directories(site_id, node_id)
         
-        # Ensure the nginx config directory exists
-        if not node.nginx_config_path:
-            # Set a default path if none is specified
-            default_path = "/etc/nginx/conf.d"
-            log_activity('warning', f"No nginx_config_path specified for node {node.name}. Using default: {default_path}")
-            node.nginx_config_path = default_path
-            db.session.commit()
+        if not ssl_dir_result.get('success', False):
+            log_activity('error', f"Failed to prepare SSL directories for {site.domain} on node {node.name}: {ssl_dir_result.get('message', 'Unknown error')}")
             
-        stdin, stdout, stderr = ssh_client.exec_command(f"mkdir -p {node.nginx_config_path}")
-        exit_status = stdout.channel.recv_exit_status()
+            # If setup didn't succeed, try fallback method - create a simple self-signed certificate directly
+            try:
+                # Connect to the node directly to verify SSL setup
+                ssh_client_direct = paramiko.SSHClient()
+                ssh_client_direct.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                
+                if node.ssh_key_path:
+                    ssh_client_direct.connect(
+                        hostname=node.ip_address,
+                        port=node.ssh_port,
+                        username=node.ssh_user,
+                        key_filename=node.ssh_key_path,
+                        timeout=10
+                    )
+                else:
+                    ssh_client_direct.connect(
+                        hostname=node.ip_address,
+                        port=node.ssh_port,
+                        username=node.ssh_user,
+                        password=node.ssh_password,
+                        timeout=10
+                    )
+                
+                # Check if letsencrypt directory exists, create it if not
+                ssh_client_direct.exec_command("sudo mkdir -p /etc/letsencrypt/live")
+                
+                # Create domain certificate directory
+                domain_dir = f"/etc/letsencrypt/live/{domain}"
+                ssh_client_direct.exec_command(f"sudo mkdir -p {domain_dir}")
+                
+                # Create a minimal self-signed certificate
+                cert_cmd = f"""
+sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \\
+  -keyout {domain_dir}/privkey.pem \\
+  -out {domain_dir}/fullchain.pem \\
+  -subj "/CN={domain}" && \\
+sudo cp {domain_dir}/fullchain.pem {domain_dir}/chain.pem && \\
+sudo chmod 644 {domain_dir}/fullchain.pem {domain_dir}/chain.pem && \\
+sudo chmod 600 {domain_dir}/privkey.pem && \\
+echo "success"
+"""
+                stdin, stdout, stderr = ssh_client_direct.exec_command(cert_cmd)
+                cert_result = stdout.read().decode('utf-8').strip()
+                
+                if "success" in cert_result:
+                    log_activity('info', f"Created emergency self-signed certificate for {domain} on node {node.name}")
+                    warnings.append("Created emergency self-signed certificate as primary method failed. Please request a real certificate.")
+                else:
+                    error = stderr.read().decode('utf-8')
+                    log_activity('error', f"Failed to create emergency certificate for {domain} on node {node.name}: {error}")
+                    warnings.append(f"Warning: Failed to create SSL certificates: {error}")
+                
+                ssh_client_direct.close()
+                
+            except Exception as e:
+                log_activity('error', f"Failed in emergency certificate creation for {domain} on node {node.name}: {str(e)}")
+                warnings.append(f"Warning: {ssl_dir_result.get('message', 'Failed to prepare SSL directories')}")
+        elif ssl_dir_result.get('certificate_exists', False) == False:
+            warnings.append("Created temporary self-signed certificate. Remember to request a real certificate.")
         
-        if exit_status != 0:
-            error = stderr.read().decode('utf-8')
+        # Test the configuration
+        is_valid, error_message, ssl_details = NginxValidationService.test_config_on_node(node_id, nginx_config, domain)
+        
+        # Handle SSL details if available
+        if ssl_details and ssl_details.get('is_https', False):
+            if ssl_details.get('certificates_needed', False):
+                warnings.append("SSL certificates need to be provisioned")
+                if ssl_details.get('ssl_certificate'):
+                    warnings.append(f"Certificate path: {ssl_details['ssl_certificate']}")
+                if ssl_details.get('ssl_certificate_key'):
+                    warnings.append(f"Certificate key path: {ssl_details['ssl_certificate_key']}")
+        
+        # Special handling for SSL certificate errors - they're expected if certs don't exist yet
+        # We'll let the deployment proceed but warn the user
+        if not is_valid and "SSL certificate" in error_message and "missing" in error_message:
+            warnings.append("Configuration test passed with SSL warnings (certificates missing)")
+            is_valid = True  # Allow deployment to proceed
+        
+        # For test_only mode, return validation results
+        if test_only:
+            if not is_valid:
+                # Analyze the error and add suggestions
+                error_analysis = NginxValidationService.analyze_validation_error(error_message)
+                warnings.append(f"Configuration test failed: {error_message}")
+                warnings.append(f"Suggestion: {error_analysis['suggestion']}")
+                
+                if error_analysis['error_type'] == 'ssl_certificate' and 'alternate_solution' in error_analysis:
+                    warnings.append(f"Alternative: {error_analysis['alternate_solution']}")
+            
+            return is_valid, warnings
+        
+        # If configuration is invalid, log and raise exception
+        if not is_valid:
+            error_analysis = NginxValidationService.analyze_validation_error(error_message)
             log = DeploymentLog(
                 site_id=site_id,
                 node_id=node_id,
                 action="deploy",
                 status="error",
-                message=f"Failed to create nginx config directory: {error}"
+                message=f"Configuration validation failed: {error_message}"
             )
             db.session.add(log)
             db.session.commit()
-            raise ValueError(f"Failed to create nginx config directory: {error}")
             
-        # Ensure ACME challenge directory exists for Let's Encrypt
-        stdin, stdout, stderr = ssh_client.exec_command(f"mkdir -p /var/www/letsencrypt/.well-known/acme-challenge")
-        exit_status = stdout.channel.recv_exit_status()
+            raise ValueError(f"Configuration validation failed: {error_message}\nSuggestion: {error_analysis['suggestion']}")
         
-        if exit_status != 0:
-            error = stderr.read().decode('utf-8')
-            log_activity('warning', f"Failed to create ACME challenge directory: {error}")
+        # Variables for proper cleanup in finally block
+        ssh_client = None
+        sftp = None
+        temp_file_path = None
+        config_file_path = None
         
-        # Create the config file
-        config_file_path = f"{node.nginx_config_path}/{domain}.conf"
-        sftp = ssh_client.open_sftp()
-        
-        # Create a unique temporary file name using timestamp to avoid conflicts
-        temp_timestamp = int(time.time())
-        temp_file_path = f"{config_file_path}.{temp_timestamp}.tmp"
-        
-        # Write to a temporary file first
-        with sftp.file(temp_file_path, 'w') as f:
-            f.write(nginx_config)
-        
-        # Move the temporary file to the final location (atomic operation)
-        ssh_client.exec_command(f"mv {temp_file_path} {config_file_path}")
-        
-        # Reload Nginx
-        stdin, stdout, stderr = ssh_client.exec_command(node.nginx_reload_command)
-        exit_status = stdout.channel.recv_exit_status()
-        
-        if exit_status != 0:
-            error = stderr.read().decode('utf-8')
-            # Check if it's an SSL certificate error during reload
-            if "SSL" in error and "certificate" in error and "failed" in error:
-                # For SSL certificate errors, log a warning but consider deployment partially successful
+        try:
+            # Connect to the node
+            ssh_client = paramiko.SSHClient()
+            ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            
+            # Enhanced connection error handling
+            connection_attempts = 0
+            max_attempts = 3
+            connection_error = None
+            
+            while connection_attempts < max_attempts:
+                try:
+                    if node.ssh_key_path:
+                        ssh_client.connect(
+                            hostname=node.ip_address,
+                            port=node.ssh_port,
+                            username=node.ssh_user,
+                            key_filename=node.ssh_key_path,
+                            timeout=10
+                        )
+                    else:
+                        ssh_client.connect(
+                            hostname=node.ip_address,
+                            port=node.ssh_port,
+                            username=node.ssh_user,
+                            password=node.ssh_password,
+                            timeout=10
+                        )
+                    # If we get here, connection succeeded
+                    connection_error = None
+                    break
+                except Exception as e:
+                    connection_error = str(e)
+                    connection_attempts += 1
+                    time.sleep(2)  # Short delay before retry
+            
+            if connection_error:
                 log = DeploymentLog(
                     site_id=site_id,
                     node_id=node_id,
                     action="deploy",
-                    status="warning",
-                    message=f"Deployment completed but Nginx reload had SSL certificate warnings: {error}"
+                    status="error", 
+                    message=f"Failed to connect to node after {max_attempts} attempts: {connection_error}"
                 )
                 db.session.add(log)
-                
-                # Update site node status to reflect warning
-                site_node = SiteNode.query.filter_by(site_id=site_id, node_id=node_id).first()
-                if site_node:
-                    site_node.status = "warning"
-                    site_node.updated_at = datetime.utcnow()
-                else:
-                    # Create new site_node relationship with warning status
-                    site_node = SiteNode(
-                        site_id=site_id,
-                        node_id=node_id,
-                        status="warning",
-                        created_at=datetime.utcnow(),
-                        updated_at=datetime.utcnow()
-                    )
-                    db.session.add(site_node)
-                
+                db.session.commit()
+                raise ValueError(f"Failed to connect to node: {connection_error}")
+            
+            # Ensure the nginx config directory exists
+            if not node.nginx_config_path:
+                # Set a default path if none is specified
+                default_path = "/etc/nginx/conf.d"
+                log_activity('warning', f"No nginx_config_path specified for node {node.name}. Using default: {default_path}")
+                node.nginx_config_path = default_path
                 db.session.commit()
                 
-                warning_message = f"Site configuration deployed but Nginx reload had SSL certificate warnings. You need to request SSL certificates for {domain}."
-                warnings.append(warning_message)
-                
-                # Return success with warnings
-                return True
-            else:
-                # For other errors, log and try to restore from backup if available
+            stdin, stdout, stderr = ssh_client.exec_command(f"mkdir -p {node.nginx_config_path}")
+            exit_status = stdout.channel.recv_exit_status()
+            
+            if exit_status != 0:
+                error = stderr.read().decode('utf-8')
                 log = DeploymentLog(
                     site_id=site_id,
                     node_id=node_id,
                     action="deploy",
                     status="error",
-                    message=f"Failed to reload nginx: {error}"
+                    message=f"Failed to create nginx config directory: {error}"
                 )
                 db.session.add(log)
                 db.session.commit()
+                raise ValueError(f"Failed to create nginx config directory: {error}")
                 
-                # Try to restore from backup
-                error_message = f"Failed to reload nginx: {error}"
-                if backup_path:
-                    # Try to trigger an automatic rollback
-                    from app.services.config_rollback_service import ConfigRollbackService
-                    try:
-                        # Get current user
-                        try:
-                            from flask_login import current_user
-                            user_id = current_user.id if current_user and current_user.is_authenticated else None
-                        except:
-                            user_id = None
-                            
-                        rollback_result = ConfigRollbackService.auto_rollback_on_failure(site_id, node_id, error_message, user_id)
-                        if rollback_result['success']:
-                            # Rollback succeeded, raise an error with rollback info
-                            raise ValueError(f"{error_message}\nAutomatic rollback was performed successfully.")
-                        else:
-                            # Rollback failed, include this info in the error
-                            raise ValueError(f"{error_message}\nAutomatic rollback was attempted but failed: {rollback_result['message']}")
-                    except Exception as rollback_error:
-                        # If the rollback process itself fails, just report the original error
-                        raise ValueError(error_message)
+            # Ensure ACME challenge directory exists for Let's Encrypt
+            stdin, stdout, stderr = ssh_client.exec_command(f"mkdir -p /var/www/letsencrypt/.well-known/acme-challenge")
+            exit_status = stdout.channel.recv_exit_status()
+            
+            if exit_status != 0:
+                error = stderr.read().decode('utf-8')
+                log_activity('warning', f"Failed to create ACME challenge directory: {error}")
+            
+            # Create the config file
+            config_file_path = f"{node.nginx_config_path}/{domain}.conf"
+            sftp = ssh_client.open_sftp()
+            
+            # Create a unique temporary file name using timestamp to avoid conflicts
+            temp_timestamp = int(time.time())
+            temp_file_path = f"{config_file_path}.{temp_timestamp}.tmp"
+            
+            # Write to a temporary file first
+            with sftp.file(temp_file_path, 'w') as f:
+                f.write(nginx_config)
+            
+            # Move the temporary file to the final location (atomic operation)
+            ssh_client.exec_command(f"mv {temp_file_path} {config_file_path}")
+            
+            # Reload Nginx
+            stdin, stdout, stderr = ssh_client.exec_command(node.nginx_reload_command)
+            exit_status = stdout.channel.recv_exit_status()
+            
+            if exit_status != 0:
+                error = stderr.read().decode('utf-8')
+                # Check if it's an SSL certificate error during reload
+                if "SSL" in error and "certificate" in error and "failed" in error:
+                    # For SSL certificate errors, log a warning but consider deployment partially successful
+                    log = DeploymentLog(
+                        site_id=site_id,
+                        node_id=node_id,
+                        action="deploy",
+                        status="warning",
+                        message=f"Deployment completed but Nginx reload had SSL certificate warnings: {error}"
+                    )
+                    db.session.add(log)
+                    
+                    # Update site node status to reflect warning
+                    site_node = SiteNode.query.filter_by(site_id=site_id, node_id=node_id).first()
+                    if site_node:
+                        site_node.status = "warning"
+                        site_node.updated_at = datetime.utcnow()
+                    else:
+                        # Create new site_node relationship with warning status
+                        site_node = SiteNode(
+                            site_id=site_id,
+                            node_id=node_id,
+                            status="warning",
+                            created_at=datetime.utcnow(),
+                            updated_at=datetime.utcnow()
+                        )
+                        db.session.add(site_node)
+                    
+                    db.session.commit()
+                    
+                    warning_message = f"Site configuration deployed but Nginx reload had SSL certificate warnings. You need to request SSL certificates for {domain}."
+                    warnings.append(warning_message)
+                    
+                    # Return success with warnings
+                    return True
                 else:
-                    # No backup available, just raise the original error
-                    raise ValueError(error_message)
-        
-        # Update or create the site_node relationship
-        site_node = SiteNode.query.filter_by(site_id=site_id, node_id=node_id).first()
-        if site_node:
-            site_node.status = "deployed"
-            site_node.updated_at = datetime.utcnow()
-        else:
-            site_node = SiteNode(
+                    # For other errors, log and try to restore from backup if available
+                    log = DeploymentLog(
+                        site_id=site_id,
+                        node_id=node_id,
+                        action="deploy",
+                        status="error",
+                        message=f"Failed to reload nginx: {error}"
+                    )
+                    db.session.add(log)
+                    db.session.commit()
+                    
+                    # Try to restore from backup
+                    error_message = f"Failed to reload nginx: {error}"
+                    if backup_path:
+                        # Try to trigger an automatic rollback
+                        from app.services.config_rollback_service import ConfigRollbackService
+                        try:
+                            # Get current user
+                            try:
+                                from flask_login import current_user
+                                user_id = current_user.id if current_user and current_user.is_authenticated else None
+                            except:
+                                user_id = None
+                                
+                            rollback_result = ConfigRollbackService.auto_rollback_on_failure(site_id, node_id, error_message, user_id)
+                            if rollback_result['success']:
+                                # Rollback succeeded, raise an error with rollback info
+                                raise ValueError(f"{error_message}\nAutomatic rollback was performed successfully.")
+                            else:
+                                # Rollback failed, include this info in the error
+                                raise ValueError(f"{error_message}\nAutomatic rollback was attempted but failed: {rollback_result['message']}")
+                        except Exception as rollback_error:
+                            # If the rollback process itself fails, just report the original error
+                            raise ValueError(error_message)
+                    else:
+                        # No backup available, just raise the original error
+                        raise ValueError(error_message)
+            
+            # Update or create the site_node relationship
+            site_node = SiteNode.query.filter_by(site_id=site_id, node_id=node_id).first()
+            if site_node:
+                site_node.status = "deployed"
+                site_node.updated_at = datetime.utcnow()
+            else:
+                site_node = SiteNode(
+                    site_id=site_id,
+                    node_id=node_id,
+                    status="deployed",
+                    created_at=datetime.utcnow(),
+                    updated_at=datetime.utcnow()
+                )
+                db.session.add(site_node)
+            
+            # Log successful deployment
+            log = DeploymentLog(
                 site_id=site_id,
                 node_id=node_id,
-                status="deployed",
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow()
+                action="deploy",
+                status="success",
+                message=f"Successfully deployed {site.domain} to {node.name}"
             )
-            db.session.add(site_node)
-        
-        # Log successful deployment
-        log = DeploymentLog(
-            site_id=site_id,
-            node_id=node_id,
-            action="deploy",
-            status="success",
-            message=f"Successfully deployed {site.domain} to {node.name}"
-        )
-        db.session.add(log)
-        db.session.commit()
-        
-        # Version the configuration in git if configured
-        from app.services.config_versioning_service import save_config_version
-        # Get the username from session if available
-        try:
-            from flask import session
-            from flask_login import current_user
-            username = current_user.username if current_user and current_user.is_authenticated else "system"
-        except:
-            username = "system"
-        
-        try:
-            save_config_version(site, nginx_config, username)
-        except Exception as e:
-            # Log but don't fail deployment if versioning fails
-            log_activity('warning', f"Failed to save config version for {site.domain}: {str(e)}")
-        
-        return True
-        
-    except Exception as e:
-        # Log the error
-        log = DeploymentLog(
-            site_id=site_id,
-            node_id=node_id,
-            action="deploy",
-            status="error",
-            message=f"Deployment error: {str(e)}"
-        )
-        db.session.add(log)
-        db.session.commit()
-        
-        # Try to restore from backup if available
-        if backup_path:
-            # Try to trigger an automatic rollback
-            from app.services.config_rollback_service import ConfigRollbackService
+            db.session.add(log)
+            db.session.commit()
+            
+            # Version the configuration in git if configured
+            from app.services.config_versioning_service import save_config_version
+            # Get the username from session if available
             try:
-                # Get current user
+                from flask import session
+                from flask_login import current_user
+                username = current_user.username if current_user and current_user.is_authenticated else "system"
+            except:
+                username = "system"
+            
+            try:
+                save_config_version(site, nginx_config, username)
+            except Exception as e:
+                # Log but don't fail deployment if versioning fails
+                log_activity('warning', f"Failed to save config version for {site.domain}: {str(e)}")
+            
+            return True
+            
+        except Exception as e:
+            # Log the error
+            log = DeploymentLog(
+                site_id=site_id,
+                node_id=node_id,
+                action="deploy",
+                status="error",
+                message=f"Deployment error: {str(e)}"
+            )
+            db.session.add(log)
+            db.session.commit()
+            
+            # Try to restore from backup if available
+            if backup_path:
+                # Try to trigger an automatic rollback
+                from app.services.config_rollback_service import ConfigRollbackService
                 try:
-                    from flask_login import current_user
-                    user_id = current_user.id if current_user and current_user.is_authenticated else None
-                except:
-                    user_id = None
-                    
-                log_activity('info', f"Attempting automatic rollback for {site.domain} on {node.name} after deployment error", 'site', site_id)
-                rollback_result = ConfigRollbackService.auto_rollback_on_failure(site_id, node_id, str(e), user_id)
-                if rollback_result['success']:
-                    # Rollback succeeded, raise an error with rollback info
-                    raise ValueError(f"Deployment error: {str(e)}\nAutomatic rollback was performed successfully.")
-                else:
-                    # Rollback failed, include this info in the error
-                    raise ValueError(f"Deployment error: {str(e)}\nAutomatic rollback was attempted but failed: {rollback_result['message']}")
-            except Exception as rollback_error:
-                # If the rollback process itself fails, just report the original error
-                raise ValueError(f"Deployment error: {str(e)}\nAutomatic rollback failed: {str(rollback_error)}")
-        else:
-            # No backup available, just re-raise the original exception
-            raise
-    
-    finally:
-        # Clean up resources to prevent leaks
-        try:
-            # Close SFTP connection if open
-            if sftp:
-                sftp.close()
-            
-            # Clean up temporary file if it exists and connection is still active
-            if temp_file_path and ssh_client and ssh_client.get_transport() and ssh_client.get_transport().is_active():
-                ssh_client.exec_command(f"rm -f {temp_file_path}")
-            
-            # Close SSH connection if open
-            if ssh_client:
-                ssh_client.close()
-        except Exception as cleanup_error:
-            # Log cleanup errors but don't fail the deployment
-            log_activity('warning', f"Error during cleanup in deploy_to_node: {str(cleanup_error)}")
+                    # Get current user
+                    try:
+                        from flask_login import current_user
+                        user_id = current_user.id if current_user and current_user.is_authenticated else None
+                    except:
+                        user_id = None
+                        
+                    log_activity('info', f"Attempting automatic rollback for {site.domain} on {node.name} after deployment error", 'site', site_id)
+                    rollback_result = ConfigRollbackService.auto_rollback_on_failure(site_id, node_id, str(e), user_id)
+                    if rollback_result['success']:
+                        # Rollback succeeded, raise an error with rollback info
+                        raise ValueError(f"Deployment error: {str(e)}\nAutomatic rollback was performed successfully.")
+                    else:
+                        # Rollback failed, include this info in the error
+                        raise ValueError(f"Deployment error: {str(e)}\nAutomatic rollback was attempted but failed: {rollback_result['message']}")
+                except Exception as rollback_error:
+                    # If the rollback process itself fails, just report the original error
+                    raise ValueError(f"Deployment error: {str(e)}\nAutomatic rollback failed: {str(rollback_error)}")
+            else:
+                # No backup available, just re-raise the original exception
+                raise
+        
+        finally:
+            # Clean up resources to prevent leaks
+            try:
+                # Close SFTP connection if open
+                if sftp:
+                    sftp.close()
+                
+                # Clean up temporary file if it exists and connection is still active
+                if temp_file_path and ssh_client and ssh_client.get_transport() and ssh_client.get_transport().is_active():
+                    ssh_client.exec_command(f"rm -f {temp_file_path}")
+                
+                # Close SSH connection if open
+                if ssh_client:
+                    ssh_client.close()
+            except Exception as cleanup_error:
+                # Log cleanup errors but don't fail the deployment
+                log_activity('warning', f"Error during cleanup in deploy_to_node: {str(cleanup_error)}")
 
 def get_node_stats(node):
     """
