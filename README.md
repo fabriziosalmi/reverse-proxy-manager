@@ -10,6 +10,12 @@ A centralized proxy management system for distributed proxy nodes, providing rob
 
 > **⚠️ DOCKER REQUIRED**: This application must be run using Docker and Docker Compose. Running the application outside of Docker is not supported and will lead to unexpected behavior.
 
+## Screenshots
+
+![screenshot1](https://github.com/fabriziosalmi/reverse-proxy-manager/blob/main/screenshot_1.png?raw=true)
+![screenshot3](https://github.com/fabriziosalmi/reverse-proxy-manager/blob/main/screenshot_3.png?raw=true)
+
+
 ## Overview
 
 Reverse Proxy Manager is a comprehensive solution for managing multiple proxy nodes from a centralized interface. It simplifies deployment, configuration, and monitoring of proxy infrastructure at scale, making it ideal for content delivery networks, load balancing, and distributed web hosting environments.
