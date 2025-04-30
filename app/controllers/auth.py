@@ -5,6 +5,7 @@ from datetime import datetime
 from app.services.access_control import admin_required
 from app.services.rate_limiter import auth_rate_limiter, rate_limit_request
 import time
+import logging
 
 auth = Blueprint('auth', __name__)
 
@@ -37,19 +38,34 @@ def login():
         password = request.form.get('password')
         remember = 'remember' in request.form
         
+        # Log for debugging
+        logging.info(f"Login attempt for username: {username}")
+        
         # Validate login credentials
         user = User.query.filter_by(username=username).first()
         
-        # Use constant-time comparison to prevent timing attacks
-        # Always check password even if user doesn't exist (using a dummy check)
-        is_valid = False
-        if user:
-            is_valid = user.check_password(password)
-        else:
-            # Perform a dummy password check to maintain constant time
-            # This helps prevent user enumeration via timing attacks
-            dummy_user = User()
+        if not user:
+            logging.info(f"User not found: {username}")
+            flash('Invalid username or password', 'error')
+            
+            # Log failed login attempt for non-existent user
+            log = ActivityLog(
+                user_id=None,
+                action='login_failed',
+                ip_address=request.remote_addr,
+                details=f"Failed login attempt for non-existent username: {username}"
+            )
+            db.session.add(log)
+            db.session.commit()
+            
+            # Still do a dummy check to prevent timing attacks
+            dummy_user = User(username="dummy", email="dummy@example.com", password="Dummy_password1")
             dummy_user.check_password(password)
+            
+            return render_template('auth/login.html')
+        
+        # Try to validate the password
+        is_valid = user.check_password(password)
         
         if user and is_valid:
             # Successfully authenticated
@@ -74,26 +90,22 @@ def login():
             else:
                 return redirect(url_for('client.dashboard'))
         else:
+            # Password validation failed
+            logging.info(f"Password validation failed for user: {username}")
+            
             # Log failed login attempt
-            details = f"Failed login attempt for username: {username}"
-            
-            if user:
-                log = ActivityLog(
-                    user_id=user.id,
-                    action='login_failed',
-                    ip_address=request.remote_addr,
-                    details=details
-                )
-            else:
-                log = ActivityLog(
-                    user_id=None,
-                    action='login_failed',
-                    ip_address=request.remote_addr,
-                    details=details
-                )
-            
+            log = ActivityLog(
+                user_id=user.id,
+                action='login_failed',
+                ip_address=request.remote_addr,
+                details=f"Failed login attempt for username: {username}"
+            )
             db.session.add(log)
             db.session.commit()
+            
+            # Display helpful message about password requirements (only in development)
+            if current_app.config.get('DEBUG', False):
+                flash('Your password must contain at least 8 characters, including uppercase, lowercase, and a number', 'info')
             
             flash('Invalid username or password', 'error')
     
@@ -173,35 +185,41 @@ def register():
             flash(error, 'error')
         else:
             # Create new user
-            user = User(
-                username=username,
-                email=email,
-                role='client',  # Default role for new users
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow()
-            )
-            user.set_password(password)
-            
-            # Add user to database
-            db.session.add(user)
-            
-            # Log the registration
-            log = ActivityLog(
-                user_id=None,  # User ID not yet known
-                action='register',
-                ip_address=request.remote_addr,
-                details=f"New user registration: {username}"
-            )
-            db.session.add(log)
-            
-            db.session.commit()
-            
-            # Update log with actual user ID
-            log.user_id = user.id
-            db.session.commit()
-            
-            flash('Registration successful! You can now log in.', 'success')
-            return redirect(url_for('auth.login'))
+            try:
+                # First create the user object
+                user = User(
+                    username=username,
+                    email=email,
+                    password=password,  # Password will be hashed in the __init__ method
+                    role='client'  # Default role for new users
+                )
+                
+                # Add user to database
+                db.session.add(user)
+                
+                # Log the registration
+                log = ActivityLog(
+                    user_id=None,  # User ID not yet known
+                    action='register',
+                    ip_address=request.remote_addr,
+                    details=f"New user registration: {username}"
+                )
+                db.session.add(log)
+                
+                db.session.commit()
+                
+                # Update log with actual user ID
+                log.user_id = user.id
+                db.session.commit()
+                
+                flash('Registration successful! You can now log in.', 'success')
+                return redirect(url_for('auth.login'))
+            except ValueError as e:
+                # Handle password validation errors
+                db.session.rollback()
+                flash(str(e), 'error')
+                # Also show the password requirements
+                flash('Password must be at least 8 characters long and contain uppercase, lowercase, and numeric characters.', 'info')
     
     return render_template('auth/register.html')
 
@@ -371,28 +389,36 @@ def reset_password(token):
             user = User.query.filter_by(email=email).first()
             
             if user:
-                # Update the password
-                user.set_password(password)
-                user.updated_at = datetime.utcnow()
-                
-                # Log the password reset
-                log = ActivityLog(
-                    user_id=user.id,
-                    action='password_reset',
-                    ip_address=request.remote_addr,
-                    details='Password reset completed'
-                )
-                db.session.add(log)
-                
-                db.session.commit()
-                
-                # Clear session data
-                session.pop('reset_token', None)
-                session.pop('reset_email', None)
-                
-                flash('Your password has been reset successfully! You can now log in.', 'success')
-                return redirect(url_for('auth.login'))
+                try:
+                    # Update the password
+                    user.set_password(password)
+                    user.updated_at = datetime.utcnow()
+                    
+                    # Log the password reset
+                    log = ActivityLog(
+                        user_id=user.id,
+                        action='password_reset',
+                        ip_address=request.remote_addr,
+                        details='Password reset completed'
+                    )
+                    db.session.add(log)
+                    
+                    db.session.commit()
+                    
+                    # Clear session data
+                    session.pop('reset_token', None)
+                    session.pop('reset_email', None)
+                    
+                    flash('Your password has been reset successfully! You can now log in.', 'success')
+                    return redirect(url_for('auth.login'))
+                except ValueError as e:
+                    # Handle password validation errors
+                    db.session.rollback()
+                    flash(str(e), 'error')
+                    flash('Password must be at least 8 characters long and contain uppercase, lowercase, and numeric characters.', 'info')
             else:
                 flash('Invalid user.', 'error')
     
+    # Show password requirements
+    flash('Password must be at least 8 characters long and contain uppercase, lowercase, and numeric characters.', 'info')
     return render_template('auth/reset_password.html')
