@@ -2,7 +2,7 @@
 
 A centralized proxy management system for distributed proxy nodes, providing robust management of content delivery infrastructure.
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![Version](https://img.shields.io/badge/version-0.0.1-blue)
 ![Python](https://img.shields.io/badge/python-3.12+-green)
 ![Flask](https://img.shields.io/badge/flask-2.3+-green)
 ![License](https://img.shields.io/badge/license-MIT-yellow)
