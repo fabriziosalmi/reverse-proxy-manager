@@ -394,14 +394,23 @@ class ProxyServiceBase(ABC):
         # Extract error message
         error_message = str(e)
         
-        # Log the error
-        self.log_deployment(
+        # Log the error to the deployment logs
+        deployment_log = self.log_deployment(
             site_id=site_id,
             node_id=node_id,
             action=action,
             status="error",
             message=f"Error during {action}: {error_message}"
         )
+        
+        # Send email notification if it's a deployment failure (not just a test)
+        if not test_only:
+            try:
+                from app.services.deployment_notification_service import notify_on_failed_deployment
+                notify_on_failed_deployment(deployment_log)
+            except Exception as notify_error:
+                import logging
+                logging.getLogger(__name__).error(f"Failed to send deployment notification: {str(notify_error)}")
         
         # For test operations, return the result
         if test_only:

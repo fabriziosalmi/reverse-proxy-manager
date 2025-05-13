@@ -435,3 +435,130 @@ def send_failed_deployment_notification(deployment):
         
     except Exception as e:
         return False, f"Failed to send deployment failure notification: {str(e)}"
+
+
+def send_security_alert_notification(alerts):
+    """
+    Send an email notification about security alerts detected in the system
+    
+    Args:
+        alerts (list): List of security alert dictionaries with details
+        
+    Returns:
+        tuple: (success, message)
+    """
+    from flask import current_app
+    from app.models.models import SystemSetting, User
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+    import smtplib
+    from datetime import datetime
+    
+    try:
+        # Skip if no alerts to report
+        if not alerts:
+            return True, "No security alerts to report"
+            
+        # Get email settings from system settings
+        smtp_server = SystemSetting.get('email_smtp_server')
+        smtp_port = int(SystemSetting.get('email_smtp_port', 587))
+        smtp_user = SystemSetting.get('email_smtp_user')
+        smtp_password = SystemSetting.get('email_smtp_password')
+        sender_email = SystemSetting.get('email_sender', smtp_user)
+        use_tls = SystemSetting.get('email_use_tls', 'True') == 'True'
+        
+        # Get admin email
+        admin = User.query.filter_by(is_admin=True).first()
+        recipient_email = admin.email if admin else current_app.config.get('ADMIN_EMAIL')
+        
+        if not recipient_email:
+            return False, "No admin email found to send notification"
+            
+        # Prepare the email
+        msg = MIMEMultipart()
+        msg['From'] = sender_email
+        msg['To'] = recipient_email
+        msg['Subject'] = f"Security Alert - {len(alerts)} Potential Issues Detected"
+        
+        # Create the email body
+        body = f"""
+        <html>
+        <head>
+            <style>
+                table {{ border-collapse: collapse; width: 100%; }}
+                th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
+                th {{ background-color: #f2f2f2; }}
+                .high {{ color: red; font-weight: bold; }}
+                .medium {{ color: orange; }}
+                .low {{ color: #555; }}
+            </style>
+        </head>
+        <body>
+            <h2>Security Alerts</h2>
+            <p>The following security alerts have been detected in your system:</p>
+            <table>
+                <tr>
+                    <th>Severity</th>
+                    <th>Type</th>
+                    <th>Source</th>
+                    <th>Description</th>
+                    <th>Time</</th>
+                </tr>
+        """
+        
+        for alert in alerts:
+            # Determine severity class
+            severity = alert.get('severity', 'medium').lower()
+            css_class = {
+                'high': 'high',
+                'medium': 'medium',
+                'low': 'low'
+            }.get(severity, 'medium')
+            
+            # Format timestamp
+            timestamp = alert.get('timestamp')
+            if isinstance(timestamp, datetime):
+                timestamp = timestamp.strftime('%Y-%m-%d %H:%M:%S')
+            else:
+                timestamp = str(timestamp) if timestamp else 'Unknown'
+                
+            # Add row to table
+            body += f"""
+                <tr class="{css_class}">
+                    <td>{severity.upper()}</td>
+                    <td>{alert.get('type', 'Unknown')}</td>
+                    <td>{alert.get('source', 'Unknown')}</td>
+                    <td>{alert.get('description', 'No description provided')}</td>
+                    <td>{timestamp}</td>
+                </tr>
+            """
+        
+        body += """
+            </table>
+            <p>Please review these security issues as soon as possible.</p>
+            <p>If you believe these are false positives, you can adjust your security settings in the admin dashboard.</p>
+        </body>
+        </html>
+        """
+        
+        # Attach the HTML body
+        msg.attach(MIMEText(body, 'html'))
+        
+        # Connect to SMTP server and send email
+        server = smtplib.SMTP(smtp_server, smtp_port)
+        server.ehlo()
+        
+        if use_tls:
+            server.starttls()
+            server.ehlo()
+            
+        if smtp_user and smtp_password:
+            server.login(smtp_user, smtp_password)
+            
+        server.send_message(msg)
+        server.quit()
+        
+        return True, f"Security alert notification sent successfully to {recipient_email}"
+        
+    except Exception as e:
+        return False, f"Failed to send security alert notification: {str(e)}"

@@ -2,6 +2,10 @@ import os
 from datetime import timedelta
 
 class Config:
+
+    # Version
+    VERSION = 'v0.0.2'
+    
     # Security
     SECRET_KEY = os.environ.get('SECRET_KEY') or 'you-should-change-this-in-production'
     JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY') or 'another-secret-key-for-jwt'
