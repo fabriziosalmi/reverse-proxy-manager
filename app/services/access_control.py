@@ -8,6 +8,9 @@ import functools
 def admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
+        if not current_user.is_authenticated:
+            flash('Please log in to access this page.', 'warning')
+            return redirect(url_for('auth.login'))
         if not current_user.is_admin():
             flash('You need admin privileges to access this page.', 'error')
             return abort(403)
@@ -17,6 +20,9 @@ def admin_required(f):
 def client_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
+        if not current_user.is_authenticated:
+            flash('Please log in to access this page.', 'warning')
+            return redirect(url_for('auth.login'))
         if not current_user.is_client():
             flash('This page is available only for client users.', 'error')
             return abort(403)

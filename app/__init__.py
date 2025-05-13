@@ -1,4 +1,4 @@
-from flask import Flask
+from flask import Flask, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
 from flask_migrate import Migrate
@@ -101,9 +101,26 @@ def create_app(config_name="default"):
     from app.services.scheduled_task_service import initialize_scheduled_tasks
     initialize_scheduled_tasks(app)
     
-    # Route for the index page
+    # Route for the index page - redirect to appropriate dashboard based on user role
     @app.route('/')
     def index():
+        from flask_login import current_user
+        if current_user.is_authenticated:
+            if current_user.is_admin():
+                return redirect(url_for('admin.dashboard'))
+            else:
+                return redirect(url_for('client.dashboard'))
         return app.send_static_file('index.html')
+    
+    # Add a route for /dashboard that redirects to the appropriate dashboard
+    @app.route('/dashboard')
+    def dashboard_redirect():
+        from flask_login import current_user
+        if current_user.is_authenticated:
+            if current_user.is_admin():
+                return redirect(url_for('admin.dashboard'))
+            else:
+                return redirect(url_for('client.dashboard'))
+        return redirect(url_for('auth.login'))
     
     return app
