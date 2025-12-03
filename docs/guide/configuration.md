@@ -6,7 +6,7 @@ Configure the application by setting environment variables in the `.env` file, w
 
 ### Example `.env` file
 
-\`\`\`bash
+```bash
 FLASK_ENV=development
 ADMIN_USERNAME=admin
 ADMIN_EMAIL=admin@example.com
@@ -16,19 +16,19 @@ AUTO_NODE_DISCOVERY=true
 NODES_YAML_PATH=/path/to/custom/nodes.yaml
 AUTO_ACTIVATE_DISCOVERED_NODES=true
 RATELIMIT_STORAGE_URI=memcached://memcached:11211
-\`\`\`
+```
 
 ## Production Configuration
 
 Recommended production settings:
 
-\`\`\`bash
+```bash
 FLASK_ENV=production
 DEBUG=False
 LOG_LEVEL=INFO
 PROXY_FIX=True  # If behind a reverse proxy
 RATELIMIT_STORAGE_URI=memcached://memcached:11211
-\`\`\`
+```
 
 ### Security Considerations
 

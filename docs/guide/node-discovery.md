@@ -13,17 +13,17 @@ Reverse Proxy Manager supports automatic discovery of proxy nodes from a YAML co
 
 Set the following environment variables:
 
-\`\`\`bash
+```bash
 AUTO_NODE_DISCOVERY=true
 NODES_YAML_PATH=/path/to/custom/nodes.yaml  # Optional, defaults to config/nodes.yaml
 AUTO_ACTIVATE_DISCOVERED_NODES=true  # Optional, defaults to true
-\`\`\`
+```
 
 ## YAML File Format
 
 The `nodes.yaml` file should contain a list of node objects:
 
-\`\`\`yaml
+```yaml
 - name: cdn-node-1             # Required: Unique name to identify the node
   ip_address: 192.168.1.10     # Required: IPv4 or IPv6 address
   ssh_user: ubuntu             # Required: SSH username
@@ -32,13 +32,13 @@ The `nodes.yaml` file should contain a list of node objects:
   ssh_password: password123    # Optional: SSH password (if not using key)
   nginx_config_path: /etc/nginx/conf.d  # Optional: Nginx config path
   nginx_reload_command: sudo systemctl reload nginx  # Optional: Command to reload Nginx
-\`\`\`
+```
 
 ## Manual Discovery
 
 You can trigger node discovery manually using the CLI command:
 
-\`\`\`bash
+```bash
 # Using default nodes.yaml location
 ./manage.py discover-nodes
 
@@ -47,4 +47,4 @@ You can trigger node discovery manually using the CLI command:
 
 # Disable auto-activation of discovered nodes
 ./manage.py discover-nodes --no-activate
-\`\`\`
+```

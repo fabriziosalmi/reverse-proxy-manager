@@ -22,7 +22,7 @@ Three protection levels are available:
 
 ## Sample Custom Rules
 
-\`\`\`
+```
 # Block specific user agent
 SecRule REQUEST_HEADERS:User-Agent "badbot" "id:1000,phase:1,deny,status:403,log,msg:'Blocked Bad Bot'"
 
@@ -31,4 +31,4 @@ SecRule REMOTE_ADDR "@ipMatch 192.168.1.0/24" "id:1001,phase:1,deny,status:403,l
 
 # Block specific URI path
 SecRule REQUEST_URI "@contains /admin/backup" "id:1002,phase:1,deny,status:403,log,msg:'Blocked sensitive URI'"
-\`\`\`
+```

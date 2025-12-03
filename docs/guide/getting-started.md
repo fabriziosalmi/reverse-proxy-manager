@@ -13,28 +13,28 @@ The application **must** be run using Docker Compose in both development and pro
 ## Quick Start
 
 1. **Clone the repository:**
-   \`\`\`bash
+   ```bash
    git clone https://github.com/fabriziosalmi/reverse-proxy-manager.git
    cd reverse-proxy-manager
-   \`\`\`
+   ```
 
 2. **Create a `.env` file:**
-   \`\`\`bash
+   ```bash
    cp .env.example .env
    # Edit .env with your preferred settings
-   \`\`\`
+   ```
 
 3. **Start the application:**
 
    In development mode:
-   \`\`\`bash
+   ```bash
    docker compose up app-dev
-   \`\`\`
+   ```
 
    Or in production mode:
-   \`\`\`bash
+   ```bash
    docker compose up -d app-prod
-   \`\`\`
+   ```
 
    > Note: If you're using an older version of Docker Compose (v1), use `docker-compose` instead of `docker compose`.
 
@@ -45,7 +45,7 @@ The application **must** be run using Docker Compose in both development and pro
 
 The application includes various management commands that must be run within Docker:
 
-\`\`\`bash
+```bash
 # Database Management
 docker compose run --rm manage init-db              # Initialize the database
 docker compose run --rm manage backup-db            # Backup the database
@@ -64,4 +64,4 @@ docker compose run --rm manage list-sites           # List all sites
 
 # System Management
 docker compose run --rm manage system-check         # Run a system health check
-\`\`\`
+```
