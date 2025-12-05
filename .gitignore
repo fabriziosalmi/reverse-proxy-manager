@@ -78,7 +78,6 @@ temp/
 
 # Compiled Javascript
 node_modules/
-package-lock.json
 
 # Generated Nginx configs
 nginx_configs/sites/*
