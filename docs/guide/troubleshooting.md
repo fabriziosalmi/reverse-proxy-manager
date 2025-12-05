@@ -395,7 +395,7 @@ docker compose down
 docker compose up -d app-dev
 
 # Check for stale lock files
-ls -la instance/.db*
+ls -la instance/app.db*
 ```
 
 ### Data Corruption

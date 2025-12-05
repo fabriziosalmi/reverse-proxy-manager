@@ -391,8 +391,10 @@ Currently not implemented. Future versions may include WebSocket support for rea
 The API follows semantic versioning. Check the application version with:
 
 ```bash
-docker compose run --rm manage --version
+docker compose run --rm manage system-check
 ```
+
+This will display the application version along with other system information.
 
 ## Future API Development
 
